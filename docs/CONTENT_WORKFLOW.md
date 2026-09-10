@@ -106,4 +106,6 @@ Sopra loads the six generated WAVs through Meep's asset manager, with positional
 
 ## Tests and changes
 
+Regional airborne effects are authored in `effects.mjs` as native Meep particle graphs. `ambient.mjs` blends emission near region boundaries and stops outdoor emission under cover sampled by the simulation BVH. Existing particles must finish their fade before recycling. Pollen, dust, snow and ash receive scene lighting; fireflies and glass motes emit light. `WorldWind` runs Meep's fluid solver at 20 Hz in a local 18 × 8 × 18 field with 3 m cells and terrain solids. It follows the camera's character through native field shifts. This presentation field steers ambient effects; changes to projectile physics require a separate shared simulation rule.
+
 Keep tests beside the relevant `.mjs` modules using Vitest. Prefer small tests around collision outcomes, progression invariants and authority handoff. Use the existing socket integration test when changing network ownership or persistence. Use the production build and browser for renderer/asset checks rather than pretending Node unit tests validate GPU output. One-off investigations belong in the OS temporary directory, not the content pipeline.

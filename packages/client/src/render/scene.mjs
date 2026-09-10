@@ -31,6 +31,8 @@ import { effect } from './effects.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
+import {WorldWind} from './wind.mjs';
+import {WorldAmbient} from './ambient.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -48,8 +50,10 @@ export class WorldView {
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
+      this.wind=new WorldWind();config.addSystem(this.wind);
     }});
     this.ecd=this.engine.entityManager.dataset;
+    this.wind.attach(this.ecd);this.wind.follow(0,heightAt(0,23)+1,23);
     this.engine.viewStack.el.classList.add('meep-world');
     const renderer=this.engine.graphics.renderer;
     if(!renderer)throw new Error('Meep could not initialize WebGPU on this browser.');
@@ -110,7 +114,7 @@ export class WorldView {
       const p=layout.lights[i];this.light(p,[1,.48,.13],42,Light.Type.POINT,i%5===0,8);
       this.emitter('embers',p,22);
     }
-    this.motes=this.emitter('motes',[0,3,10],80);
+    this.ambient=new WorldAmbient(this);
     const fog=new ParticipatingMedia();fog.target_extinction=.0006;fog.fade_distance=30;
     const ft=new Transform64();ft.setTranslation(0,24,-120);ft.setScale(650,140,800);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
     for(const [x,z,w,d,strength] of [[-85,-55,65,90,.012],[35,-185,38,70,.014],[-112,-210,90,80,.009],[95,-248,85,80,.004],[0,-78,42,22,.009]]){
@@ -183,7 +187,7 @@ export class WorldView {
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
-      this.motes.t.setTranslation(player.x,player.y+2,player.z);this.motes.t.updateMatrix();t64_announce_change(this.ecd,this.motes.id);
+      this.ambient.update(player,snapshot.time,dt);
     }
     const sky=this.sky.update(this.scene,snapshot.time);
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);

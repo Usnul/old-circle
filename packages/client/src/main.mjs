@@ -52,7 +52,7 @@ async function start(character){
     worker.onerror=e=>showError(e.message);
     worker.onmessage=({data})=>{
       inspector?.onMessage(data);
-      if(data.type==='camera'){view.cameraLimit=data.distance;return;}
+      if(data.type==='camera'){view.cameraLimit=data.distance;view.shelter=data.shelter;return;}
       if(data.type==='network-status'){$('#network-state').title=data.message;return;}
       if(data.type==='error'){showError(data.message);return;}
       if(data.type==='save'){if(!inspecting)localStorage.setItem(SAVE_KEY,JSON.stringify(data.character));return;}

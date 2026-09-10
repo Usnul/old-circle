@@ -106,7 +106,13 @@ self.onmessage=async({data})=>{
       if(length<.001)return;
       world.ray.set([...from,...d.map(v=>v/length),length]);
       const hit=world.physics.raycast(world.ray,world.hit,e=>e!==world.actors.get(playerId));
-      postMessage({type:'camera',distance:hit?Math.max(.35,world.hit.t-.3):length});
+      const distance=hit?Math.max(.35,world.hit.t-.3):length;
+      let shelter=0;
+      for(const [dx,dz] of [[0,0],[-2,0],[2,0],[0,-2],[0,2]]){
+        world.ray.set([p.x+dx,p.y+.8,p.z+dz,0,1,0,18]);
+        if(world.physics.raycast(world.ray,world.hit,e=>e!==world.actors.get(playerId)))shelter+=.2;
+      }
+      postMessage({type:'camera',distance,shelter});
     }
   }catch(error){postMessage({type:'error',message:error.stack??String(error)});}
 };
