@@ -39,6 +39,8 @@ import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener
 import {ModelStore} from './model-store.mjs';
 import {WorldStream} from './world-stream.mjs';
 import {GeometryCache} from './geometry-cache.mjs';
+import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
+import {CombatTrails} from './combat-trails.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -57,6 +59,7 @@ export class WorldView {
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
       config.addSystem(new DecalSystem(engine.graphics,engine.assetManager));
+      this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
     }});
@@ -119,6 +122,7 @@ export class WorldView {
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
+    this.combatTrails=new CombatTrails(this);
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.ambient=new WorldAmbient(this);
@@ -208,5 +212,6 @@ export class WorldView {
     this.audio.update(snapshot,player,dt);
     this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
     this.bossHazards.update(snapshot.projectiles,player,this.poses.epoch,dt);
+    this.combatTrails.update(presented,snapshot.projectiles,player,this.poses.epoch,dt);
   }
 }

@@ -27,6 +27,7 @@ export class GameInput {
       if(['journal','map','escape'].includes(name))this.action(name);
       else if(this.enabled){if(['jump','nova','heal','rest'].includes(name))this.pulse(name);else if(['sword','spear','bow','staff'].includes(name))this.action(name);}
     });
+    ecd.addEntityEventListener(this.entity,'attack',()=>{if(this.activeLook&&!this.suppressAttack)this.pulse('attack');});
     devices.pointer.on.down.add(()=>{if(this.enabled&&!this.activeLook){this.suppressAttack=true;this.capture();}});
     devices.pointer.on.move.add((_p,event,delta)=>{
       if(this.enabled&&(this.activeLook||(this.inspect&&(event.buttons&2))))this.look(delta.x,delta.y);
@@ -61,7 +62,7 @@ export class GameInput {
     const now=performance.now(),down=name=>this.map.isActive(name)||(this.pending.get(name)??0)>now;
     this.map.coordinate(this.axis,0,'move');const [side,forward]=this.axis;
     if(!this.map.isActive('attack'))this.suppressAttack=false;
-    const attack=this.activeLook&&!this.suppressAttack&&this.map.isActive('attack');
+    const attack=this.activeLook&&!this.suppressAttack&&down('attack');
     return {x:-Math.sin(yaw)*forward+Math.cos(yaw)*side,z:-Math.cos(yaw)*forward-Math.sin(yaw)*side,yaw,
       buttons:(down('sprint')?1:0)|(down('crouch')?2:0)|(down('jump')?4:0)|(attack?8:0)|(down('nova')?16:0)|(down('heal')?32:0)|(down('rest')?64:0)};
   }
