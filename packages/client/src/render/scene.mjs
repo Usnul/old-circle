@@ -30,6 +30,7 @@ import { buildLayout } from '@old-circle/game/world/layout.mjs';
 import { heightAt } from '@old-circle/game/world/regions.mjs';
 import { effect } from './effects.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
+import {WorldGround} from './ground.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -62,6 +63,7 @@ export class WorldView {
     }
     this.materials.path=new StandardShadeMaterial();this.materials.path.diffuse_color.set(.28,.29,.23);
     this.materials.glassLeaf=new StandardShadeMaterial();this.materials.glassLeaf.diffuse_color.set(.12,.23,.27);
+    this.materials.landscape=new StandardShadeMaterial();this.materials.landscape.roughness_factor=1;
     const textures={};for(const name of ['stone','ground','bark','sky']){
       const response=await fetch(`/assets/textures/${name}.png`),bitmap=await createImageBitmap(await response.blob());
       if(name==='sky'){this.sky=new WorldSky(bitmap);continue;}
@@ -82,7 +84,8 @@ export class WorldView {
         })));complete++;progress('Remembering the old road…',.15+complete/entries.length*.65);
       }));
     }
-    const layout=buildLayout();for(const p of layout.props)this.model(p.model,p.position,p.scale,p.yaw);
+    const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
+    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);

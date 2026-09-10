@@ -1,8 +1,8 @@
 """Old Circle's reproducible Blender source. All shipped 3D geometry originates here.
-Run tools/build-assets.ps1, which exports the shared world data first.
+Run pnpm assets:blender, which exports the shared world data first.
 No GPU allocation: modeling/export only. Coordinates converted from Blender Z-up to Meep Y-up.
 """
-import bpy, math, random, json
+import bpy, math, random, json, sys
 from pathlib import Path
 from mathutils import Vector, noise
 
@@ -13,6 +13,9 @@ with open(OUT/'world.json') as f: WORLD=json.load(f)
 SOURCE = ROOT / 'assets' / 'blender'
 SOURCE.mkdir(parents=True, exist_ok=True)
 random.seed(81731)
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from ground_materials import build_ground,torus
+build_ground(ROOT,WORLD)
 vfx=ROOT/'packages/client/public/assets/vfx'
 vfx.mkdir(parents=True,exist_ok=True)
 sprite=bpy.data.images.new('Soft emissive mote',width=64,height=64,alpha=True)
@@ -32,7 +35,7 @@ PALETTE = {
  'iron': (.20,.23,.24), 'cloth': (.065,.095,.10), 'leather': (.12,.07,.035),
  'ember': (1,.37,.06), 'magic': (.20,.57,.76), 'bone': (.63,.60,.48),
  'sand': (.48,.32,.19), 'snow': (.61,.70,.73), 'ice': (.34,.52,.59),
- 'path': (.28,.29,.23), 'sky': (0,0,0), 'glassLeaf': (.12,.23,.27),
+ 'path': (.28,.29,.23), 'sky': (0,0,0), 'glassLeaf': (.12,.23,.27), 'landscape':(.3,.3,.3),
 }
 materials = {}
 for name, rgb in PALETTE.items():
@@ -48,14 +51,14 @@ for kind in ['stone','ground','bark','sky']:
  image=bpy.data.images.new(kind,width=w,height=h,alpha=True);data=[]
  for yy in range(h):
   for xx in range(w):
-   u,v=xx/w,yy/h
-   n=noise.fractal(Vector((math.cos(u*math.tau)*2,math.sin(u*math.tau)*2,v*5)),.9,2,4)
+   u,v=xx/(w-1),yy/(h-1)
+   n=noise.fractal(torus(u,v,.7),.9,2,4)
    if kind=='sky':
     t=max(0,min(1,(v-.4)*2.1));cloud=max(0,min(.35,(n-.12)*.9))
     rgb=tuple(a+(b-a)*t+cloud for a,b in zip((.46,.51,.46),(.07,.17,.24)))
    else:
-    grain=noise.noise(Vector((u*80,v*80,7)))
-    groove=(max(0,math.sin(u*100+n*7))**8)*.22 if kind=='bark' else 0
+    grain=noise.noise(torus(u,v,6))
+    groove=(max(0,math.sin(u*math.tau*16+n*7))**8)*.22 if kind=='bark' else 0
     k=max(.2,min(1,.80+n*(.09 if kind=='ground' else .22)+grain*.04-groove));rgb=(k,k*.98,k*.94)
    data.extend((*rgb,1))
  image.pixels=data;image.filepath_raw=str(textures/(kind+'.png'));image.file_format='PNG';image.save()
@@ -127,6 +130,11 @@ def finish(name):
     for vi,li in zip(tri.vertices,tri.loops):
      v=matrix @ m.vertices[vi].co
      n=(normal_matrix @ (m.vertices[vi].normal if m.polygons[tri.polygon_index].use_smooth else tri.normal)).normalized()
+     if mat=='landscape':
+      ix=round((v.x-WORLD['minX'])/2);iz=round((-v.y-WORLD['minZ'])/2);heights=WORLD['heights']
+      ax,bx=max(0,ix-1),min(240,ix+1);az,bz=max(0,iz-1),min(320,iz+1)
+      hx=(heights[iz][bx]-heights[iz][ax])/((bx-ax)*2);hz=(heights[bz][ix]-heights[az][ix])/((bz-az)*2)
+      n=Vector((-hx,hz,1)).normalized()
      indices.append(len(positions)//3); positions.extend((v.x,v.z,-v.y)); normals.extend((n.x,n.z,-n.y))
      if mat=='sky':uvs.extend(m.uv_layers.active.data[li].uv)
      elif abs(n.z)>.65:uvs.extend((v.x*.45,v.y*.45))
@@ -172,18 +180,36 @@ for name,foliage in [('tree','leaf'),('magicTree','magic'),('winterTree','snow')
   beam((0,0,.15),(x*1.6,y*1.6,.05),.2,'bark',.05)
   tip=(x*2.9,y*2.9,4.3+(j%3)*1.0)
   beam((.1,.1,2.9+j*.38),tip,.20,'bark',.06)
+  if name=='winterTree':
+   for k in range(5):
+    angle=a+(k-2)*.38;end=(tip[0]+math.cos(angle)*1.4,tip[1]+math.sin(angle)*1.4,tip[2]+.8+k*.1)
+    beam(tip,end,.05,'bark',.008,5)
+    if k%2==0:beam((tip[0],tip[1],tip[2]+.05),(end[0],end[1],end[2]+.03),.055,'snow',.015,5)
+   continue
   # Many irregular sprays leave negative space in the canopy instead of solid balls.
   for k in range(26):
    angle=random.random()*math.tau;radius=random.uniform(.25,1.85)
    p=(tip[0]+math.cos(angle)*radius,tip[1]+math.sin(angle)*radius,tip[2]+random.uniform(-.1,1.45))
    mat=('leafLight' if k%4==0 else 'leaf') if foliage=='leaf' else ('magic' if k%16==0 else 'glassLeaf') if foliage=='magic' else foliage
    leaf_spray(p,mat)
- for k in range(25):
+ for k in range(0 if name=='winterTree' else 25):
   a=random.random()*math.tau;r=random.random()*1.7
   leaf_spray((math.cos(a)*r,math.sin(a)*r,7+random.uniform(-.2,1)),'glassLeaf' if foliage=='magic' else foliage)
  finish(name)
 beam((0,0,0),(.1,0,9),.42,'bark',.05)
-for j in range(6): cone((0,0,3+j*1.1),2.7-j*.37,.08,3.4,'leaf',9)
+for j in range(10):
+ z=1.4+j*.7;radius=3.2*(1-j/12)
+ for k in range(6):
+  a=k*math.tau/6+j*1.17;tip=Vector((math.cos(a)*radius,math.sin(a)*radius,z-.25))
+  root=Vector((.05,0,z+.45));beam(root,tip,.08*(1-j/12),'bark',.009,5)
+  verts=[];faces=[]
+  for n in range(22):
+   t=.2+n/27;center=root.lerp(tip,t);width=(1-t)*.55+.1
+   for side in [-1,1]:
+    end=center+Vector((math.cos(a+side*.9)*width,math.sin(a+side*.9)*width,.13))
+    index=len(verts);verts.extend([tuple(center+Vector((0,0,.035))),tuple(end+Vector((-.05,.035,0))),tuple(end+Vector((.05,-.035,0)))])
+    faces.extend([(index,index+1,index+2),(index+2,index+1,index)])
+  mesh('Needled pine bough',verts,faces,'leafLight' if j%4==0 else 'leaf')
 finish('pine')
 for j in range(22):
  a=random.random()*math.tau; r=random.random()*.75; x,y=math.cos(a)*r,math.sin(a)*r; h=random.uniform(.25,.8)
@@ -195,6 +221,15 @@ for j in range(7):
  for k in range(5):
   a=k*math.tau/5; ico((x+math.cos(a)*.055,y+math.sin(a)*.055,h),(.05,.04,.02),'bone')
 finish('flowers')
+# A mixed patch, with flowers growing among blades rather than in isolated tufts.
+for j in range(36):
+ a=random.random()*math.tau;r=math.sqrt(random.random())*.9;x,y=math.cos(a)*r,math.sin(a)*r;h=random.uniform(.14,.42)
+ mesh('Meadow blades',[(x-.018,y,0),(x+.018,y,0),(x+.05,y+.03,h*.65),(x+.09,y+.06,h)],[(0,1,2),(0,2,3),(2,1,0),(3,2,0)],'grassLight' if j%5==0 else 'grass')
+ if j in [7,23]:
+  beam((x,y,0),(x,y,h+.04),.006,'grass',.004,4)
+  for k in range(5):
+   a=k*math.tau/5;ico((x+math.cos(a)*.033,y+math.sin(a)*.033,h+.04),(.033,.025,.012),'bone')
+finish('groundcover')
 cone((0,0,.12),.7,.62,.24,'stoneDark')
 cone((0,0,.5),.13,.12,.7,'brass')
 cone((0,0,.95),.48,.6,.24,'brass')
@@ -263,8 +298,7 @@ for tx in range(-3,3):
    for i in range(40):
     x=tx*80+i*2; z=tz*80+j*2
     cell=WORLD['cells'][round((z-WORLD['minZ'])/2)][round((x-WORLD['minX'])/2)]
-    mat=cell['material']
-    if cell['pathDistance']<2+noise.noise(Vector((x*.35,z*.35,0)))*.7: mat='path'
+    mat='landscape'
     verts,faces=groups.setdefault(mat,([],[])); k=len(verts)
     verts.extend([(a,-b,height(a,b)) for a,b in [(x,z),(x+2,z),(x,z+2),(x+2,z+2)]])
     faces.extend([(k,k+2,k+1),(k+1,k+2,k+3)])

@@ -11,7 +11,8 @@
 ```powershell
 pnpm assets:blender
 # Or select another Blender executable:
-powershell -NoProfile -File tools/build-assets.ps1 -Blender 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
+$env:BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
+pnpm assets:blender
 ```
 
 This exports world samples, runs Blender in CPU-only background mode, saves `assets/blender/old-circle-kit.blend`, exports intermediate triangles/material groups to `.local/blender/meshes.json`, exports gameplay convex hulls to `packages/game/src/content/colliders.json`, then compiles geometry with Meep's `MeshletGeometrySerializationAdapter`. Shipped files in `packages/client/public/assets/geometry` contain native meshlets and BVHs. No runtime GLTF conversion is required.
@@ -21,6 +22,8 @@ The kit's source is `tools/blender/build_world.py`. Each named asset is a collec
 The export changes Blender `(x,y,z)` into Meep `(x,z,-y)`, including normals. An asset's origin is its placement pivot. Weapons point along local +Y in Meep; the authored blade intervals must stay consistent with `simulation/weapon-pose.mjs`. Trees collide through their trunks; masonry exports one convex hull per constituent piece; foliage does not block actors. Do not export an entire arch as one convex hull, which closes its doorway.
 
 Textures and the particle sprite are also authored in Blender. `compile-assets.mjs` computes tangents and serializes geometry. `pnpm assets:compile` reruns just conversion from an existing intermediate export. Asset generation does not modify the installed engine or the separate Meep repository.
+
+`ground_materials.py` authors periodic terrain detail and continuous biome/road weights. Its edge and weight-normalization checks run during every asset build. The client applies Meep's native terrain splat pass to the Blender terrain meshes, so transitions are independent of triangle boundaries. Keep texture scale in metres in the generated terrain manifest. Groves use a region's species, outcrops include buried parent rocks and smaller scree, and meadow patches mix grasses and flowers. Arches receive masonry foundations wherever their feet clear the terrain.
 
 ## Add or modify an area
 

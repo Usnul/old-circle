@@ -4,27 +4,48 @@ export function buildLayout() {
   const props=[], solids=[], lights=[];
   let seed=4171;
   const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
-  const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z))=>{ const p={model,position:[x,y,z],scale:Array.isArray(scale)?scale:[scale,scale,scale],yaw};props.push(p);return p; };
+  const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z))=>{
+    const s=Array.isArray(scale)?scale:[scale,scale,scale],p={model,position:[x,y,z],scale:s,yaw};props.push(p);
+    if(model==='arch')for(const side of [-1,1]){
+      const fx=x+Math.cos(yaw)*side*2.05*s[0],fz=z-Math.sin(yaw)*side*2.05*s[0],ground=heightAt(fx,fz)-.18;
+      if(y>ground+.2)props.push({model:'block',position:[fx,ground,fz],scale:[.85*s[0],y-ground+.03,1.05*s[2]],yaw});
+    }
+    return p;
+  };
   const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
-  for(let i=0;i<640;i++){
-    const x=random()*440-220,z=random()*565-420;
-    const near=pathDistance(x,z), region=regionAt(x,z).id;
-    if(near<6 || Math.hypot(x,z+48)<19 || Math.hypot(x-38,z+15)<15)continue;
-    const model=region==='magic'?'magicTree':region==='tundra'?'winterTree':region==='desert'||region==='crown'?`rock${i%3}`:i%3===0?'pine':'tree';
-    const scale=model.startsWith('rock')?2+random()*5:.6+random()*.85;
-    add(model,x,z,scale,random()*Math.PI*2);
-    if(!model.startsWith('rock'))box(x,heightAt(x,z)+2,z,.6*scale,4,.6*scale);
+  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14;
+  // Groves share species and age structure. Meadow openings stay open; conifers
+  // belong to the northern foothills instead of alternating with every oak.
+  for(let grove=0;grove<95;grove++){
+    const cx=random()*420-210,cz=random()*545-415,region=regionAt(cx,cz).id;
+    if(!clear(cx,cz,10)||region==='desert'||region==='crown'||(region==='meadow'&&random()<.55))continue;
+    const species=region==='magic'?'magicTree':region==='tundra'?(cz>-290?'pine':'winterTree'):'tree';
+    for(let j=0;j<4+grove%5;j++){
+      const a=random()*Math.PI*2,r=Math.sqrt(random())*11,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
+      if(!clear(x,z)||regionAt(x,z).id!==region)continue;
+      add(species,x,z,(j===0?1.25:.55+random()*.6),random()*Math.PI*2,heightAt(x,z)-.06);
+    }
   }
-  for(let i=0;i<750;i++){
-    const x=random()*160-80,z=random()*180-105;
-    if(pathDistance(x,z)<3.2 || Math.hypot(x,z+48)<17)continue;
-    add(i%8===0?'flowers':'grass',x,z,.7+random()*.8,random()*6.28);
+  // Outcrops form families: a buried parent boulder, scree, and vegetation in
+  // sheltered gaps. Every member is checked against the route's walking space.
+  for(let group=0;group<95;group++){
+    const cx=random()*430-215,cz=random()*560-420;if(!clear(cx,cz,9))continue;
+    const region=regionAt(cx,cz).id,large=region==='desert'||region==='crown'?3.5:1.6;
+    for(let j=0;j<5;j++){
+      const a=random()*Math.PI*2,r=j===0?0:random()*large*2,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r,s=j===0?large:.3+random()*large*.32;
+      if(clear(x,z,5))add(`rock${(group+j)%3}`,x,z,[s,s*(.7+random()*.3),s],random()*6.28,heightAt(x,z)-s*.28);
+    }
   }
-  for(let i=0;i<80;i++){
-    const x=random()*180-90,z=random()*190-120;
-    if(pathDistance(x,z)>6)add(`rock${i%3}`,x,z,.3+random()*.9,random()*6.28);
+  for(let patch=0;patch<165;patch++){
+    const cx=random()*180-90,cz=random()*190-115;
+    if(regionAt(cx,cz).id!=='meadow'&&regionAt(cx,cz).id!=='wood')continue;
+    for(let j=0;j<15;j++){
+      const a=random()*6.28,r=Math.sqrt(random())*4.5,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
+      if(pathDistance(x,z)<2.8||Math.hypot(x,z+48)<18||Math.hypot(x-38,z+23)<5)continue;
+      add('groundcover',x,z,.65+random()*.45,random()*6.28,heightAt(x,z)-.04);
+    }
   }
   // Opening overlook: an architectural frame, a hearth and a low mantle wall.
   add('arch',-6,25,1.35,.35);
@@ -35,7 +56,7 @@ export function buildLayout() {
   add('block',0,-48,[30,.65,30],0,floor-.55);box(0,floor-.225,-48,30,.65,30);
   for(let i=0;i<20;i++){
     const a=i*Math.PI*2/20,x=Math.sin(a)*16,z=-48+Math.cos(a)*16;
-    if(i%5!==0){add('column',x,z,1.25,-a,floor);add('arch',x,z,1,-a,floor+4.2);box(x,floor+3,z,1.2,6,1.2);}
+    if(i%5!==0)add('arch',x,z,1,a,floor);
     if(i%2===0)lamp(x*.85,-48+(z+48)*.85,floor);
   }
   add('halo',0,-57,1.7,0,floor+12);

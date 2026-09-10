@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "world:check": "node tools/world-check.mjs",
-    "assets:blender": "powershell -NoProfile -File tools/build-assets.ps1",
+    "assets:blender": "node tools/build-assets.mjs",
     "assets:compile": "node tools/compile-assets.mjs"
   },
   "devDependencies": { "vitest": "3.2.7" }
