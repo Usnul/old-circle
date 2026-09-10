@@ -76,7 +76,10 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
                 h=max(height*max(0,1-math.hypot((x-cx)/rx,(y-cy)/ry))**1.12 for cx,cy,height,rx,ry in peaks)
                 erosion=noise.fractal(Vector((x*.075,y*.075,variant*11.7)),.8,2,4)
                 foothill=min(1,h/12)
-                z=h+foothill*(erosion*3.4+math.sin(h*.55+x*.09)*.7)
+                # The ridge continues below the world's edge. A flat base at
+                # mountain altitude exposed a floating underside from the east.
+                skirt=90*max(0,1-h/20)**2
+                z=h+foothill*(erosion*3.4+math.sin(h*.55+x*.09)*.7)-skirt
                 vertices.append((x,y,z))
         for j in range(ny):
             for i in range(nx):
