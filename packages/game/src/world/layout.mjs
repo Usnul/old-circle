@@ -1,4 +1,4 @@
-import { heightAt, pathDistance, regionAt, landmarkPosition } from './regions.mjs';
+import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS } from './regions.mjs';
 
 export function buildLayout() {
   const props=[], solids=[], lights=[];
@@ -15,7 +15,7 @@ export function buildLayout() {
   const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
-  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&!(z<-284&&z>-356&&x>14&&x<82);
+  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&!(z<-284&&z>-356&&x>14&&x<82);
   // Groves share species and age structure. Meadow openings stay open; conifers
   // belong to the northern foothills instead of alternating with every oak.
   for(let grove=0;grove<140;grove++){
@@ -50,6 +50,11 @@ export function buildLayout() {
   // Opening overlook: an architectural frame, a hearth and a low mantle wall.
   add('arch',-6,25,1.35,.35);
   lamp(0,20); lamp(-8,24);
+  for(const hearth of HEARTHS.slice(1)){
+    const [x,,z]=hearth.position;lamp(x,z);
+    const dx=x-hearth.arrival[0],dz=z-hearth.arrival[1];
+    add('arch',x+dx,z+dz,.8,Math.atan2(dx,dz));
+  }
   for(let i=0;i<4;i++) {add('block',8+i,15,[1,.9,1]);box(8+i,heightAt(8+i,15)+.45,15,1,.9,1);}
   // Circular abbey, with south and north gates open to late arrivals.
   const floor=heightAt(0,-48);

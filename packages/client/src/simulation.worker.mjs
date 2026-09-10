@@ -3,7 +3,8 @@ import { SharedSession, NET_DT, PROTOCOL_VERSION } from '@old-circle/game/networ
 import { GameSocketTransport as WebSocketTransport } from '@old-circle/game/network/socket-transport.mjs';
 import { WEAPONS } from '@old-circle/game/content/catalog.mjs';
 import { SpatialAtlas } from '@old-circle/game/world/spatial-atlas.mjs';
-import { landmarkPosition } from '@old-circle/game/world/regions.mjs';
+import { landmarkPosition,HEARTHS } from '@old-circle/game/world/regions.mjs';
+import {hearthArrival} from '@old-circle/game/simulation/resting.mjs';
 import {Ragdolls} from '@old-circle/game/simulation/ragdolls.mjs';
 
 // Rendering never owns authority. This Worker keeps the same Meep simulation
@@ -13,13 +14,14 @@ let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick
 let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,sequence:0},pendingLevel;
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const seenEvents=new Set();
+function levelResult(ok){postMessage({type:'level-result',ok,snapshot:{...world.snapshot(),events:[],ragdolls:ragdolls.snapshot()},mode:remote?'online':'offline'});}
 function disconnect(reason='Connection closed'){
   seenEvents.clear();
   postMessage({type:'network-status',message:reason});
   const old=remote;remote=null;connecting=false;retryAt=performance.now()+5000;accumulator=0;lastEventTick=-1;
   const ws=socket;socket=null;try{ws?.close();}catch{}
   old?.stop().catch(e=>console.warn('Session cleanup',e));
-  if(pendingLevel){postMessage({type:'level-result',ok:world.actor(playerId).level>pendingLevel.level});pendingLevel=null;}
+  if(pendingLevel){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
 }
 function connect(){
   if(connecting||remote||!url)return;connecting=true;
@@ -53,7 +55,7 @@ function update(){
         if(state.tick!==lastServerTick){lastServerTick=state.tick;lastServerAt=now;}
         events.push(...state.events);
         world.replaceSnapshot(state);mode='online';
-        if(pendingLevel&&remote.localCharacter()?.appliedSequence===pendingLevel.sequence){postMessage({type:'level-result',ok:world.actor(playerId).level>pendingLevel.level});pendingLevel=null;}
+        if(pendingLevel&&remote.localCharacter()?.appliedSequence===pendingLevel.sequence){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
       }else{world.input(playerId,intent);if(!paused)world.step(DT);}
       if(now-lastServerAt>3500)disconnect(`No authoritative updates; last tick ${lastServerTick}`);
     }else if(!paused){
@@ -82,12 +84,12 @@ self.onmessage=async({data})=>{
     if(data.type==='pvp'){world.actor(playerId).pvp=data.enabled;settings.pvp=Number(data.enabled);}
     if(data.type==='level'){
       if(remote){settings.levelStat=stats.indexOf(data.stat)+1;settings.sequence++;pendingLevel={sequence:settings.sequence,level:world.actor(playerId).level};}
-      else postMessage({type:'level-result',ok:world.levelUp(playerId,data.stat)});
+      else levelResult(world.levelUp(playerId,data.stat));
     }
     if(data.type==='save')postMessage({type:'save',character:world.exportCharacter(playerId)});
     if(data.type==='pause'){paused=data.paused;if(paused)intent={...intent,x:0,z:0,buttons:0};}
     if(inspect&&data.type==='inspect'){
-      if(data.landmark){const p=landmarkPosition(data.landmark);world.teleport(world.actor(playerId),[p[0],p[1]+1,p[2]+5]);}
+      if(data.landmark){const hearth=HEARTHS.find(h=>h.id===data.landmark),p=landmarkPosition(data.landmark);world.teleport(world.actor(playerId),hearth?hearthArrival(hearth):[p[0],p[1]+1,p[2]+5]);}
       if(data.position)world.teleport(world.actor(playerId),data.position);
       if(Number.isFinite(data.time))world.time=data.time;
       postMessage({type:'snapshot',snapshot:{...world.snapshot(),ragdolls:ragdolls.snapshot()},mode:'offline'});

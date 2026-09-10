@@ -13,6 +13,7 @@
 #objective {display:block;margin-top:10px;font-size:9px;letter-spacing:.16em;}
 
 .slot:disabled { opacity: .28; cursor: default; }
+.stat-row small {display:block;margin-top:$space;color:$muted;font-size:10px;}
 .inspector { position:fixed; z-index:20; right:20px; top:105px; width:205px; padding:14px; background:#101714ed; border:1px solid #bda57466; display:grid; gap:8px; color:#e5dfcd; font:12px 'Segoe UI',sans-serif; }
 .inspector button,.inspector select { padding:7px; background:#26302a; color:#e5dfcd; border:1px solid #bda57466; font:inherit; cursor:pointer; }
 .inspector output { line-height:1.5; overflow-wrap:anywhere; }

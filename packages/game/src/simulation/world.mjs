@@ -19,7 +19,8 @@ import { weaponPose } from './weapon-pose.mjs';
 import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
 import collisionAssets from '../content/colliders.json' with {type:'json'};
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION } from '../world/regions.mjs';
+import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
+import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 
@@ -288,17 +289,18 @@ export class GameWorld {
     return !this.physics.raycast(this.ray,this.hit,e=>e!==ignore&&e!==target);
   }
   rest(a){
-    const p=landmarkPosition('hearth');if(Math.hypot(a.x-p[0],a.z-p[2])>4)return false;
-    if([...this.actors.keys()].some(id=>{const e=this.actor(id);return e.kind==='enemy'&&e.hp>0&&Math.hypot(e.x-a.x,e.z-a.z)<12;}))return false;
-    a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.flasks=3;a.checkpoint=[p[0],p[1]+1,p[2]+3];this.event('rest',a);return true;
+    const {hearth,reason}=restStatus(a,[...this.actors.keys()].map(id=>this.actor(id)));if(reason)return false;
+    a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.flasks=3;a.checkpoint=hearthArrival(hearth);a.checkpointId=hearth.id;
+    if(!a.hearths.includes(hearth.id))a.hearths.push(hearth.id);
+    this.event('rest',a,{hearth:hearth.id,name:hearth.name});return true;
   }
   levelUp(id,stat){
     const a=this.actor(id);if(!a||!Object.hasOwn(a.stats,stat)||a.embers<levelCost(a.level))return false;
-    if(Math.hypot(a.x,a.z-20)>4||a.hp<=0)return false;
+    if(restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
     a.embers-=levelCost(a.level);a.level++;a.stats[stat]++;
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);this.rest(a);return true;
   }
-  respawn(a){a.hp=a.healthMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.mantle=null;a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
+  respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
   teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
   checkEncounters(){
     for(const id of this.actors.keys()){
@@ -307,7 +309,7 @@ export class GameWorld {
       if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;this.teleport(a,a.home);}
     }
   }
-  exportCharacter(id){const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,inventory}=a;return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],inventory:structuredClone(inventory)};}
+  exportCharacter(id){const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,checkpointId,hearths,inventory}=a;return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory)};}
   importCharacter(id,s){
     const a=this.actor(id);if(!a||s.version!==1)throw new Error('Unsupported character save version');
     const fields=['vigor','endurance','might','insight'];
@@ -316,6 +318,8 @@ export class GameWorld {
     if(s.inventory&&!Array.isArray(s.inventory.weapons))throw new Error('Malformed inventory');
     // Client progression is trusted at reconnect, per game policy. World state never comes from this payload.
     Object.assign(a,{origin:s.origin,weapon:s.weapon,stats:{...s.stats},level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
+    a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
+    a.hearths=[...new Set(['hearth',a.checkpointId,...(Array.isArray(s.hearths)?s.hearths.filter(id=>HEARTHS.some(h=>h.id===id)):[])])];
     a.inventory=s.inventory?{weapons:[...new Set(s.inventory.weapons.filter(w=>WEAPONS[w]).concat(s.weapon))],arrows:clamp(Math.floor(Number(s.inventory.arrows)||0),0,9999),armor:String(s.inventory.armor??'road-worn mail')}:{weapons:[s.weapon,'sword'],arrows:30,armor:'road-worn mail'};
     a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);

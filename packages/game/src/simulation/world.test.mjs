@@ -1,6 +1,7 @@
 import {afterEach,expect,test} from 'vitest';
 import {GameWorld,BUTTON} from './world.mjs';
-import {heightAt} from '../world/regions.mjs';
+import {heightAt,HEARTHS} from '../world/regions.mjs';
+import {hearthArrival} from './resting.mjs';
 import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
@@ -112,6 +113,26 @@ test('equipment and arrows belong to the character and survive save import',asyn
   const w=await setup(),p=w.addPlayer('player','wayfarer');expect(p.weapon).toBe('bow');w.attack(p);expect(p.inventory.arrows).toBe(29);
   p.attackAge=-1;w.equip(p.id,'staff');expect(p.weapon).toBe('bow');const saved=w.exportCharacter(p.id);
   w.importCharacter(p.id,saved);expect(p.inventory.arrows).toBe(29);expect(p.inventory.weapons).toContain('bow');
+});
+
+test('each regional hearth restores resources and remembers a safe return point through saves',async()=>{
+  const w=await setup(),p=w.addPlayer('pilgrim');
+  for(const hearth of HEARTHS){
+    w.teleport(p,hearthArrival(hearth));p.hp=1;p.stamina=0;p.mana=0;p.flasks=0;
+    expect(w.rest(p),hearth.id).toBe(true);expect(p.checkpointId).toBe(hearth.id);expect(p.hearths).toContain(hearth.id);
+    const saved=w.exportCharacter(p.id);w.importCharacter(p.id,saved);expect(p.checkpointId).toBe(hearth.id);
+    w.teleport(p,[0,10,30]);w.respawn(p);expect([p.x,p.y,p.z]).toEqual(hearthArrival(hearth));
+    expect([p.hp,p.stamina,p.mana,p.flasks]).toEqual([p.healthMax,p.staminaMax,p.manaMax,3]);
+  }
+});
+
+test('level improvements cannot spend embers during danger and work at a regional hearth',async()=>{
+  const w=await setup(),p=w.addPlayer('learner'),hearth=HEARTHS[2];w.teleport(p,hearthArrival(hearth));p.embers=500;
+  const guard=w.spawnActor('guard',{},[p.x+10,p.y,p.z]),stats={...p.stats};
+  expect(w.levelUp(p.id,'vigor')).toBe(false);expect(p.embers).toBe(500);expect(p.stats).toEqual(stats);
+  guard.hp=0;expect(w.levelUp(p.id,'vigor')).toBe(true);expect(p.level).toBe(2);expect(p.stats.vigor).toBe(stats.vigor+1);expect(p.embers).toBe(377);
+  expect(p.checkpointId).toBe(hearth.id);expect(p.hp).toBe(p.healthMax);
+  w.teleport(p,[p.x,p.y+5,p.z]);expect(w.rest(p)).toBe(false);
 });
 
 test('idle enemies patrol, pause, and keep individual facing and animation phases',async()=>{

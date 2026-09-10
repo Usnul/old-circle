@@ -2,7 +2,7 @@ import {computeCatmullRomSpline} from '@woosh/meep-engine/src/core/math/spline/c
 import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/create_simplex_noise_2d.js';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
 export const WORLD_VERSION = 2;
-export const SPAWN = [0, 0, 24];
+export const SPAWN = [0, 0, 23];
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },
   { id: 'wood', name: 'Mourningwood', level: [5, 10], center: [-125, -55], radius: 100, color: '#365d50', enemies: ['hollow', 'hound', 'archer'], landmark: 'The Widow Oak', purpose: 'Recover the root seal beneath the Widow Oak.', boss: 'rootbound' },
@@ -39,6 +39,20 @@ export const ROAD_PATHS=ROUTES.map(([a,b])=>{
   computeCatmullRomSpline(flat,points.flat(),points.length,2,points.length*7);
   return {from:a,to:b,points:Array.from({length:flat.length/2},(_,i)=>[flat[i*2],flat[i*2+1]])};
 });
+// Hearths sit beside a graded approach, with the return point on the road.
+// Stable IDs are saved with the character; positions follow authored road edits.
+export const HEARTHS=[{...LANDMARKS[0],arrival:[0,23]},...[
+  ['widows-rest','Widow’s Rest','wood','abbey','oak',.72],
+  ['salt-vigil','The Salt Vigil','desert','abbey','aqueduct',.73],
+  ['blue-watch','The Blue Watch','magic','oak','spire',.8],
+  ['winter-shelter','Winter’s Shelter','tundra','aqueduct','pilgrims',.78],
+  ['last-vigil','The Last Vigil','crown','pilgrims','halo',.6],
+].map(([id,name,region,from,to,fraction])=>{
+  const road=ROAD_PATHS.find(r=>r.from===from&&r.to===to),index=Math.floor((road.points.length-1)*fraction);
+  const p=road.points[index],next=road.points[index+1],dx=next[0]-p[0],dz=next[1]-p[1],length=Math.hypot(dx,dz);
+  return {id,name,region,kind:'hearth',position:[p[0]-dz/length*3,0,p[1]+dx/length*3],arrival:[...p]};
+})];
+LANDMARKS.push(...HEARTHS.slice(1));
 const hills=[
   [0,32,7,58,38],[-85,5,19,42,53],[80,8,19,33,47],
   [-67,-156,33,32,79],[59,-158,35,29,65],[150,-116,8,70,45],

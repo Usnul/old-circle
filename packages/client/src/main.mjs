@@ -1,6 +1,7 @@
 import './ui/style.scss';
 import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catalog.mjs';
-import { REGIONS,LANDMARKS,ROAD_PATHS,regionAt } from '@old-circle/game/world/regions.mjs';
+import { REGIONS,LANDMARKS,ROAD_PATHS,HEARTHS,regionAt } from '@old-circle/game/world/regions.mjs';
+import {restStatus} from '@old-circle/game/simulation/resting.mjs';
 import {GameInput} from './input.mjs';
 import {compassMarkup,updateCompass} from './ui/compass.mjs';
 
@@ -55,8 +56,8 @@ async function start(character){
       if(data.type==='network-status'){$('#network-state').title=data.message;return;}
       if(data.type==='error'){showError(data.message);return;}
       if(data.type==='save'){if(!inspecting)localStorage.setItem(SAVE_KEY,JSON.stringify(data.character));return;}
-      if(data.type==='level-result'){toast(data.ok?'Your strength takes root.':'Rest at the hearth with enough embers to grow.');if(menu)journal();return;}
-      if(data.snapshot){snapshot=data.snapshot;view.acceptSnapshot(snapshot);$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast('Restored at the Pilgrim’s Hearth');if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
+      if(data.snapshot){snapshot=data.snapshot;view.acceptSnapshot(snapshot);$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast(`Restored at ${e.name}`);if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
+      if(data.type==='level-result'){toast(data.ok?'Your strength takes root.':'Find a safe hearth and enough embers to grow.');if(menu)journal();return;}
       if(data.type==='ready'){$('#loading').hidden=true;$('#hud').hidden=false;started=true;$('#capture-mouse').hidden=inspecting;requestAnimationFrame(frame);view.engine.viewStack.el.focus();}
     };
     if(inspecting){const {installInspector}=await import('./inspector.mjs');inspector=installInspector({send,getView:()=>view,getSnapshot:()=>snapshot,playerId});}
@@ -67,13 +68,18 @@ async function start(character){
 function showError(message){$('#loading').hidden=true;modal(`<div class="panel-top"><div><div class="eyebrow">The road is interrupted</div><h2>Unable to enter the world</h2></div></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Return to the beginning</span><span>⟶</span></button>`);$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
 function journal(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
-  modal(`<div class="panel-top"><div><div class="eyebrow">The wanderer’s journal</div><h2>Your place in the circle</h2></div><button class="close" aria-label="Close">×</button></div><div class="eyebrow">Level ${p.level} · ${p.embers} embers · ${p.seals.length} / 6 seals</div><div class="stats-grid">${Object.entries(p.stats).map(([name,n])=>`<div class="stat-row"><span>${name[0].toUpperCase()+name.slice(1)}</span><span>${n} <button data-stat="${name}" title="Improve ${name}">+</button></span></div>`).join('')}</div><p>${p.inventory.arrows} arrows · ${p.inventory.armor}<br>Next improvement: ${levelCost(p.level)} embers. Return to the hearth to spend them.</p><div class="button-row"><button class="subtle" id="show-map">World map</button><button class="subtle" id="toggle-pvp">PvP ${p.pvp?'on':'off'} — ${p.pvp?'disable':'enable'}</button><button class="subtle" id="save-game">Save journey</button></div><p>${p.seals.length?`Seals recovered: ${p.seals.join(', ')}`:'Find Aldren in the ruined abbey. Recover the Dawn seal.'}</p>`);
+  const rest=restStatus(p,snapshot.actors),checkpoint=HEARTHS.find(h=>h.id===p.checkpointId)??HEARTHS[0],cost=levelCost(p.level);
+  const benefits={vigor:'+5 health',endurance:'+3 stamina',might:'Stronger melee strikes',insight:'+4 focus and stronger projectiles'};
+  modal(`<div class="panel-top"><div><div class="eyebrow">The wanderer’s journal</div><h2>Your place in the circle</h2></div><button class="close" aria-label="Close">×</button></div><div class="eyebrow">Level ${p.level} · ${p.embers} embers · ${p.seals.length} / 6 seals</div><div class="stats-grid">${Object.entries(p.stats).map(([name,n])=>`<div class="stat-row"><span>${name[0].toUpperCase()+name.slice(1)}<small>${benefits[name]}</small></span><span>${n} <button data-stat="${name}" aria-label="Improve ${name}" title="${rest.reason??(p.embers<cost?'Not enough embers':benefits[name])}" ${rest.reason||p.embers<cost?'disabled':''}>+</button></span></div>`).join('')}</div><p>${p.inventory.arrows} arrows · ${p.inventory.armor}<br>Next improvement: ${cost} embers. ${rest.reason??`Resting at ${rest.hearth.name}.`}</p><p>Return point: <strong>${checkpoint.name}</strong><br>${p.hearths?.length??1} of ${HEARTHS.length} hearths kindled. Rest at a hearth to remember it.</p><div class="button-row"><button class="subtle" id="show-map">World map</button><button class="subtle" id="toggle-pvp">PvP ${p.pvp?'on':'off'} — ${p.pvp?'disable':'enable'}</button><button class="subtle" id="save-game">Save journey</button></div><p>${p.seals.length?`Seals recovered: ${p.seals.join(', ')}`:'Find Aldren in the ruined abbey. Recover the Dawn seal.'}</p>`);
   document.querySelectorAll('[data-stat]').forEach(b=>b.onclick=()=>send({type:'level',stat:b.dataset.stat}));$('#show-map').onclick=map;$('#toggle-pvp').onclick=()=>{send({type:'pvp',enabled:!p.pvp});p.pvp=!p.pvp;journal();};$('#save-game').onclick=()=>{send({type:'save'});closeModal();toast('Your journey is remembered.');};
 }
 function map(){
   const x=v=>v+250,y=v=>(v+450)*.72;
   const p=snapshot.actors.find(a=>a.id===playerId);
-  modal(`<div class="panel-top"><div><div class="eyebrow">The known lands</div><h2>All roads turn inward</h2></div><button class="close" aria-label="Close">×</button></div><svg class="map" viewBox="0 0 500 420" role="img" aria-label="Map of six connected regions">${ROAD_PATHS.map(road=>`<polyline points="${road.points.map(p=>`${x(p[0])},${y(p[1])}`).join(' ')}" fill="none" stroke="#bca57277" stroke-width="1" stroke-dasharray="3 5"/>`).join('')}${REGIONS.map(r=>`<circle cx="${x(r.center[0])}" cy="${y(r.center[1])}" r="37" fill="${r.color}" opacity=".13"/><text x="${x(r.center[0])}" y="${y(r.center[1])}" text-anchor="middle">${r.name}</text><text class="map-level" x="${x(r.center[0])}" y="${y(r.center[1])+17}" text-anchor="middle">LEVEL ${r.level.join('–')}</text>`).join('')}<circle cx="${x(p.x)}" cy="${y(p.z)}" r="4" fill="#e6c984"/><text class="map-level" x="${x(p.x)+9}" y="${y(p.z)-6}">YOU</text><text x="470" y="25" text-anchor="middle">N ↑</text></svg><p>Meadow → forest or cinder road → glasswood and pale reach → the last crown. The Bellkeeper’s Hollow reconnects with the abbey road.</p>`);
+  const roads=ROAD_PATHS.map(road=>`<polyline points="${road.points.map(p=>`${x(p[0])},${y(p[1])}`).join(' ')}" fill="none" stroke="#bca57277" stroke-width="1" stroke-dasharray="3 5"/>`).join('');
+  const regions=REGIONS.map(r=>`<circle cx="${x(r.center[0])}" cy="${y(r.center[1])}" r="37" fill="${r.color}" opacity=".13"/><text x="${x(r.center[0])}" y="${y(r.center[1])}" text-anchor="middle">${r.name}</text><text class="map-level" x="${x(r.center[0])}" y="${y(r.center[1])+17}" text-anchor="middle">LEVEL ${r.level.join('–')}</text>`).join('');
+  const fires=HEARTHS.filter(h=>p.hearths?.includes(h.id)).map(h=>`<g><title>${h.name}${h.id===p.checkpointId?' · Return point':''}</title><circle cx="${x(h.position[0])}" cy="${y(h.position[2])}" r="${h.id===p.checkpointId?6:3}" fill="none" stroke="#e6c984" stroke-width="1.5"/></g>`).join('');
+  modal(`<div class="panel-top"><div><div class="eyebrow">The known lands</div><h2>All roads turn inward</h2></div><button class="close" aria-label="Close">×</button></div><svg class="map" viewBox="0 0 500 420" role="img" aria-label="Map of six connected regions and your kindled hearths">${roads}${regions}${fires}<circle cx="${x(p.x)}" cy="${y(p.z)}" r="4" fill="#e6c984"/><text class="map-level" x="${x(p.x)+9}" y="${y(p.z)-6}">YOU</text><text x="470" y="25" text-anchor="middle">N ↑</text></svg><p>Gold rings mark kindled hearths. The larger ring is your return point.<br>Meadow → forest or cinder road → glasswood and pale reach → the last crown. The Bellkeeper’s Hollow reconnects with the abbey road.</p>`);
 }
 for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');
 let previous=performance.now();
@@ -94,6 +100,8 @@ function updateHud(){
   const region=regionAt(p.x,p.z),hour=snapshot.time;$('#daytime').textContent=`${hour<6||hour>=18?'Night':hour>16?'Evening':'Day'} · ${region.name}`;$('#pvp-state').textContent=`PvP ${p.pvp?'on':'off'}`;
   const next=Object.values(BOSSES).find(b=>!p.seals.includes(b.seal));$('#objective').textContent=next?LANDMARKS.find(l=>l.id===next.landmark).name.toUpperCase():'THE CIRCLE IS BROKEN';
   if(lastArea!==region.id){lastArea=region.id;$('#area-name').textContent=region.name;$('#area-level').textContent=`Recommended level ${region.level.join('–')}`;$('#area-title').style.opacity=1;clearTimeout(areaTimer);areaTimer=setTimeout(()=>$('#area-title').style.opacity=0,5500);}
-  $('#interact').hidden=Math.hypot(p.x,p.z-20)>4;$('#death').hidden=p.hp>0;
+  const rest=restStatus(p,snapshot.actors);$('#interact').hidden=!rest.hearth;
+  if(rest.hearth)$('#interact').innerHTML=rest.reason??`<kbd>E</kbd>Rest at ${rest.hearth.name}`;
+  $('#death').hidden=p.hp>0;
   const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;$('#boss-health').style.width=`${boss.hp/boss.healthMax*100}%`;}
 }
