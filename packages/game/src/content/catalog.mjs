@@ -1,8 +1,8 @@
 export const WEAPONS = {
   sword: { name: 'Pilgrim’s Longsword', style: 'melee', damage: 24, reach: 2.35, stamina: 19, cooldown: .72, active: [.18, .43], impulse: 260, icon: 'sword' },
   spear: { name: 'Bellkeeper’s Spear', style: 'melee', damage: 21, reach: 3.2, stamina: 23, cooldown: .85, active: [.24, .46], impulse: 220, icon: 'sword' },
-  bow: { name: 'Ashwood Bow', style: 'ranged', damage: 27, speed: 36, stamina: 16, cooldown: .8, impulse: 130, icon: 'bow' },
-  staff: { name: 'Cinder Seal', style: 'magic', damage: 32, speed: 19, mana: 12, stamina: 5, cooldown: .65, impulse: 180, icon: 'seal' },
+  bow: { name: 'Ashwood Bow', style: 'ranged', damage: 27, speed: 36, stamina: 16, cooldown: .8, release: .46, impulse: 130, icon: 'bow' },
+  staff: { name: 'Cinder Seal', style: 'magic', damage: 32, speed: 19, mana: 12, stamina: 5, cooldown: .65, release: .27, impulse: 180, icon: 'seal' },
 };
 export const ORIGINS = [
   { id: 'pilgrim', name: 'The Pilgrim', description: 'A road-worn blade. A borrowed purpose.', stats: { vigor: 12, endurance: 12, might: 12, insight: 8 }, weapon: 'sword' },

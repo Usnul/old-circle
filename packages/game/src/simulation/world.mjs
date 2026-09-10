@@ -83,6 +83,7 @@ export class GameWorld {
     const a=Object.assign(new Actor(),values,{id});
     const p=position??[SPAWN[0],heightAt(SPAWN[0],SPAWN[2])+1,SPAWN[2]];
     a.x=p[0];a.y=p[1];a.z=p[2];a.home=[...p];
+    if(a.kind==='enemy'){const seed=Array.from(id).reduce((n,c)=>(Math.imul(n,31)+c.charCodeAt(0))>>>0,4171);a.animationTime=(seed%1000)/73;a.gaitPhase=(seed%100)/31;}
     const scale=a.boss?1.5:1;
     const e=this.body(p,CapsuleShape3D.from(.32*scale,1.05*scale));
     this.ecd.addComponentToEntity(e,a);this.actors.set(id,e);return a;
@@ -112,6 +113,7 @@ export class GameWorld {
         continue;
       }
       a.hurtTime=Math.max(0,a.hurtTime-dt);a.cooldown=Math.max(0,a.cooldown-dt);
+      a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       a.stamina=Math.min(a.staminaMax,a.stamina+dt*22);a.mana=Math.min(a.manaMax,a.mana+dt*3);
       if(a.kind==='enemy')this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
@@ -153,7 +155,7 @@ export class GameWorld {
       if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=28){a.mana-=28;a.cooldown=1.2;this.nova(a,6.5,36,'frost');}
       if((pressed&BUTTON.HEAL)&&a.flasks>0&&a.hp<a.healthMax){a.flasks--;a.hp=Math.min(a.healthMax,a.hp+70);this.event('heal',a);}
       if((pressed&BUTTON.INTERACT)&&a.kind==='player')this.rest(a);
-      if(a.attackAge>=0){a.attackAge+=dt;this.melee(a);if(a.attackAge>(a.boss?1.2:WEAPONS[a.weapon].cooldown))a.attackAge=-1;}
+      if(a.attackAge>=0)this.advanceAttack(a,dt);
       t.setRotation(0,Math.sin(a.yaw/2),0,Math.cos(a.yaw/2));
     }
     this.physics.fixedUpdate(dt);
@@ -196,9 +198,16 @@ export class GameWorld {
   attack(a){
     const w=WEAPONS[a.weapon];if(a.stamina<w.stamina||a.mana<(w.mana??0))return;
     if(a.kind==='player'&&a.weapon==='bow'){if(a.inventory.arrows<=0)return;a.inventory.arrows--;}
-    a.stamina-=w.stamina;a.mana-=w.mana??0;a.cooldown=w.cooldown;a.attackAge=0;a.attackId++;a.hitIds=[];
+    a.stamina-=w.stamina;a.mana-=w.mana??0;a.cooldown=w.cooldown;a.attackAge=0;a.attackId++;a.hitIds=[];a.attackKind='weapon';a.projectileReleased=false;
     this.event('attack',a,{weapon:a.weapon});
-    if(w.style!=='melee')this.spawnProjectile(a,w);
+  }
+  advanceAttack(a,dt){
+    a.attackAge+=dt;const w=WEAPONS[a.weapon];
+    if(a.attackKind!=='nova'){
+      this.melee(a);
+      if(w.release!==undefined&&!a.projectileReleased&&a.attackAge>=w.release){this.spawnProjectile(a,w);a.projectileReleased=true;this.event('release',a,{weapon:a.weapon});}
+    }
+    if(a.attackAge>(a.attackKind==='nova'?1:w.cooldown))a.attackAge=-1;
   }
   setCrouch(a,crouch){
     if(a.kind!=='player')return;
@@ -209,7 +218,7 @@ export class GameWorld {
     this.physics.setPose(b,{x:a.x,y,z:a.z},rotation);a.y=y;a.crouch=crouch;
   }
   melee(a){
-    const w=WEAPONS[a.weapon];if(w.style!=='melee')return;
+    const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova')return;
     const age=a.attackAge;if(age<w.active[0]||age>w.active[1])return;
     const current=weaponPose(a),previous=weaponPose(a,Math.max(w.active[0],age-DT));
     const segments=[[current.start,current.end]];
@@ -247,6 +256,7 @@ export class GameWorld {
     return true;
   }
   nova(a,radius,damage,effect){
+    a.attackKind='nova';a.attackAge=0;
     a.attackId++;this.event('nova',a,{key:`${a.id}:nova:${a.attackId}`,radius,effect});
     const n=this.physics.overlap(SphereShape3D.from(radius),[a.x,a.y,a.z],q,this.overlaps,0);
     const hit=new Set();
@@ -262,8 +272,8 @@ export class GameWorld {
   spawnProjectile(a,w){
     const t=new Transform64(),p=new Projectile(),e=this.ecd.createEntity();
     p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?w.damage+a.stats.insight*.6:a.boss?BOSSES[a.archetype].damage:ENEMIES[a.archetype]?.damage??18;
-    p.velocity=[-Math.sin(a.yaw)*w.speed,1,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
-    t.setTranslation(a.x-Math.sin(a.yaw)*.8,a.y+.3,a.z-Math.cos(a.yaw)*.8);
+    p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
+    t.setTranslation(...weaponPose(a).origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);
   }
   stepProjectiles(dt){

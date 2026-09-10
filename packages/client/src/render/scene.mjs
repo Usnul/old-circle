@@ -4,12 +4,12 @@ import { Transform64 } from '@woosh/meep-engine/src/engine/ecs/transform/Transfo
 import { t64_look_rotation } from '@woosh/meep-engine/src/engine/ecs/transform/t64_look_rotation.js';
 import { t64_announce_change } from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import { Quaternion } from '@woosh/meep-engine/src/core/geom/Quaternion.js';
-import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
-import {fabrik3d_solve_primitive} from '@woosh/meep-engine/src/engine/physics/inverse_kinematics/fabrik/fabrik3d_solve_primitive.js';
 import { Camera } from '@woosh/meep-engine/src/engine/graphics/ecs/camera/Camera.js';
 import { CameraSystem } from '@woosh/meep-engine/src/engine/graphics3/CameraSystem.js';
 import { ShadedGeometry } from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import { ShadedGeometrySystem } from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
+import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
+import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
 import { GPUParticleEmitterSystem } from '@woosh/meep-engine/src/engine/graphics3/GPUParticleEmitterSystem.js';
 import { LightSystem } from '@woosh/meep-engine/src/engine/graphics3/LightSystem.js';
 import { Light } from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
@@ -23,7 +23,6 @@ import { BinaryBuffer } from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import { ShadeImage } from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
 import { ColorSpace } from '@woosh/meep-engine/src/shade/renderer/texture/ColorSpace.js';
-import { weaponPose } from '@old-circle/game/simulation/weapon-pose.mjs';
 import { WorldAudio } from './audio.mjs';
 import { WorldSky } from './sky.mjs';
 import { buildLayout } from '@old-circle/game/world/layout.mjs';
@@ -31,6 +30,7 @@ import { heightAt } from '@old-circle/game/world/regions.mjs';
 import { effect } from './effects.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
+import {Characters} from './characters.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -39,9 +39,12 @@ export class WorldView {
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
   async start(progress=()=>{}){
     progress('Kindling the light…',.1);
+    this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
       this.scene=EngineHarness.shadeScene(engine);
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
+      this.meshSystem=new MeshSystem(engine.graphics,this.scene,async url=>this.characterRenderer.bundle(url));config.addSystem(this.meshSystem);
+      this.animations=new AnimationSystem(engine.graphics,this.meshSystem);config.addSystem(this.animations);
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
@@ -109,15 +112,6 @@ export class WorldView {
     for(const {id,t} of parts){t.setTranslation(...p);t.setScale(scale,scale,scale);t.setRotation(...quat);t.updateMatrix();t64_announce_change(this.ecd,id);}
   }
   remove(parts){for(const {id} of parts)this.ecd.removeEntity(id);}
-  arm(rig,shoulder,elbow,hand,scale){
-    const positions=new Float32Array([...shoulder,...elbow,...hand]);
-    fabrik3d_solve_primitive(3,positions,[.43*scale,.38*scale],...shoulder,...hand,6,.0001);
-    for(const [i,parts] of [[0,rig.rightArm],[1,rig.rightForearm]]){
-      const from=Array.from(positions.slice(i*3,i*3+3)),to=Array.from(positions.slice(i*3+3,i*3+6));
-      const direction=new Vector3(...to.map((v,j)=>v-from[j])).normalize();quat.fromUnitVectors(new Vector3(0,-1,0),direction);
-      for(const {id,t} of parts){t.setTranslation(...from);t.setScale(scale,scale,scale);t.setRotation(...quat);t.updateMatrix();t64_announce_change(this.ecd,id);}
-    }
-  }
   light(p,color,intensity,type,shadow=false,distance=15){
     const l=new Light();l.type.set(type);l.color.set(...color);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(.15);l.castShadow.set(shadow);l.maxShadowDistance.set(130);
     const t=new Transform64();t.setTranslation(...p);const id=new Entity().add(l).add(t).build(this.ecd);return {id,t,l};
@@ -133,10 +127,6 @@ export class WorldView {
       const emitter=this.emitter(ev.effect,[px,Math.max(y-.7,heightAt(px,pz)+.15),pz],0,1.1);this.particles.burst(emitter.id,10);
     }
   }
-  character(a){
-    if(a.archetype==='hound')return {hound:this.model('hound'),weaponName:a.weapon};
-    return {torso:this.model('torso'),helm:this.model('helm'),cloak:this.model('cloak'),leftArm:this.model('arm'),rightArm:this.model('upperArm'),rightForearm:this.model('forearm'),leftLeg:this.model('leg'),rightLeg:this.model('leg'),weapon:this.model(a.weapon),weaponName:a.weapon};
-  }
   update(snapshot,playerId,dt){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
     const present=new Set();
@@ -144,28 +134,13 @@ export class WorldView {
     for(const state of snapshot.actors){
       const a=this.poses.sample(state,renderTime);
       if(a.hp<=0){continue;}present.add(a.id);
-      let rig=this.characters.get(a.id);if(!rig){rig=this.character(a);this.characters.set(a.id,rig);}
+      let rig=this.characters.get(a.id);if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
       if(a.windup>0&&a.attackKind==='nova'){
         rig.telegraph??=this.model('dangerRing');this.pose(rig.telegraph,[a.x,heightAt(a.x,a.z)+.13,a.z],8);
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
-      if(rig.weaponName!==a.weapon&&rig.weapon){this.remove(rig.weapon);rig.weapon=this.model(a.weapon);rig.weaponName=a.weapon;}
-      const moving=Math.hypot(a.vx,a.vz),stride=Math.sin(this.elapsed*(moving>4?12:8))*Math.min(moving/4,.65),scale=a.boss?1.85:1,yaw=a.yaw+Math.PI;
-      const target=[a.x,a.y-(a.boss?1.25:a.crouch?.49:.84),a.z];rig.position=target;
-      const p=rig.position;
-      if(rig.hound){this.pose(rig.hound,p,1.1,yaw);continue;}
-      const local=(x,y,z)=>[p[0]+(Math.cos(yaw)*x+Math.sin(yaw)*z)*scale,p[1]+y*scale,p[2]+(-Math.sin(yaw)*x+Math.cos(yaw)*z)*scale];
-      const crouch=a.crouch?-.35:0;
-      this.pose(rig.torso,local(0,crouch,0),scale,yaw,a.crouch?.2:0);this.pose(rig.cloak,local(0,crouch,0),scale,yaw,.04+Math.sin(this.elapsed*2)*.04);
-      this.pose(rig.helm,local(0,1.68+crouch,0),scale,yaw);
-      this.pose(rig.leftLeg,local(-.16,.81,0),scale,yaw,stride);this.pose(rig.rightLeg,local(.16,.81,0),scale,yaw,-stride);
-      const attacking=a.attackAge>=0,hanging=a.mantle?.phase==='hang';
-      this.pose(rig.leftArm,local(-.37,1.43+crouch,0),scale,yaw,hanging?-2.6:-stride*.5);
-      const blade=weaponPose(a),wp=attacking?blade.origin:local(.45,.62+crouch,.1);
-      this.pose(rig.weapon,wp,scale,attacking?blade.yaw:yaw,attacking?-Math.PI/2:0);
-      const grip=a.weapon==='spear'?.7:.25,hand=hanging?[a.x-Math.sin(a.yaw)*.55,a.y+.9,a.z-Math.cos(a.yaw)*.55]:attacking?[wp[0]+Math.sin(blade.yaw)*grip*scale,wp[1],wp[2]+Math.cos(blade.yaw)*grip*scale]:local(.45,.42+crouch,.1);
-      this.arm(rig,local(.37,1.43+crouch,0),local(.58,1+crouch,.18),hand,scale);
+      this.characterRenderer.update(rig,a);
     }
-    for(const [id,rig] of this.characters)if(!present.has(id)){for(const v of Object.values(rig))if(Array.isArray(v)&&v[0]?.t)this.remove(v);this.characters.delete(id);}
+    for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
     const liveProjectiles=new Set();for(const p of snapshot.projectiles){liveProjectiles.add(p.id);let m=this.missiles.get(p.id);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell');this.missiles.set(p.id,m);}const v=p.velocity;this.pose(m,p.position,1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}

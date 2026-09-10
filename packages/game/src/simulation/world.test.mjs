@@ -67,11 +67,11 @@ test('reconnect imports the character and replaces every world-owned state',asyn
 test('a fast arrow hits a thin wall before the actor behind it',async()=>{
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);
   const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.body([100,15,27],BoxShape3D.from_size(3,4,.02),BodyKind.Static);
-  w.attack(a);expect(w.projectiles.size).toBe(1);w.stepProjectiles(.2);expect(w.projectiles.size).toBe(0);expect(b.hp).toBe(100);
+  w.attack(a);expect(w.projectiles.size).toBe(0);w.advanceAttack(a,.45);expect(w.projectiles.size).toBe(0);w.advanceAttack(a,.02);expect(w.projectiles.size).toBe(1);w.stepProjectiles(.2);expect(w.projectiles.size).toBe(0);expect(b.hp).toBe(100);
 });
 test('a fast arrow connects with a visible actor over its swept travel',async()=>{
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);
-  const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.attack(a);w.stepProjectiles(.2);expect(b.hp).toBeLessThan(100);expect(w.projectiles.size).toBe(0);
+  const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.attack(a);w.advanceAttack(a,.47);w.stepProjectiles(.2);expect(b.hp).toBeLessThan(100);expect(w.projectiles.size).toBe(0);
 });
 test('nova damages nearby visible actors and excludes distant actors',async()=>{
   const w=await setup(),a=w.addPlayer('caster');w.teleport(a,[100,15,30]);

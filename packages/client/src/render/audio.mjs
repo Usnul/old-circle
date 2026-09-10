@@ -25,7 +25,7 @@ export class WorldAudio {
   play(name,position){this.sopra.playOneShot(this.events[name],{position:new Vector3(...position)});}
   update(snapshot,player,dt){
     if(!player)return;this.sopra.listenerPosition=new Vector3(player.x,player.y,player.z);
-    if(this.lastSnapshot!==snapshot){for(const e of snapshot.events){if(e.type==='attack'&&e.weapon!=='staff')this.play('sword',e.position);if(e.type==='nova')this.play('frost',e.position);if(e.type==='boss-defeated')this.play('bell',e.position);}this.lastSnapshot=snapshot;}
+    if(this.lastSnapshot!==snapshot){for(const e of snapshot.events){if((e.type==='attack'&&['sword','spear'].includes(e.weapon))||(e.type==='release'&&e.weapon==='bow'))this.play('sword',e.position);if(e.type==='nova'||(e.type==='release'&&e.weapon==='staff'))this.play('frost',e.position);if(e.type==='boss-defeated')this.play('bell',e.position);}this.lastSnapshot=snapshot;}
     this.footTime+=dt;this.bellTime+=dt;
     if(player.grounded&&Math.hypot(player.vx,player.vz)>1&&this.footTime>(player.crouch?.85:.55)){this.play('step',[player.x,player.y,player.z]);this.footTime=0;}
     if(this.bellTime>42){this.play('bell',[0,8,-48]);this.bellTime=0;}

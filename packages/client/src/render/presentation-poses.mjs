@@ -18,7 +18,7 @@ export class PresentationPoses {
       this.transform.setTranslation(a.x,a.y,a.z);this.transform.setRotation(0,Math.sin(a.yaw/2),0,Math.cos(a.yaw/2));
       this.codec.serialize(this.log.begin_record(this.keys.get(a.id),0),this.transform);this.log.end_record();
     }
-    this.log.end_tick();this.frames.push({tick,time});if(this.frames.length>16)this.frames.shift();
+    this.log.end_tick();this.frames.push({tick,time,actors:new Map(snapshot.actors.map(a=>[a.id,a]))});if(this.frames.length>16)this.frames.shift();
   }
   sample(actor,time){
     if(!this.frames.length)return actor;
@@ -30,6 +30,12 @@ export class PresentationPoses {
     this.buffer.position=0;this.codec.deserialize(this.buffer,this.transform);const t=this.transform;
     // Respawns, workshop visits and authority changes must not fly through scenery.
     if(Math.hypot(t.translation_x-actor.x,t.translation_y-actor.y,t.translation_z-actor.z)>8)return actor;
-    return {...actor,x:t.translation_x,y:t.translation_y,z:t.translation_z,yaw:2*Math.atan2(t.rotation[1],t.rotation[3])};
+    const result={...actor,x:t.translation_x,y:t.translation_y,z:t.translation_z,yaw:2*Math.atan2(t.rotation[1],t.rotation[3])};
+    const a=first.actors.get(actor.id),b=second.actors.get(actor.id);
+    if(a&&b){
+      for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=a[key]+(b[key]-a[key])*alpha;
+      if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=a.attackAge+(b.attackAge-a.attackAge)*alpha;
+    }
+    return result;
   }
 }
