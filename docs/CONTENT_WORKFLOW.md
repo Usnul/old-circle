@@ -60,6 +60,12 @@ Textures, normal maps and the particle sprite are also authored in Blender. `arc
 
 The current atlas samples one ground layer at 2 m spacing. Small obstacles are conservatively expanded; narrow passages may produce false negatives. Roofs, floors over floors and underground rooms need separately authored Meep navigation surfaces and explicit links. Do not treat a successful ground path as proof that an arbitrary jumping/mantling route works.
 
+## Generate the journal map
+
+`node tools/generate-world-map.mjs` produces the shipped `assets/map/world.svg` and its source fingerprint. It runs on every Vite startup/build and at the end of the Blender asset build. The image uses canonical height samples and road splines, collision footprints transformed by actual prop placement, and tree canopy extents decoded with Meep from the native geometry. Five-metre contours and shaded relief reveal climbs. Water footprints are included when authored water collision surfaces exist; the current world has none.
+
+`WORLD_BOUNDS` and `world/map.mjs` supply the same north-up projection to the image and player, keeper and hearth markers. The full image represents 480 × 640 metres, without the old map’s compressed Z scale. The map supports zoom, dragging, arrow-key panning, return to the full extent, and centering on the current player. Run the generator again after editing world source while a development preview remains open, or restart the preview. Image generation is deterministic and requires neither Blender intermediates nor an inference model.
+
 ## Ask spatial questions
 
 ```powershell

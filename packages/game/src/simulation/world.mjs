@@ -18,7 +18,7 @@ import { weaponPose } from './weapon-pose.mjs';
 import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
 import collisionAssets from '../content/colliders.json' with {type:'json'};
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
+import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,WORLD_BOUNDS,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
@@ -47,7 +47,8 @@ export class GameWorld {
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
     const {sampler}=terrainSurface();
-    this.terrainEntity=this.body([0,-15,-160],HeightMapShape3D.from(sampler,480,sampler.data.reduce((h,v)=>Math.max(h,v),0)+1,640),BodyKind.Static);
+    const {minX,minZ,width,depth}=WORLD_BOUNDS;
+    this.terrainEntity=this.body([minX+width/2,-15,minZ+depth/2],HeightMapShape3D.from(sampler,width,sampler.data.reduce((h,v)=>Math.max(h,v),0)+1,depth),BodyKind.Static);
     this.layout.solids=[];
     for(const prop of this.layout.props)for(const part of collisionAssets[prop.model]??[]){
       const vertices=new Float32Array(part.vertices.length),min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];

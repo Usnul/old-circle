@@ -3,6 +3,7 @@ import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/cr
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
 export const WORLD_VERSION = 3;
+export const WORLD_BOUNDS=Object.freeze({minX:-240,minZ:-480,width:480,depth:640});
 export const SPAWN = [0, 0, 23];
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },

@@ -11,6 +11,7 @@ for(const [command,args] of [
   [blender,['--background','--factory-startup','--python-exit-code','1','--python','tools/blender/build_characters.py']],
   [process.execPath,['tools/compile-assets.mjs']],
   [process.execPath,['tools/world-check.mjs','bake']],
+  [process.execPath,['tools/generate-world-map.mjs']],
 ]){
   const result=spawnSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true});
   if(result.error)throw result.error;

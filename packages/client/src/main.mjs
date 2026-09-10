@@ -1,9 +1,11 @@
 import './ui/style.scss';
 import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catalog.mjs';
-import { REGIONS,LANDMARKS,ROAD_PATHS,HEARTHS,regionAt } from '@old-circle/game/world/regions.mjs';
+import { LANDMARKS,HEARTHS,regionAt } from '@old-circle/game/world/regions.mjs';
 import {restStatus} from '@old-circle/game/simulation/resting.mjs';
 import {GameInput} from './input.mjs';
 import {compassMarkup,updateCompass} from './ui/compass.mjs';
+import {worldMapMarkup,installMapControls} from './ui/world-map.mjs';
+import {worldToMap} from '@old-circle/game/world/map.mjs';
 import {equipmentMarkup} from './ui/equipment.mjs';
 import {ARMOR,armorFor,reinforcement,hasAllSeals} from '@old-circle/game/content/equipment.mjs';
 
@@ -106,12 +108,8 @@ function ending(){
   $('#continue-road').onclick=closeModal;
 }
 function map(){
-  const x=v=>v+250,y=v=>(v+450)*.72;
-  const p=snapshot.actors.find(a=>a.id===playerId);
-  const roads=ROAD_PATHS.map(road=>`<polyline points="${road.points.map(p=>`${x(p[0])},${y(p[1])}`).join(' ')}" fill="none" stroke="#bca57277" stroke-width="1" stroke-dasharray="3 5"/>`).join('');
-  const regions=REGIONS.map(r=>`<circle cx="${x(r.center[0])}" cy="${y(r.center[1])}" r="37" fill="${r.color}" opacity=".13"/><text x="${x(r.center[0])}" y="${y(r.center[1])}" text-anchor="middle">${r.name}</text><text class="map-level" x="${x(r.center[0])}" y="${y(r.center[1])+17}" text-anchor="middle">LEVEL ${r.level.join('–')}</text>`).join('');
-  const fires=HEARTHS.filter(h=>p.hearths?.includes(h.id)).map(h=>`<g><title>${h.name}${h.id===p.checkpointId?' · Return point':''}</title><circle cx="${x(h.position[0])}" cy="${y(h.position[2])}" r="${h.id===p.checkpointId?6:3}" fill="none" stroke="#e6c984" stroke-width="1.5"/></g>`).join('');
-  modal(`<div class="panel-top"><div><div class="eyebrow">The known lands</div><h2>All roads turn inward</h2></div><button class="close" aria-label="Close">×</button></div><svg class="map" viewBox="0 0 500 420" role="img" aria-label="Map of six connected regions and your kindled hearths">${roads}${regions}${fires}<circle cx="${x(p.x)}" cy="${y(p.z)}" r="4" fill="#e6c984"/><text class="map-level" x="${x(p.x)+9}" y="${y(p.z)-6}">YOU</text><text x="470" y="25" text-anchor="middle">N ↑</text></svg><p>Gold rings mark kindled hearths. The larger ring is your return point.<br>Meadow → forest or cinder road → glasswood and pale reach → the last crown. The Bellkeeper’s Hollow reconnects with the abbey road.</p>`);
+  const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
+  equipmentOpen=false;modal(worldMapMarkup(p));installMapControls(()=>snapshot.actors.find(a=>a.id===playerId));
 }
 for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');
 let previous=performance.now();
@@ -128,6 +126,7 @@ function frame(now){
 function updateHud(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
   if(menu)refreshJournal();
+  $('#map-player')?.setAttribute('transform',`translate(${worldToMap(p.x,p.z).join(' ')})`);
   $('#stamina-state').textContent=p.sprintExhausted?'Recover stamina and release Shift to sprint again':'';
   for(const [id,v,m] of [['health',p.hp,p.healthMax],['mana',p.mana,p.manaMax],['stamina',p.stamina,p.staminaMax]])$(`#${id}`).style.width=`${Math.max(0,v/m*100)}%`;
   $('#embers').textContent=Math.floor(p.embers).toLocaleString();$('#flask-count').textContent=p.flasks;$('#weapon-name').textContent=WEAPONS[p.weapon].name+(reinforcement(p)?' +'+reinforcement(p):'');
