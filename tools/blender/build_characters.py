@@ -3,18 +3,22 @@
 Exports native-mesh compiler input and sampled TRS curves. The saved blend keeps
 the armatures, skin modifiers and editable Actions; no GLTF conversion at runtime.
 """
-import bpy, math, json
+import bpy, math, json, sys
 from pathlib import Path
 from mathutils import Vector, Matrix, Quaternion
 
 ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from equipment_materials import build_equipment_materials,apply_equipment_materials
+build_equipment_materials(ROOT)
 OUT=ROOT/'.local/blender';OUT.mkdir(parents=True,exist_ok=True)
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 C=Matrix(((1,0,0,0),(0,0,1,0),(0,-1,0,0),(0,0,0,1)))
 TAU=math.tau
 MATERIALS={}
-for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06)}.items():
+for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'cloak':(1,1,1),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06)}.items():
     mat=bpy.data.materials.new(name);mat.diffuse_color=(*color,1);MATERIALS[name]=mat
+apply_equipment_materials(MATERIALS,ROOT)
 GEOMETRY={};RIGS={};objects=[]
 
 def bind(obj,bone,material):
@@ -131,7 +135,9 @@ def human_mesh():
         for col in range(12):
             a=row*13+col;faces.extend([(a,a+13,a+1),(a+1,a+13,a+14),(a+1,a+13,a),(a+14,a+13,a+1)])
     mesh=bpy.data.meshes.new('Weighted travelling cloak');mesh.from_pydata(verts,[],faces);mesh.update()
-    obj=bpy.data.objects.new('Travelling cloak',mesh);bpy.context.collection.objects.link(obj);obj.data.materials.append(MATERIALS['cloth']);objects.append(obj)
+    obj=bpy.data.objects.new('Travelling cloak',mesh);bpy.context.collection.objects.link(obj);obj.data.materials.append(MATERIALS['cloak']);objects.append(obj)
+    uv=mesh.uv_layers.new(name='Travelling cloth atlas')
+    for loop in mesh.loops:uv.data[loop.index].uv=(loop.vertex_index%13/12,1-(loop.vertex_index//13)/16)
     groups=[obj.vertex_groups.new(name='cloak'+str(i+1)) for i in range(3)]
     for index,vert in enumerate(verts):
         u=max(0,min(2,(1.43-vert[2])/.4));lo=int(u);hi=min(2,lo+1)
@@ -255,10 +261,18 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
         for obj in objects:
             if obj.data.materials[0].name!=mat:continue
             mesh=obj.data;mesh.calc_loop_triangles();nm=obj.matrix_world.to_3x3().inverted().transposed()
+            uv_layer=mesh.uv_layers.active or mesh.uv_layers.new(name='Surface detail')
             for triangle in mesh.loop_triangles:
-                for vi in triangle.vertices:
+                face=C.to_3x3()@(nm@triangle.normal)
+                for vi,li in zip(triangle.vertices,triangle.loops):
                     vert=mesh.vertices[vi];p=C@(obj.matrix_world@vert.co);n=C.to_3x3()@(nm@(triangle.normal if obj.name=='Travelling cloak' else vert.normal)).normalized()
-                    chunk['indices'].append(len(chunk['positions'])//3);chunk['positions'].extend(p);chunk['normals'].extend(n);chunk['uvs'].extend((p.x*2,p.y*2))
+                    chunk['indices'].append(len(chunk['positions'])//3);chunk['positions'].extend(p);chunk['normals'].extend(n)
+                    if mat=='cloak':uv=(vi%13/12,(vi//13)/16)
+                    elif abs(face.y)>.65:uv=(p.x*2,p.z*2)
+                    elif abs(face.x)>abs(face.z):uv=(p.z*2,p.y*2)
+                    else:uv=(p.x*2,p.y*2)
+                    chunk['uvs'].extend(uv)
+                    uv_layer.data[li].uv=(uv[0],1-uv[1])
                     groups=sorted([(indices[obj.vertex_groups[g.group].name],g.weight) for g in vert.groups if g.weight>0],key=lambda a:-a[1])[:4]
                     total=sum(g[1] for g in groups);assert total>0
                     chunk['joints'].extend([g[0] for g in groups]+[0]*(4-len(groups)));chunk['weights'].extend([g[1]/total for g in groups]+[0]*(4-len(groups)))

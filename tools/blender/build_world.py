@@ -16,7 +16,9 @@ SOURCE.mkdir(parents=True, exist_ok=True)
 random.seed(81731)
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from ground_materials import build_ground,torus
+from equipment_materials import build_equipment_materials,apply_equipment_materials
 build_ground(ROOT,WORLD)
+build_equipment_materials(ROOT)
 vfx=ROOT/'packages/client/public/assets/vfx'
 vfx.mkdir(parents=True,exist_ok=True)
 sprite=bpy.data.images.new('Soft emissive mote',width=64,height=64,alpha=True)
@@ -41,6 +43,7 @@ PALETTE = {
 materials = {}
 for name, rgb in PALETTE.items():
  m = bpy.data.materials.new(name); m.diffuse_color = (*rgb,1); materials[name] = m
+apply_equipment_materials(materials,ROOT)
 assets = {}
 colliders = {}
 current = []

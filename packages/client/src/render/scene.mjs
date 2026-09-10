@@ -67,6 +67,7 @@ export class WorldView {
     this.materials.path=new StandardShadeMaterial();this.materials.path.diffuse_color.set(.28,.29,.23);
     this.materials.glassLeaf=new StandardShadeMaterial();this.materials.glassLeaf.diffuse_color.set(.12,.23,.27);
     this.materials.landscape=new StandardShadeMaterial();this.materials.landscape.roughness_factor=1;
+    this.materials.cloak=new StandardShadeMaterial();
     this.sky=new WorldSky();
     const textures={};for(const name of ['stone','ground','bark','stone-normal','ground-normal','bark-normal']){
       const response=await fetch(`/assets/textures/${name}.png`),bitmap=await createImageBitmap(await response.blob());
@@ -77,6 +78,14 @@ export class WorldView {
     this.materials.bark.texture_albedo=textures.bark;
     for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_normal=textures['stone-normal'];
     this.materials.landscape.texture_normal=textures['ground-normal'];this.materials.bark.texture_normal=textures['bark-normal'];
+    for(const name of ['iron','brass','leather','cloth','cloak']){
+      const material=this.materials[name];material.roughness_factor=1;material.metallic_factor=name==='iron'||name==='brass'?1:0;
+      for(const [suffix,channel] of [['','albedo'],['-normal','normal'],['-orm','orm']]){
+        const response=await fetch(`/assets/textures/${name}${suffix}.png`);if(!response.ok)throw new Error(`Missing material ${name}${suffix}`);
+        const image=ShadeImage.fromImageBitmap(await createImageBitmap(await response.blob()));image.color_space=suffix?ColorSpace.None:ColorSpace.SRGB;
+        material[`texture_${channel}`]=ShadeTexture.from(image);
+      }
+    }
     const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json()),adapter=new MeshletGeometrySerializationAdapter();
     const entries=Object.entries(manifest.models);let complete=0;
     // Limited fetch concurrency avoids monopolizing browser networking during startup.

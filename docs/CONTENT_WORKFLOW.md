@@ -37,6 +37,8 @@ The export changes Blender `(x,y,z)` into Meep `(x,z,-y)`, including normals. An
 
 Textures, normal maps and the particle sprite are also authored in Blender. `architecture.py` builds masonry at metre scale, including the cloister floor and bell tower; avoid stretching a unit cube to make large floors. `compile-assets.mjs` computes tangents and serializes geometry, publishing complete files atomically so a live preview cannot read a partial mesh. `pnpm assets:compile` reruns just conversion from an existing intermediate export. Asset generation does not modify the installed engine or the separate Meep repository.
 
+`equipment_materials.py` generates repeatable iron, brass, leather and cloth albedo/normal/ORM maps. ORM stores occlusion in red, roughness in green and metalness in blue; normal and ORM images use Meep's non-color data space. The travelling cloak has an explicit UV atlas with stitched hems and a broken-circle emblem. Character surface UVs use the dominant face plane so side faces do not collapse to a line. The Blender files pack the material images for review; regenerate them with the meshes when changing the maps.
+
 `ground_materials.py` authors periodic terrain detail and continuous biome/road weights. Its edge and weight-normalization checks run during every asset build. The client applies Meep's native terrain splat pass to the Blender terrain meshes, so transitions are independent of triangle boundaries. Keep texture scale in metres in the generated terrain manifest. Groves use a region's species, outcrops include buried parent rocks and smaller scree, and meadow patches mix grasses and flowers. Arches receive masonry foundations wherever their feet clear the terrain.
 
 ## Add or modify an area

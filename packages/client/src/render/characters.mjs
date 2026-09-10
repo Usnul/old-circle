@@ -27,6 +27,7 @@ export class Characters {
       if(appearance!=='player'){
         mesh.material=c.material.clone();
         if(c.material===this.view.materials.cloth)mesh.material.diffuse_color.set(...(appearance==='mage'?[.12,.17,.23]:appearance==='archer'?[.22,.20,.13]:[.20,.12,.08]));
+        if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...(appearance==='mage'?[.7,.9,1.3]:appearance==='archer'?[1.1,.97,.72]:[1.2,.75,.52]));
         if(appearance==='sentinel'&&c.material===this.view.materials.iron)mesh.material.diffuse_color.set(.38,.30,.17);
       }
       mesh.parent=skeleton.root;skeleton.root.children.push(mesh);return mesh;
