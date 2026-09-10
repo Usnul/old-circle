@@ -59,9 +59,11 @@ export class SpatialAtlas {
       indices.push(a,c,b,b,c,d);
     }
     bt_mesh_from_indexed_geometry(this.nav.topology,indices,positions);bt_mesh_build_face_bvh(this.nav.bvh,this.nav.topology);
+    this.geometry={positions,indices};
     this.faceCount=indices.length/3;return this;
   }
   path(from,to){
+    if([from,to].some(p=>p[0]<this.bounds[0]||p[0]>this.bounds[2]||p[2]<this.bounds[1]||p[2]>this.bounds[3]))return {reachable:false,reason:'Endpoint outside navigation tile',points:[]};
     const output=[],count=this.nav.find_path(output,...from,...to),points=[];
     for(let i=0;i<count;i++)points.push(output.slice(i*3,i*3+3));
     if(!count)return {reachable:false,reason:'No connected walkable surface',points:[]};

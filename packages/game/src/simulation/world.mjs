@@ -22,6 +22,7 @@ import {EnemyMind,enemySeed} from './enemy-mind.mjs';
 import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
+import {loadNavigation} from '../world/navigation-data.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 
 export const DT=1/60;
@@ -37,9 +38,9 @@ export class GameWorld {
     for(const c of [Transform64,RigidBody,Collider,Actor,Projectile])this.ecd.registerComponentType(c);
     this.actors=new Map();this.projectiles=new Set();this.events=[];this.tick=0;this.time=15.2;this.layout=buildLayout();
     this.ray=new Ray3();this.hit=new PhysicsSurfacePoint();this.overlaps=new Uint32Array(512);
-    this.navigation=new Map();this.mind=new EnemyMind(this);
+    this.navigation=null;this.mind=new EnemyMind(this);
   }
-  async start({populate=true}={}){
+  async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
     // Meep heightfield with a safe below-surface base. Same height function and metre coordinates as Blender.
     const samples=new Float32Array(241*321);
@@ -57,6 +58,7 @@ export class GameWorld {
       this.body(prop.position,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
       this.layout.solids.push({position:min.map((v,j)=>(v+max[j])/2),size:min.map((v,j)=>max[j]-v)});
     }
+    if(navigation)this.navigation=await loadNavigation();
     if(populate)this.populate();
     this.physics.optimizeBroadphase?.();return this;
   }
@@ -84,6 +86,7 @@ export class GameWorld {
     const a=Object.assign(new Actor(),values,{id});
     const p=position??[SPAWN[0],heightAt(SPAWN[0],SPAWN[2])+1,SPAWN[2]];
     a.x=p[0];a.y=p[1];a.z=p[2];a.home=[...p];
+    if(a.kind==='enemy')this.navigation?.tile(a.home);
     if(a.kind==='enemy'){const seed=enemySeed(id);a.animationTime=(seed%1000)/73;a.gaitPhase=(seed%100)/31;a.yaw=(seed*2.399963)%6.283185;a.intent.yaw=a.yaw;}
     const scale=a.boss?1.5:1;
     const e=this.body(p,CapsuleShape3D.from(.32*scale,1.05*scale));

@@ -2,7 +2,6 @@ import {BranchBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavio
 import {ConditionBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavior/util/ConditionBehavior.js';
 import {ActionBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavior/primitive/ActionBehavior.js';
 import {BehaviorStatus} from '@woosh/meep-engine/src/engine/intelligence/behavior/BehaviorStatus.js';
-import {SpatialAtlas} from '../world/spatial-atlas.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {WEAPONS,BOSSES} from '../content/catalog.mjs';
 
@@ -37,9 +36,10 @@ export class EnemyMind {
   steer(goal,speed,dt){
     const w=this.world,a=this.actor,dx=goal[0]-a.x,dz=goal[2]-a.z,d=Math.hypot(dx,dz);let next=goal;
     if(d>.1&&!w.lineOfSight([a.x,a.y,a.z],[goal[0],goal[1],goal[2]],w.actors.get(a.id),this.target&&w.actors.get(this.target.id))){
-      const key=`${Math.floor(a.home[0]/40)},${Math.floor(a.home[2]/40)}`;
-      let atlas=w.navigation.get(key);if(!atlas){const [x,z]=key.split(',').map(v=>Number(v)*40);atlas=new SpatialAtlas(w,{bounds:[x-32,z-32,x+72,z+72],spacing:2}).build();w.navigation.set(key,atlas);}
-      if(!a.path||w.tick-(a.pathTick??0)>60){a.path=atlas.path([a.x,a.y-.845,a.z],[goal[0],goal[1]-.845,goal[2]]).points;a.pathTick=w.tick;}
+      if(!a.path||w.tick-(a.pathTick??0)>60){
+        const halfHeight=a.boss?1.2675:.845,result=w.navigation?.tile(a.home).path([a.x,a.y-halfHeight,a.z],[goal[0],goal[1]-halfHeight,goal[2]]);
+        a.path=result?.reachable?result.points:[];a.pathTick=w.tick;
+      }
       while(a.path?.length&&Math.hypot(a.path[0][0]-a.x,a.path[0][2]-a.z)<.8)a.path.shift();
       next=a.path?.[0];
       if(!next){a.intent={x:0,z:0,yaw:a.yaw,buttons:0};return false;}
