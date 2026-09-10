@@ -30,7 +30,7 @@ The server supports one active socket per character. Browser tabs in the same pr
 
 ## Combat and progression
 
-Supported characters cancel gravity and follow the contact plane through their Meep rigid-body velocity. Ground adhesion accounts for capsule curvature on slopes, settling to contact without pushing downhill. Character colliders have zero friction: motor braking holds a resting character, while surface friction would otherwise oppose the commanded walking speed. Knockback and airborne motion retain dynamic physics.
+Supported characters cancel gravity and follow the contact plane through their Meep rigid-body velocity. Ground adhesion accounts for capsule curvature on slopes, settling to contact without pushing downhill. Character colliders have zero friction: motor braking holds a resting character, while surface friction would otherwise oppose the commanded walking speed. Knockback and airborne motion retain dynamic physics. Sprint consumes 18 stamina per second without simultaneous regeneration. Exhaustion persists in replay and character saves until Shift is released with 25 stamina (or a quarter of maximum) recovered; resting and respawning reset it. Journal attribute eligibility refreshes from every presented snapshot, including while the shared world keeps running behind the menu.
 
 Melee's shared `weaponPose` matches the Blender blade pivots. Meep sphere sweeps test the blade and sampled travel between ticks, with a per-swing victim set. A hound uses a short muzzle segment. Projectiles sweep their travelled distance; arrows have gravity. Nova uses a Meep sphere overlap followed by line-of-sight tests and shows its radius with particles and a ring. Knockback is a Meep impulse, with temporarily reduced movement control.
 

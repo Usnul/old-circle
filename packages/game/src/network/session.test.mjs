@@ -17,6 +17,9 @@ test('hearth equipment commands replay once and replicate owned armor and reinfo
     client.localInput={...client.localInput,sequence:2,upgradeWeapon:0,armor:armorIds.indexOf('keeper')+1};frames(20);
     expect(host.sim.actor(p.id).inventory.armor).toBe('keeper');expect(client.localCharacter().actor.inventory.armor).toBe('keeper');
     expect(client.localCharacter().actor.inventory.reinforcements.sword).toBe(1);expect(host.sim.actor(p.id).embers).toBe(1840);
+    client.localInput={...client.localInput,sequence:3,armor:0,levelStat:1};frames(20);
+    expect(host.sim.actor(p.id).level).toBe(2);expect(client.localCharacter().actor.stats.vigor).toBe(11);
+    expect(host.sim.actor(p.id).embers).toBe(1717);
   }finally{await client.stop();await host.stop();}
 });
 test('Meep initial sync, owned input prediction and authoritative replication work together',async()=>{

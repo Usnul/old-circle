@@ -186,8 +186,8 @@ test('reconnect imports the character and replaces every world-owned state',asyn
 test('character handoff preserves velocity, crouch and action phase without restarting locomotion',async()=>{
   const local=await setup(),server=await setup(),p=local.addPlayer('moving');server.addPlayer(p.id);
   local.setCrouch(p,true);local.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});run(local,45);local.attack(p);local.advanceAttack(p,.2);
-  const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
-  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId'])expect(returning[key],key).toBe(p[key]);
+  p.sprintExhausted=true;const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
+  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId','sprintExhausted'])expect(returning[key],key).toBe(p[key]);
   server.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});server.step();expect(returning.vx).toBeGreaterThan(1);expect(returning.attackAge).toBeGreaterThan(.2);
 });
 test('a fast arrow hits a thin wall before the actor behind it',async()=>{

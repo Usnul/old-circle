@@ -1,4 +1,5 @@
 @use 'tokens' as *;
+.stamina-state { position:absolute;top:$space*13;left:$space*5;color:$paper;font:12px $font-body;text-shadow:0 1px 3px $ink; }
 .equipment-list { display:grid;gap:$space*2;margin:$space*2 0 $space*4; }
 .equipment-row { display:flex;align-items:start;gap:$space*2;padding:$space*2;border:1px solid $line; }
 .equipment-row img { width:$space*7;height:$space*7;object-fit:cover; }
