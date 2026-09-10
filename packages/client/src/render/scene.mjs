@@ -105,6 +105,7 @@ export class WorldView {
       const low=new ParticipatingMedia();low.target_extinction=strength;low.fade_distance=7;
       const lt=new Transform64();lt.setTranslation(x,heightAt(x,z)+2,z);lt.setScale(w,9,d);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
     }
+    progress('Remembering the daylight…',.96);await this.sky.prepare();
     progress('The circle opens.',1);return this;
   }
   model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null){
@@ -171,9 +172,9 @@ export class WorldView {
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
       this.motes.t.setTranslation(player.x,player.y+2,player.z);this.motes.t.updateMatrix();t64_announce_change(this.ecd,this.motes.id);
     }
-    const daylight=Math.max(.08,Math.sin((snapshot.time-6)/24*Math.PI*2));
-    this.sun.l.intensity.set(.16+daylight*3.6);this.sun.l.color.set(.62+daylight*.38,.70+daylight*.16,.93-daylight*.23);this.sky.update(this.scene,daylight);
-    t64_look_rotation(this.sun.t,-.6,-Math.max(.08,daylight),-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
+    const sky=this.sky.update(this.scene,snapshot.time);
+    this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);
+    t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
   }
 }
