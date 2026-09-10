@@ -33,6 +33,7 @@ import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
 import {WorldWind} from './wind.mjs';
 import {WorldAmbient} from './ambient.mjs';
+import {WorldBanners} from './banners.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -106,6 +107,7 @@ export class WorldView {
       }));
     }
     const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
+    this.banners=new WorldBanners(this,layout.banners);
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
@@ -188,6 +190,7 @@ export class WorldView {
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
       this.ambient.update(player,snapshot.time,dt);
+      this.banners.update(dt);
     }
     const sky=this.sky.update(this.scene,snapshot.time);
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);

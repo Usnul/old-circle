@@ -60,6 +60,14 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     beam((0,0,25.4),(0,0,27.8),.085,'brass',.025)
     finish('bellTower',physical)
 
+    # Votive banner stand. Its cloth has an independent Blender skin and actions.
+    physical=[cube((0,0,.12),(.52,.52,.3),'stoneDark',.06),beam((0,0,.1),(0,0,3.8),.06,'iron',.04)]
+    beam((0,0,3.5),(1.8,0,3.5),.045,'brass',.028)
+    beam((0,0,2.85),(.65,0,3.5),.025,'iron',.025)
+    for x in [.18,1.62]:beam((x,0,3.5),(x,0,3.4),.014,'brass',.014)
+    ico((0,0,3.9),(.09,.07,.15),'brass',2)
+    finish('bannerStand',physical)
+
     # Metre-scale ridges share saddles and broad foothills. A height grid gives
     # every summit real area; collapsed radial rings created vertical fins.
     ridges=[

@@ -37,6 +37,12 @@ export class WorldWind extends FluidSystem {
     super.fixedUpdate(.05);this.stepMs+=(performance.now()-start-this.stepMs)*.05;
   }
   sample(out,x,y,z){
+    const c=this.fluid,res=c.field.getResolution(),p=[x,y,z];
+    // Distant cloth still follows the native prevailing effector. Only nearby
+    // consumers receive the detailed terrain flow within this bounded field.
+    if(p.some((v,i)=>v<c.origin[i]+c.cell_size||v>c.origin[i]+(res[i]-2)*c.cell_size)){
+      for(let i=0;i<3;i++)out[i]=this.source.wind[i];return out;
+    }
     this.fluid.sampleVelocityAtWorld(out,x,y,z);
     for(let i=0;i<3;i++)out[i]*=this.fluid.cell_size;
     return out;

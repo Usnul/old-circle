@@ -1,7 +1,7 @@
 import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS } from './regions.mjs';
 
 export function buildLayout() {
-  const props=[], solids=[], lights=[];
+  const props=[], solids=[], lights=[], banners=[];
   let seed=4171;
   const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
   const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z))=>{
@@ -14,6 +14,7 @@ export function buildLayout() {
   };
   const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
+  const banner=(x,z,yaw=.6)=>{const p=add('bannerStand',x,z,1,yaw);banners.push({position:p.position,yaw,phase:banners.length*.73});};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
   const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&REGIONS.every(r=>Math.hypot(x-r.center[0],z-r.center[1])>23)&&!(z<-284&&z>-356&&x>14&&x<82);
   const slope=(x,z)=>[(heightAt(x+1,z)-heightAt(x-1,z))/2,(heightAt(x,z+1)-heightAt(x,z-1))/2];
@@ -76,6 +77,8 @@ export function buildLayout() {
   // Opening overlook: an architectural frame, a hearth and a low mantle wall.
   add('arch',-6,25,1.35,.35);
   lamp(0,20); lamp(-8,24);
+  for(const h of HEARTHS)banner(h.position[0]+3,h.position[2]+1.8);
+  banner(-4,-29,-.5);banner(4,-29,.5);
   for(const hearth of HEARTHS.slice(1)){
     const [x,,z]=hearth.position;lamp(x,z);
     const dx=x-hearth.arrival[0],dz=z-hearth.arrival[1];
@@ -124,5 +127,5 @@ export function buildLayout() {
     const x=-330+i*42,z=-470-Math.sin(i*1.6)*25;
     add(['mountain','mountainRidge','mountainShoulder'][i%3],x,z,[.85+(i%3)*.08,.72+(i%5)*.09,.9],Math.sin(i*1.7)*.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
   }
-  return {props,solids,lights};
+  return {props,solids,lights,banners};
 }

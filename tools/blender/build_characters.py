@@ -270,7 +270,7 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
             for triangle in mesh.loop_triangles:
                 face=C.to_3x3()@(nm@triangle.normal)
                 for vi,li in zip(triangle.vertices,triangle.loops):
-                    vert=mesh.vertices[vi];p=C@(obj.matrix_world@vert.co);n=C.to_3x3()@(nm@(triangle.normal if obj.name=='Travelling cloak' else vert.normal)).normalized()
+                    vert=mesh.vertices[vi];p=C@(obj.matrix_world@vert.co);n=C.to_3x3()@(nm@(triangle.normal if mat=='cloak' else vert.normal)).normalized()
                     chunk['indices'].append(len(chunk['positions'])//3);chunk['positions'].extend(p);chunk['normals'].extend(n)
                     if mat=='cloak':uv=(vi%13/12,(vi//13)/16)
                     elif abs(face.y)>.65:uv=(p.x*2,p.z*2)
@@ -329,8 +329,10 @@ for weapon in ['sword','spear','bow','staff']:
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
 export('briarHound',HOUND,hound_mesh,hound_pose,[(kind,kind,duration,'sword') for kind,duration in [('idle',3.4),('walk',.9),('run',.55),('sword',.72),('hurt',.3),('jump',.6)]])
+from banner import build_banner
+build_banner(export,MATERIALS,lambda:objects)
 (OUT/'characters.json').write_text(json.dumps(GEOMETRY,separators=(',',':')))
 (ROOT/'packages/game/src/content/rigs.json').write_text(json.dumps(RIGS,separators=(',',':')))
 bpy.context.scene.render.fps=30
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets/blender/old-circle-characters.blend'))
-print('Exported two Blender skins and',sum(len(r['clips']) for r in RIGS.values()),'full-body animation clips')
+print('Exported',len(RIGS),'Blender skins and',sum(len(r['clips']) for r in RIGS.values()),'animation clips')

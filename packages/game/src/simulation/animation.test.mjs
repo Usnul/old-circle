@@ -1,9 +1,20 @@
 import {expect,test} from 'vitest';
 import {Actor} from './components.mjs';
-import {actorJointPoses,actorScale,animationPlan,rigs,actorSocket} from './animation.mjs';
+import {actorJointPoses,actorScale,animationPlan,rigs,actorSocket,createSkeleton} from './animation.mjs';
 import {weaponPose} from './weapon-pose.mjs';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
+import {pose_evaluate_world} from '@woosh/meep-engine/src/shade/renderer/animation/pose/pose_evaluate_world.js';
+
+test('Blender banner loops pin the top edge while the hem billows',()=>{
+  const skeleton=createSkeleton('votiveBanner'),root=skeleton.joints[1],hem=skeleton.joints.at(-1);
+  const point=(joint,name,time,offset)=>new Vector3(...offset).applyMatrix4(pose_evaluate_world(new Transform64(),joint,[{clip:skeleton.byName.get(name),time,weight:1}]));
+  for(const name of ['calm','breeze','reverse']){
+    const start=point(hem,name,0,[0,.5,0]),end=point(hem,name,3.6,[0,.5,0]);expect(start.distanceTo(end)).toBeLessThan(.0001);
+    for(const time of [0,.9,1.8,2.7,3.6])for(const x of [-.72,.72])expect(point(root,name,time,[x,0,0]).distanceTo(point(root,'calm',0,[x,0,0]))).toBeLessThan(.0001);
+  }
+  expect(point(hem,'breeze',0,[0,.5,0]).distanceTo(point(hem,'breeze',1.2,[0,.5,0]))).toBeGreaterThan(.2);
+});
 
 function actor(){return Object.assign(new Actor(),{y:.845,grounded:true});}
 test('Blender idle cycles close and animate head, torso and cloth',()=>{
