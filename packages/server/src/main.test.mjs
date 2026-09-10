@@ -9,10 +9,10 @@ import {GameSocketTransport as WebSocketTransport} from '@old-circle/game/networ
 import {WebSocket} from 'ws';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(predicate,timeout=8000){const end=Date.now()+timeout;while(!predicate()){if(Date.now()>end)throw new Error('Timed out waiting for network state');await delay(30);}}
-async function joinWorld(port,character){
+async function joinWorld(port,character,playerId='integration-player'){
   const socket=new WebSocket(`ws://127.0.0.1:${port}/multiplayer`);await new Promise((done,fail)=>{socket.onopen=done;socket.onerror=fail;});
   const welcome=new Promise((done,fail)=>{socket.addEventListener('message',e=>done(JSON.parse(e.data)),{once:true});socket.addEventListener('close',e=>fail(new Error(`Join closed: ${e.code} ${e.reason}`)),{once:true});});
-  socket.send(JSON.stringify({protocol:PROTOCOL_VERSION,playerId:'integration-player',origin:'pilgrim',character}));const data=await welcome;
+  socket.send(JSON.stringify({protocol:PROTOCOL_VERSION,playerId,origin:'pilgrim',character}));const data=await welcome;
   const session=await new SharedSession('client',data.peerId).start(),malformed=[],syncs=[],transport=new WebSocketTransport({socket});
   session.net.peer.onMalformedPacket.add((_,error)=>{if(malformed.length<5)malformed.push(error.message);});session.net.peer.onInitialSync.add((_,_token,frame)=>syncs.push(frame));
   session.localNetworkId=data.networkId;session.connect(0,transport);
@@ -21,6 +21,17 @@ async function joinWorld(port,character){
   try{await until(()=>session.localCharacter()?.actor);}catch(error){const detail={peer:data.peerId,networkId:data.networkId,frame:session.net.current_frame,actors:session.presentation()?.actors.map(a=>a.id),socket:socket.readyState,malformed,syncs,traffic:transport.getStats()};await stop();throw new Error(error.message+' '+JSON.stringify(detail));}
   return {session,stop};
 }
+
+test('the server enforces its player budget and permits a returning character to replace its socket',async()=>{
+  const dataDir=await mkdtemp(join(tmpdir(),'old-circle-capacity-'));let server,client,returning;
+  try{
+    server=await startServer({port:0,dataDir,maxPlayers:1});client=await joinWorld(server.port);
+    await expect(joinWorld(server.port,undefined,'second-player')).rejects.toThrow('World is full');
+    returning=await joinWorld(server.port);expect(returning.session.localCharacter().actor.id).toBe('integration-player');
+    expect([...server.host.sim.actors.keys()].filter(id=>server.host.sim.actor(id).kind==='player')).toEqual(['integration-player']);
+    expect(server.host.views.size).toBe(1);
+  }finally{await client?.stop();await returning?.stop();await server?.stop();await rm(dataDir,{recursive:true,force:true});}
+},30000);
 test('real socket disconnect, character-only return, and world persistence',async()=>{
   const dataDir=await mkdtemp(join(tmpdir(),'old-circle-server-'));let server,client,local;
   try{

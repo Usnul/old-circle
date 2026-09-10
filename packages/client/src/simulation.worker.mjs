@@ -28,6 +28,7 @@ function disconnect(reason='Connection closed'){
   seenEvents.clear();
   postMessage({type:'network-status',message:reason});
   const old=remote;remote=null;connecting=false;retryAt=performance.now()+5000;accumulator=0;lastEventTick=-1;
+  if(old)world.resumeLocalWorld(playerId);
   const ws=socket;socket=null;try{ws?.close();}catch{}
   old?.stop().catch(e=>console.warn('Session cleanup',e));
   if(pendingLevel){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}

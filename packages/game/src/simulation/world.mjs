@@ -47,6 +47,7 @@ export class GameWorld {
     this.actors=new Map();this.projectiles=new Set();this.events=[];this.tick=0;this.time=15.2;this.layout=buildLayout();
     this.ray=new Ray3();this.hit=new PhysicsSurfacePoint();this.overlaps=new Uint32Array(512);
     this.navigation=null;this.mind=new EnemyMind(this);this.predictionSleeping=new Set();this.contactSurfaces=new Map();
+    this.authoredActors=new Map();this.dormantActors=new Map();this.scopedAuthority=false;
   }
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
@@ -70,7 +71,7 @@ export class GameWorld {
       this.layout.solids.push({position:min.map((v,j)=>(v+max[j])/2),size:min.map((v,j)=>max[j]-v)});
     }
     if(navigation)this.navigation=await loadNavigation();
-    if(populate)this.populate();
+    if(populate){this.populate();this.authoredActors=new Map([...this.actors.keys()].map(id=>this.actor(id)).filter(a=>a.kind==='enemy').map(a=>[a.id,structuredClone(a)]));}
     this.physics.optimizeBroadphase?.();return this;
   }
   footSurface(position,scale=1){
@@ -449,18 +450,36 @@ export class GameWorld {
   replaceSnapshot(snapshot,{preservePlayer}={}){
     const saved=preservePlayer?this.exportCharacter(preservePlayer):null;
     const ids=new Set(snapshot.actors.map(a=>a.id));
+    const firstScope=snapshot.scope==='nearby'&&!this.scopedAuthority;
+    if(firstScope){this.scopedAuthority=true;this.dormantActors=new Map([...this.authoredActors].map(([id,actor])=>[id,{actor:structuredClone(actor),tick:snapshot.tick}]));}
+    if(snapshot.scope==='nearby'){
+      // Cache only states received in this authority epoch. An earlier offline
+      // branch must not reappear when its distant actors leave the new scope.
+      if(!firstScope)for(const id of this.actors.keys()){const actor=this.actor(id);if(actor.kind==='enemy'&&!ids.has(id))this.dormantActors.set(id,{actor:structuredClone(actor),tick:this.tick});}
+      for(const id of ids)this.dormantActors.delete(id);
+    }
     for(const [id,e] of this.actors)if(!ids.has(id)){this.predictionSleeping.delete(this.ecd.getComponent(e,RigidBody));this.ecd.removeEntity(e);this.actors.delete(id);}
     for(const value of snapshot.actors){
       let a=this.actor(value.id);if(!a)a=this.spawnActor(value.id,value,[value.x,value.y,value.z]);
       const resized=a.crouch!==value.crouch||a.boss!==value.boss;
       const moved=a.x!==value.x||a.y!==value.y||a.z!==value.z;
       Object.assign(a,structuredClone(value));if(moved)this.teleport(a,[value.x,value.y,value.z]);
+      if(snapshot.scope==='nearby'&&a.kind==='enemy'){a.path=null;a.pathTick=0;a.patrolGoal=null;delete a.patrolWaitUntil;delete a.patrolDeadline;a.memory=0;}
       this.syncActorCollider(a,resized);
       const velocity=this.ecd.getComponent(this.actors.get(a.id),RigidBody).linearVelocity;velocity[0]=value.vx;velocity[1]=value.vy;velocity[2]=value.vz;
     }
     for(const e of this.projectiles)this.ecd.removeEntity(e);this.projectiles.clear();
     for(const value of snapshot.projectiles??[]){const e=this.ecd.createEntity(),t=new Transform64(),p=Object.assign(new Projectile(),structuredClone(value));t.setTranslation(...value.position);this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);}
     this.events=structuredClone(snapshot.events??[]);this.tick=snapshot.tick;this.time=snapshot.time;if(saved&&this.actor(preservePlayer))this.importCharacter(preservePlayer,saved);
+  }
+  resumeLocalWorld(playerId){
+    if(!this.scopedAuthority)return;
+    const snapshot=this.snapshot();snapshot.actors=snapshot.actors.filter(a=>a.kind==='enemy'||a.id===playerId);
+    for(const {actor,tick} of this.dormantActors.values()){
+      const a=structuredClone(actor),elapsed=Math.max(0,(this.tick-tick)*DT);a.cooldown=Math.max(0,a.cooldown-elapsed);a.memory=0;a.targetId=null;a.path=null;
+      if(a.hp<=0)a.deadTime+=elapsed;snapshot.actors.push(a);
+    }
+    this.scopedAuthority=false;this.dormantActors.clear();this.replaceSnapshot(snapshot);
   }
   async stop(){await new Promise((resolve,reject)=>this.em.shutdown(resolve,reject));}
 }

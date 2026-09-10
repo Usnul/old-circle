@@ -6,6 +6,51 @@ import {heightAt} from '../world/regions.mjs';
 import {armorIds} from '../content/equipment.mjs';
 import {castBossMove} from '../simulation/boss-attacks.mjs';
 import {RELICS} from '../content/relics.mjs';
+import {INTEREST} from './interest.mjs';
+
+test('each peer receives only its nearby world at initial sync and after crossing into another region',async()=>{
+  const host=await new SharedSession('host').start(),clients=[],links=[];
+  try{
+    for(const [peer,id,x,z] of [[1,'west',-115,-225],[2,'east',140,-120]]){
+      const p=host.sim.addPlayer(id);host.sim.teleport(p,[x,heightAt(x,z)+1,z]);
+      const client=await new SharedSession('client',peer).start();clients.push(client);
+      client.localNetworkId=host.addPlayer(peer,id,'pilgrim',host.sim.exportCharacter(id));
+      const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);links.push([a,b]);host.connect(peer,a);client.connect(0,b);
+    }
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();links.forEach(([,b])=>b.deliver_all());clients.forEach(c=>c.tick());links.forEach(([a])=>a.deliver_all());}};frames(18);
+    for(const [i,c] of clients.entries()){
+      const state=c.presentation();expect(state.scope).toBe('nearby');expect(state.actors).toHaveLength(host.ecd.getComponent(host.views.get(i+1).entity,host.worldFrame().constructor).snapshot.actors.length);
+      expect(state.actors.some(a=>a.id===(i?'west':'east'))).toBe(false);expect(state.actors.length).toBeLessThan(host.sim.actors.size/2);
+      expect(c.net.peer.slot_table.entity_for(0)).toBeLessThan(0);expect(c.net.peer.slot_table.entity_for(clients[1-i].localNetworkId)).toBeLessThan(0);
+    }
+    const east=host.sim.actor('east'),saved=host.sim.exportCharacter('west');Object.assign(saved,{x:east.x+3,y:east.y,z:east.z});host.importReturningCharacter('west',saved);frames(30);
+    expect(clients[0].presentation().actors.some(a=>a.id==='east')).toBe(true);
+    expect(clients[0].presentation().actors.some(a=>a.id==='boss-mirror')).toBe(false);
+    expect(clients[1].presentation().actors.some(a=>a.id==='west')).toBe(true);
+    expect(clients.every(c=>c.presentation().actors.length<=INTEREST.actors)).toBe(true);
+    host.removePlayer(1,'west');frames(12);expect(host.views.has(1)).toBe(false);expect(clients[1].presentation().actors.some(a=>a.id==='west')).toBe(false);
+  }finally{for(const c of clients)await c.stop();await host.stop();}
+},30000);
+
+test('scoped state converges through delayed, dropped and reordered packets without repeating a purchase',async()=>{
+  const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
+  try{
+    const p=host.sim.addPlayer('imperfect-link');p.embers=500;client.localNetworkId=host.addPlayer(1,p.id,'pilgrim',host.sim.exportCharacter(p.id));
+    const a=new LoopbackTransport(),b=new LoopbackTransport();a.reliable=b.reliable=false;a.ordered=b.ordered=false;LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const clean=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};clean(18);
+    const z=host.sim.actor(p.id).z;client.localInput={...client.localInput,sequence:1,upgradeWeapon:1};
+    for(let i=0;i<180;i++){
+      host.tick();
+      if(i%3===0){if(i%15===0)b.drop_next(1);if(b.queued_count()>2)b.reorder(0,b.queued_count()-1);b.deliver_all();}
+      if(i===45)client.localInput.z=1;client.tick();
+      if(i%3===1){if(i%19===0)a.drop_next(1);if(a.queued_count()>2)a.reorder(0,a.queued_count()-1);a.deliver_all();}
+    }
+    client.localInput.z=0;clean(36);
+    const actor=host.sim.actor(p.id);expect(actor.z).toBeGreaterThan(z+7);expect(actor.embers).toBe(340);expect(actor.inventory.reinforcements.sword).toBe(1);
+    expect(client.localCharacter().actor.embers).toBe(340);expect(client.localCharacter().actor.z).toBeCloseTo(actor.z,1);
+    expect(client.presentation().tick).toBeGreaterThan(360);expect(client.failure).toBeUndefined();
+  }finally{await client.stop();await host.stop();}
+},30000);
 
 test('a delayed relic interaction replays once and replicates the permanent reward',async()=>{
   const sim=await new GameWorld().start({populate:false,navigation:false}),p=sim.addPlayer('relic-seeker'),r=RELICS[0];

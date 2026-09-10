@@ -6,19 +6,21 @@ import {WebSocketServer} from 'ws';
 import {GameSocketTransport as WebSocketTransport} from '@old-circle/game/network/socket-transport.mjs';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {SharedSession,PROTOCOL_VERSION,NET_DT} from '@old-circle/game/network/session.mjs';
+import {INTEREST} from '@old-circle/game/network/interest.mjs';
 
 const root=resolve(import.meta.dirname,'../../..');
 // Disk saves are independent of network framing. Protocol upgrades must not
 // invalidate the persistent world's existing Meep binary envelope.
 const WORLD_SAVE_VERSION=1;
 const contentTypes={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.wav':'audio/wav','.svg':'image/svg+xml'};
-export async function startServer({port=Number(process.env.PORT??8787),address=process.env.HOST??'127.0.0.1',dataDir=process.env.OLD_CIRCLE_DATA_DIR??resolve(root,'.local/server')}={}){
+export async function startServer({port=Number(process.env.PORT??8787),address=process.env.HOST??'127.0.0.1',dataDir=process.env.OLD_CIRCLE_DATA_DIR??resolve(root,'.local/server'),maxPlayers=Number(process.env.OLD_CIRCLE_MAX_PLAYERS??INTEREST.players)}={}){
+  if(!Number.isInteger(maxPlayers)||maxPlayers<1||maxPlayers>INTEREST.maximumPlayers)throw new Error(`Player capacity must be 1–${INTEREST.maximumPlayers}`);
   const storage=resolve(dataDir),savePath=resolve(storage,'world.meep'),clientRoot=resolve(root,'packages/client/dist');
   await mkdir(storage,{recursive:true});let saved;
   try{const bytes=await readFile(savePath),b=new BinaryBuffer();b.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(b.readUint32()!==WORLD_SAVE_VERSION)throw new Error('Unsupported world save');saved=JSON.parse(b.readUTF8String());saved.actors=saved.actors.filter(a=>a.kind!=='player');}catch(e){if(e.code!=='ENOENT')throw e;}
   const host=await new SharedSession('host').start(saved),sockets=new Map(),reservedPeers=new Set();
   const http=createServer(async(req,res)=>{
-    if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size}));return;}
+    if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size,capacity:maxPlayers}));return;}
     try{
       const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname),file=resolve(clientRoot,'.'+(pathname==='/'?'/index.html':pathname));
       if(!file.startsWith(clientRoot+sep)){res.writeHead(403);res.end();return;}
@@ -38,6 +40,7 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
       try{
         if(isBinary)throw new Error('Expected join');const hello=JSON.parse(bytes.toString());
         if(hello.protocol!==PROTOCOL_VERSION||typeof hello.playerId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(hello.playerId))throw new Error('Incompatible join');
+        if(reservedPeers.size>=maxPlayers&&![...sockets.values()].some(p=>p.playerId===hello.playerId))throw new Error('World is full');
         let peerId=1;while(reservedPeers.has(peerId)&&peerId<=253)peerId++;if(peerId>253)throw new Error('World is full');reservedPeers.add(peerId);
         for(const [old,prior] of sockets)if(prior.playerId===hello.playerId)old.close(1000,'Character reconnected');
         info={peerId,playerId:hello.playerId};
