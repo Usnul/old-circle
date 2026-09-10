@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+coverage/
+.local/
+*.blend1
+*.blend2
+__pycache__/
+*.log

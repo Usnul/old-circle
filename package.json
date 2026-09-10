@@ -1,0 +1,18 @@
+{
+  "name": "old-circle",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "pnpm --filter @old-circle/client dev",
+    "server": "pnpm --filter @old-circle/server start",
+    "build": "pnpm --filter @old-circle/client build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "world:check": "node tools/world-check.mjs",
+    "assets:blender": "powershell -NoProfile -File tools/build-assets.ps1",
+    "assets:compile": "node tools/compile-assets.mjs"
+  },
+  "devDependencies": { "vitest": "3.2.7" }
+}

@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+allowBuilds:
+  esbuild: true
+  '@parcel/watcher': true
+minimumReleaseAgeExclude:
+  - '@woosh/meep-engine@3.20.0'

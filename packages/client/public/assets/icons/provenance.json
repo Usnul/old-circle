@@ -1,0 +1,26 @@
+{
+  "sword": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single medieval longsword with weathered steel blade and oxidized brass crossguard, diagonally placed. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8110,
+    "steps": 16
+  },
+  "bow": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single curved ashwood longbow with taut pale string, diagonally placed. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8111,
+    "steps": 16
+  },
+  "seal": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single circular oxidized brass talisman containing one pale blue glowing crystal. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8112,
+    "steps": 16
+  },
+  "flask": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single small antique amber glass healing flask with brass stopper and leather wrap. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8113,
+    "steps": 16
+  }
+}

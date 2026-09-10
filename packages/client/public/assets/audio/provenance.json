@@ -1,0 +1,50 @@
+[
+  {
+    "file": "wind.wav",
+    "duration": 12,
+    "prompt": "Gentle wind rustling meadow grasses and oak leaves, distant woodland birds, quiet natural outdoor ambience, no music, no speech.",
+    "seed": 9010,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  },
+  {
+    "file": "bell.wav",
+    "duration": 5,
+    "prompt": "One deep ancient bronze church bell struck once, resonant lonely bell decaying in an abandoned stone abbey, no music.",
+    "seed": 9011,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  },
+  {
+    "file": "sword.wav",
+    "duration": 2,
+    "prompt": "One quick medieval steel sword swoosh followed by a sharp metallic impact, dry close combat foley, no music, no speech.",
+    "seed": 9012,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  },
+  {
+    "file": "frost.wav",
+    "duration": 3,
+    "prompt": "A sudden icy magical burst, rushing crystalline frost spreading outward, tinkling ice shards with a deep soft impact, fantasy spell sound effect.",
+    "seed": 9013,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  },
+  {
+    "file": "step.wav",
+    "duration": 2,
+    "prompt": "Two heavy leather boot footsteps on a gravel and grass path, close dry footstep foley, no music.",
+    "seed": 9014,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  },
+  {
+    "file": "fire.wav",
+    "duration": 10,
+    "prompt": "Small warm campfire crackling softly with little sparks, quiet looping fire ambience, no wind, no music.",
+    "seed": 9015,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8
+  }
+]

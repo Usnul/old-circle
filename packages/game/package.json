@@ -1,0 +1,8 @@
+{
+  "name": "@old-circle/game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./*": "./src/*" },
+  "dependencies": { "@woosh/meep-engine": "3.20.0" }
+}
