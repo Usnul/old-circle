@@ -51,3 +51,5 @@ Each player receives a bounded nearby view through Meep's packed binary adapters
 Use **http://127.0.0.1:5188/?inspect=1** for the development-only world workshop. It runs offline, does not write the player's save, can visit landmarks, switch lighting, display occupancy/flow and save rendered compositions with metadata under `.local/captures`.
 
 Character saves live in browser localStorage. The server saves `.local/server/world.meep` every 15 seconds and on graceful shutdown. `.local` contains generated, disposable or runtime data and is ignored by Git. Back up the server save directory separately when operating a persistent world.
+
+If browser storage is denied or full, the game keeps the latest character in the current tab and shows a save warning. Saving retries every eight seconds; closing the tab before storage recovers loses progress since the last successful save. Unreadable saves are preserved until a new journey is deliberately saved.

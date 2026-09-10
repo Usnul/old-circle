@@ -3,6 +3,7 @@ import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catal
 import { LANDMARKS,HEARTHS,regionAt,heightAt } from '@old-circle/game/world/regions.mjs';
 import {restStatus} from '@old-circle/game/simulation/resting.mjs';
 import {GameInput} from './input.mjs';
+import {JourneyStore} from './journey-store.mjs';
 import {compassMarkup,updateCompass} from './ui/compass.mjs';
 import {worldMapMarkup,installMapControls} from './ui/world-map.mjs';
 import {worldToMap} from '@old-circle/game/world/map.mjs';
@@ -13,23 +14,22 @@ import {RELICS,flaskCapacity,nearbyRelic} from '@old-circle/game/content/relics.
 import {dungeonRoomAt} from '@old-circle/game/world/dungeons.mjs';
 
 const app=document.querySelector('#app');
-const SAVE_KEY='old-circle-character-v1';
 const inspecting=import.meta.env.DEV&&new URLSearchParams(location.search).has('inspect');let inspector;
-const playerId=localStorage.getItem('old-circle-id')??crypto.randomUUID();localStorage.setItem('old-circle-id',playerId);
+const journey=new JourneyStore(),playerId=journey.playerId;
 let view=null,worker=null,snapshot=null,started=false,menu=false,origin='pilgrim',lastArea='',areaTimer,toastTimer,lastHud=0;
-let input=null,equipmentOpen=false,equipmentFocus=null,modalReturnFocus=null,completionPending=false,journalPending=false;
-function saved(){try{return JSON.parse(localStorage.getItem(SAVE_KEY));}catch{return null;}}
+let input=null,equipmentOpen=false,equipmentFocus=null,modalReturnFocus=null,completionPending=false,journalPending=false,saveRequested=false;
+function saved(){return journey.character;}
 app.innerHTML=`
 <section class="screen title-screen" id="title">
   <header class="masthead"><span class="wordmark">Old Circle</span><span class="top-note">A world that remembers</span></header>
-  <div class="title-content"><div class="sigil" aria-hidden="true"></div><div class="eyebrow">An open-world dark fantasy</div><h1>OLD<br>CIRCLE</h1><p class="subtitle">The light has faded.<br>The road still calls.</p><div class="rule"></div><button class="primary" id="begin"><span>${saved()?'Continue your journey':'Begin your journey'}</span><span>⟶</span></button><button class="menu-link" id="new-journey">${saved()?'Begin anew':'Choose your beginning'}</button><button class="menu-link" id="controls-menu">How to play</button></div>
+  <div class="title-content"><div class="sigil" aria-hidden="true"></div><div class="eyebrow">An open-world dark fantasy</div><h1>OLD<br>CIRCLE</h1><p class="subtitle">The light has faded.<br>The road still calls.</p><div class="rule"></div><button class="primary" id="begin"><span>${saved()?'Continue your journey':'Begin your journey'}</span><span>⟶</span></button><button class="menu-link" id="new-journey">${saved()?'Begin anew':'Choose your beginning'}</button><button class="menu-link" id="controls-menu">How to play</button><p class="save-warning" data-save-warning role="status" hidden></p></div>
   <footer class="title-footer"><div><strong>One world. Many wanderers.</strong>Walk alone, or find your way together.</div><div class="coordinates"><strong>The Waking Fields</strong>Where every circle begins</div><div>Built with <strong style="display:inline;letter-spacing:.1em">MEEP</strong><br>Early playable build · WebGPU</div></footer>
 </section>
 <section class="screen loading" id="loading" hidden><div><div class="sigil"></div><div class="eyebrow">Old Circle</div><h2 id="loading-text">The road awaits.</h2><div class="loading-bar"><div id="loading-progress"></div></div><p>Every ending leaves a path.</p></div></section>
 <section class="hud" id="hud" hidden>
  <div class="vitals"><div class="crest" aria-hidden="true">◌</div><div class="bars">${[['health','Health',''],['mana','Focus','mana'],['stamina','Stamina','stamina']].map(([id,label,style])=>`<div class="bar ${style}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="${id}"></span></div>`).join('')}</div></div>
  <div id="stamina-state" class="stamina-state" role="status"></div><div class="compass">${compassMarkup()}</div>
- <div class="world-status"><div class="mode" id="network-state">Solo journey</div><div id="daytime">Evening · The Waking Fields</div><div id="pvp-state">PvP off</div></div>
+ <div class="world-status"><div class="mode" id="network-state">Solo journey</div><div id="daytime">Evening · The Waking Fields</div><div id="pvp-state">PvP off</div><p class="save-warning" data-save-warning role="status" hidden></p></div>
  <div class="area-title" id="area-title"><div class="eyebrow" id="area-level"></div><h2 id="area-name"></h2></div>
  <div class="weapon-name" id="weapon-name"></div><div class="quickbar">${Object.entries(WEAPONS).map(([id,w],i)=>`<button class="slot" data-weapon="${id}" title="${w.name}"><kbd>${i+1}</kbd><img src="/assets/icons/${w.icon}.png" alt="${w.name}"></button>`).join('')}<button class="slot" id="flask" title="Drink healing flask"><kbd>R</kbd><img src="/assets/icons/flask.png" alt="Healing flask"><span class="count" id="flask-count">3</span></button></div>
  <div class="embers" id="embers">0</div><div class="hint" id="interact" hidden><kbd>E</kbd>Rest at the Pilgrim’s Hearth</div><div class="controls">WASD move · Shift sprint · C crouch · Space jump / mantle · Click / F attack · Q frost nova · R heal · Tab journal</div>
@@ -37,16 +37,19 @@ app.innerHTML=`
 </section><button id="capture-mouse" hidden>Resume mouse look <span>Click to capture · Escape releases</span></button><div id="modal-root"></div>`;
 
 const $=s=>document.querySelector(s),send=data=>worker?.postMessage(data);
-function modal(content){
+function updateSaveWarning(){document.querySelectorAll('[data-save-warning]').forEach(el=>{el.textContent=journey.warning;el.hidden=!journey.warning;});}
+updateSaveWarning();
+function modal(content,{dismissible=true}={}){
   if(!menu)modalReturnFocus=document.activeElement;
   menu=true;input?.suspend(true);send({type:'pause',paused:true});$('#capture-mouse').hidden=true;
   $('#modal-root dialog')?.close();
   $('#modal-root').innerHTML=`<dialog class="modal" aria-labelledby="modal-title"><section class="panel">${content}</section></dialog>`;
   const dialog=$('#modal-root dialog'),heading=dialog.querySelector('h2');heading.id='modal-title';heading.tabIndex=-1;
   dialog.querySelector('.panel-top')?.insertAdjacentHTML('afterend','<p id="menu-status" role="status"></p>');
+  if(journey.warning&&$('#menu-status'))$('#menu-status').textContent=journey.warning;
   // Let the browser handle dialog keys without reaching Meep's body-bound game map.
   dialog.addEventListener('keydown',e=>e.stopPropagation());
-  dialog.addEventListener('cancel',e=>{e.preventDefault();closeModal();});
+  dialog.addEventListener('cancel',e=>{e.preventDefault();if(dismissible)closeModal();});
   dialog.querySelector('.close')?.addEventListener('click',closeModal);
   dialog.showModal();heading.focus({preventScroll:true});
 }
@@ -85,7 +88,15 @@ async function start(character){
       if(data.type==='camera'){view.cameraLimit=data.distance;view.shelter=data.shelter;return;}
       if(data.type==='network-status'){$('#network-state').title=data.message;return;}
       if(data.type==='error'){showError(data.message);return;}
-      if(data.type==='save'){if(!inspecting)localStorage.setItem(SAVE_KEY,JSON.stringify(data.character));return;}
+      if(data.type==='save'){
+        if(inspecting){if(saveRequested)toast('Workshop journeys are temporary.');}
+        else{
+          const previousWarning=journey.warning,persisted=journey.save(data.character);updateSaveWarning();
+          if(saveRequested)toast(persisted?'Your journey is remembered.':journey.warning);
+          else if(journey.warning!==previousWarning)toast(journey.warning||'Your journey is remembered.');
+        }
+        saveRequested=false;return;
+      }
       if(data.snapshot){snapshot=data.snapshot;view.acceptSnapshot(snapshot);$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast(`Restored at ${e.name}`);if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
       if(data.type==='level-result'){journalPending=false;toast(data.ok?'Your strength takes root.':'Find a safe hearth and enough embers to grow.');if(menu)refreshJournal();return;}
       if(data.type==='equipment-result'){if(equipmentOpen)equipment(equipmentFocus);equipmentFocus=null;toast(data.ok?'Your equipment is ready.':'Return to a safe hearth and check that you own the item and can afford the change.');return;}
@@ -101,14 +112,14 @@ async function start(character){
     setInterval(()=>send({type:'save'}),8000);
   }catch(e){showError(e.stack??String(e));}
 }
-function showError(message){$('#loading').hidden=true;modal(`<div class="panel-top"><div><div class="eyebrow">The road is interrupted</div><h2>Unable to enter the world</h2></div></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Return to the beginning</span><span>⟶</span></button>`);$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
+function showError(message){$('#loading').hidden=true;modal(`<div class="panel-top"><div><div class="eyebrow">The road is interrupted</div><h2>Unable to enter the world</h2></div></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Return to the beginning</span><span>⟶</span></button>`,{dismissible:false});$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
 function journal(){
   equipmentOpen=false;
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
   const rest=restStatus(p,snapshot.actors),checkpoint=HEARTHS.find(h=>h.id===p.checkpointId)??HEARTHS[0],cost=levelCost(p.level);
   const benefits={vigor:'+5 health',endurance:'+3 stamina',might:'Stronger melee and arrows',insight:'+4 focus, stronger spells and arrows'};
   modal(`<div class="panel-top"><div><div class="eyebrow">The wanderer’s journal</div><h2>Your place in the circle</h2></div><button class="close" aria-label="Close">×</button></div><div class="eyebrow" id="journal-progress">Level ${p.level} · ${p.embers} embers · ${p.seals.length} / 6 seals</div><div class="stats-grid">${Object.entries(p.stats).map(([name,n])=>`<div class="stat-row"><span>${name[0].toUpperCase()+name.slice(1)}<small>${benefits[name]}</small></span><span><span data-stat-value="${name}">${n}</span> <button data-stat="${name}" aria-label="Improve ${name}" title="${rest.reason??(p.embers<cost?'Not enough embers':benefits[name])}" ${rest.reason||p.embers<cost?'disabled':''}>+</button></span></div>`).join('')}</div><p>${p.inventory.arrows} arrows · ${armorFor(p).name} · ${flaskCapacity(p)} flasks</p>${RELICS.filter(r=>(p.relics??[]).includes(r.id)).map(r=>`<p><strong>✦ ${r.name}</strong><br>${r.description}</p>`).join('')}<p id="growth-status" role="status" aria-live="polite"></p><p>Return point: <strong>${checkpoint.name}</strong><br>${p.hearths?.length??1} of ${HEARTHS.length} hearths kindled. Rest at a hearth to remember it.</p><div class="button-row"><button class="subtle" id="show-equipment">Equipment & forge</button><button class="subtle" id="show-map">World map</button><button class="subtle" id="toggle-pvp">PvP ${p.pvp?'on':'off'} — ${p.pvp?'disable':'enable'}</button><button class="subtle" id="save-game">Save journey</button></div><div class="seal-list">${Object.values(BOSSES).map(b=>`<div class="${p.seals.includes(b.seal)?'recovered':''}"><span>${p.seals.includes(b.seal)?'✦':'○'} ${b.seal}</span><small>${b.name}</small></div>`).join('')}</div>${hasAllSeals(p)?'<button class="subtle" id="read-ending">The circle is broken · Read the ending</button>':''}`);
-  document.querySelectorAll('[data-stat]').forEach(b=>b.onclick=()=>{journalPending=true;refreshJournal();send({type:'level',stat:b.dataset.stat});});$('#show-equipment').onclick=equipment;$('#read-ending')?.addEventListener('click',ending);$('#show-map').onclick=map;$('#toggle-pvp').onclick=()=>{send({type:'pvp',enabled:!p.pvp});p.pvp=!p.pvp;journal();};$('#save-game').onclick=()=>{send({type:'save'});closeModal();toast('Your journey is remembered.');};refreshJournal();
+  document.querySelectorAll('[data-stat]').forEach(b=>b.onclick=()=>{journalPending=true;refreshJournal();send({type:'level',stat:b.dataset.stat});});$('#show-equipment').onclick=equipment;$('#read-ending')?.addEventListener('click',ending);$('#show-map').onclick=map;$('#toggle-pvp').onclick=()=>{send({type:'pvp',enabled:!p.pvp});p.pvp=!p.pvp;journal();};$('#save-game').onclick=()=>{saveRequested=true;send({type:'save'});closeModal();};refreshJournal();
 }
 function refreshJournal(){
   if(!$('#journal-progress'))return;
