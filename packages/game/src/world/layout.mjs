@@ -1,4 +1,5 @@
 import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS } from './regions.mjs';
+import {CAVES,inCaveFootprint} from './interiors.mjs';
 
 export function buildLayout() {
   const props=[], solids=[], lights=[], banners=[];
@@ -99,14 +100,20 @@ export function buildLayout() {
     add('abbeyWall',side*18,-40-i*5,1,Math.PI/2,floor-.2);
     add('buttress',side*20,-40-i*5,1,side*Math.PI/2,floor-.2);
   }
-  // Walk-through rock hollow. Two exits, a clear floor, visible collision-sized roof.
-  for(let i=0;i<8;i++){
-    const z=-11-i*3.2, y=heightAt(38,z);
-    for(const s of [-1,1]){add('rock1',38+s*4.15,z,[1.35,3,1.7],i*.5,y);box(38+s*4.15,y+2.4,z,2.6,5,3.4);}
-    add('rock0',38,z,[3.8,1.2,1.5],i*.2,y+4.7);box(38,y+5.7,z,8.6,2,3.4);
-    if(i%2===0)lamp(36,z,y);
+  // Blender-authored hollow: a sealed rock shell and a central burial chamber.
+  for(const cave of CAVES){
+    add(cave.model,0,0,1,0,0);
+    for(const [x,z] of cave.lights)lamp(x,z);
+    for(const [x,z,yaw] of cave.tombs)add('cryptTomb',x,z,1,yaw);
+    for(const [x,z,width] of [cave.sections[0],cave.sections.at(-1)])for(const side of [-1,1])for(let i=0;i<3;i++){
+      const px=x+side*(width+1.8+i*.65),pz=z+i*.75;
+      add(`rock${i}`,px,pz,[1.2-i*.2,.8-i*.1,1.1-i*.15],side*.7+i*.3,heightAt(px,pz)-.5);
+    }
+    for(const [i,[x,z,,h]] of cave.sections.entries())if(i>0&&i<cave.sections.length-1){
+      add('caveFang',x-1,z,1+i%2*.4,0,heightAt(x,z)+h+.3);
+      add('caveFang',x+1.5,z-1,.7,0,heightAt(x,z)+h+.25);
+    }
   }
-  add('arch',38,-10,[1.18,1,1],0);add('arch',38,-37,[1.18,1,1],0);
   // Regional monuments share a visual grammar, but never the same silhouette.
   const [ox,oy,oz]=landmarkPosition('oak');add('tree',ox,oz-8,3.7,0,heightAt(ox,oz-8));lamp(ox+5,oz+4);
   for(let i=0;i<9;i++){add('arch',109+i*6,-114,1.5,0);if(i%2===0)lamp(109+i*6,-110);}
@@ -127,5 +134,9 @@ export function buildLayout() {
     const x=-330+i*42,z=-470-Math.sin(i*1.6)*25;
     add(['mountain','mountainRidge','mountainShoulder'][i%3],x,z,[.85+(i%3)*.08,.72+(i%5)*.09,.9],Math.sin(i*1.7)*.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
   }
+  // Remove cover inside authored rock after scatter, preserving all random
+  // sequences and placements elsewhere when a local interior changes.
+  const vegetation=new Set(['tree','pine','magicTree','winterTree','groundcover','groundcover1','dryGrass','moorGrass','fern','bracken','fallenTrunk']);
+  for(let i=props.length-1;i>=0;i--)if(vegetation.has(props[i].model)&&inCaveFootprint(props[i].position[0],props[i].position[2],3))props.splice(i,1);
   return {props,solids,lights,banners};
 }

@@ -15,10 +15,12 @@ SOURCE = ROOT / 'assets' / 'blender'
 SOURCE.mkdir(parents=True, exist_ok=True)
 random.seed(81731)
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from ground_materials import build_ground,torus
+from ground_materials import build_ground,torus,publish_image
 from equipment_materials import build_equipment_materials,apply_equipment_materials
+from caves import build_caves,build_cave_materials
 build_ground(ROOT,WORLD)
 build_equipment_materials(ROOT)
+build_cave_materials(ROOT)
 vfx=ROOT/'packages/client/public/assets/vfx'
 vfx.mkdir(parents=True,exist_ok=True)
 sprite=bpy.data.images.new('Soft emissive mote',width=64,height=64,alpha=True)
@@ -28,7 +30,7 @@ for yy in range(64):
   r=math.hypot((xx-31.5)/31.5,(yy-31.5)/31.5)
   a=max(0,1-r*r)**3
   pixels.extend((1,1,1,a))
-sprite.pixels=pixels;sprite.filepath_raw=str(vfx/'mote.png');sprite.file_format='PNG';sprite.save()
+sprite.pixels=pixels;publish_image(sprite,vfx/'mote.png')
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 PALETTE = {
@@ -40,11 +42,13 @@ PALETTE = {
  'ember': (1,.37,.06), 'magic': (.20,.57,.76), 'bone': (.63,.60,.48),
  'sand': (.48,.32,.19), 'snow': (.61,.70,.73), 'ice': (.34,.52,.59),
  'path': (.28,.29,.23), 'sky': (0,0,0), 'glassLeaf': (.12,.23,.27), 'landscape':(.3,.3,.3),
+ 'limestone':(1,1,1),
 }
 materials = {}
 for name, rgb in PALETTE.items():
  m = bpy.data.materials.new(name); m.diffuse_color = (*rgb,1); materials[name] = m
 apply_equipment_materials(materials,ROOT)
+apply_equipment_materials(materials,ROOT,['limestone'])
 assets = {}
 colliders = {}
 current = []
@@ -66,14 +70,14 @@ for kind in ['stone','ground','bark','sky']:
     groove=(max(0,math.sin(u*math.tau*16+n*7))**8)*.22 if kind=='bark' else 0
     k=max(.2,min(1,.82+n*(.09 if kind=='ground' else .12)+grain*.08-groove));rgb=(k,k*.98,k*.95)
    data.extend((*rgb,1))
- image.pixels=data;image.filepath_raw=str(textures/(kind+'.png'));image.file_format='PNG';image.save()
+ image.pixels=data;publish_image(image,textures/(kind+'.png'))
  if kind!='sky':
   heights=np.array(data,dtype=np.float32).reshape(h,w,4)[:-1,:-1,0]
   dx=(np.roll(heights,-1,axis=1)-np.roll(heights,1,axis=1))*2.5
   dy=(np.roll(heights,-1,axis=0)-np.roll(heights,1,axis=0))*2.5
   normal=np.stack((-dx,-dy,np.ones_like(dx)),axis=-1);normal/=np.linalg.norm(normal,axis=-1,keepdims=True)
   normal=np.pad(normal,((0,1),(0,1),(0,0)),mode='wrap');rgba=np.ones((h,w,4),dtype=np.float32);rgba[:,:,:3]=normal*.5+.5
-  bump=bpy.data.images.new(kind+'-normal',width=w,height=h,alpha=True);bump.colorspace_settings.name='Non-Color';bump.pixels.foreach_set(rgba.ravel());bump.filepath_raw=str(textures/(kind+'-normal.png'));bump.file_format='PNG';bump.save()
+  bump=bpy.data.images.new(kind+'-normal',width=w,height=h,alpha=True);bump.colorspace_settings.name='Non-Color';bump.pixels.foreach_set(rgba.ravel());publish_image(bump,textures/(kind+'-normal.png'))
 
 def keep(obj, mat):
  obj.data.materials.append(materials[mat]); current.append(obj); return obj
@@ -148,7 +152,7 @@ def finish(name,collision_parts=None):
       hx=(heights[iz][bx]-heights[iz][ax])/((bx-ax)*2);hz=(heights[bz][ix]-heights[az][ix])/((bz-az)*2)
       n=Vector((-hx,hz,1)).normalized()
      indices.append(len(positions)//3); positions.extend((v.x,v.z,-v.y)); normals.extend((n.x,n.z,-n.y))
-     if mat=='sky':uvs.extend(m.uv_layers.active.data[li].uv)
+     if mat=='sky' or o.get('export_uv'):uvs.extend(m.uv_layers.active.data[li].uv)
      elif abs(n.z)>.65:uvs.extend((v.x*.45,v.y*.45))
      elif abs(n.x)>abs(n.y):uvs.extend((v.y*.45,v.z*.45))
      else:uvs.extend((v.x*.45,v.z*.45))
@@ -180,6 +184,7 @@ for j in range(28):
 finish('halo')
 from architecture import build_architecture
 build_architecture(cube,cone,beam,ico,mesh,finish,current)
+build_caves(WORLD,mesh,finish,cube,cone)
 random.seed(195)
 
 # Trees with bent trunks, branching roots and clustered leaves; coherent repeated silhouettes.

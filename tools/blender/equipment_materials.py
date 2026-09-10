@@ -72,10 +72,10 @@ def build_equipment_materials(root):
     rgb*=1-dirt[:,:,None]
     write_set(out,'cloak',rgb,weave*.24+thread*.65,.96-thread*.15,0,False)
 
-def apply_equipment_materials(materials,root):
+def apply_equipment_materials(materials,root,kinds=KINDS):
     """Keep the saved Blender source reviewable with the same texture channels."""
     out=root/'packages/client/public/assets/textures'
-    for name in KINDS:
+    for name in kinds:
         mat=materials.get(name)
         if mat is None:continue
         mat.use_nodes=True;nodes=mat.node_tree.nodes;nodes.clear();links=mat.node_tree.links

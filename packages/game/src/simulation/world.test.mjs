@@ -175,6 +175,17 @@ test('crouch preserves foot height and cannot stand into a low ceiling',async()=
   w.body([p.x,standingY+.65,p.z],BoxShape3D.from_size(3,.2,3),BodyKind.Static);
   w.setCrouch(p,false);expect(p.crouch).toBe(true);
 });
+
+test('the Bellkeeper vault shelters its interior and allows walking through both mouths',async()=>{
+  const w=await setup(),p=w.addPlayer('vault-walker');
+  for(const z of [-14,-18,-22,-26,-30,-34]){
+    w.ray.set([39,heightAt(39,z)+1.7,z,0,1,0,12]);
+    expect(w.physics.raycast(w.ray,w.hit,e=>e!==w.actors.get(p.id)),`Roof at ${z}`).toBe(true);
+    expect(w.hit.t).toBeGreaterThan(2);
+  }
+  w.teleport(p,[38,heightAt(38,-8)+.86,-8]);w.input(p.id,{x:0,z:-1,yaw:0,buttons:0});run(w,650);
+  expect(p.z).toBeLessThan(-42);expect(Math.abs(p.x-38)).toBeLessThan(.1);
+});
 test('a clear ledge supports hanging, followed by a mantle on jump',async()=>{
   const w=await setup(),p=w.addPlayer('climber');w.teleport(p,[100,15,30]);
   w.body([100,15,28.85],BoxShape3D.from_size(3,2,1),BodyKind.Static);p.yaw=0;

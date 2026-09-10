@@ -1,14 +1,28 @@
 """Author seamless terrain layers and continuous splat weights in Blender."""
-import bpy, math, json
+import bpy, math, json, os, time
 import numpy as np
 from mathutils import Vector, noise
+
+def publish_image(image,path):
+    """Publish a complete PNG despite brief Windows preview/antivirus locks."""
+    temporary=path.with_name('.'+path.stem+'.'+str(os.getpid())+'.png')
+    try:
+        image.filepath_raw=str(temporary);image.file_format='PNG';image.save()
+        if path.exists() and path.read_bytes()==temporary.read_bytes():return
+        for attempt in range(8):
+            try:os.replace(temporary,path);break
+            except PermissionError:
+                if attempt==7:raise
+                time.sleep(.05*(attempt+1))
+    finally:
+        temporary.unlink(missing_ok=True);image.filepath_raw=str(path)
 
 def save_image(directory,name,pixels,noncolor=False):
     h,w,_=pixels.shape
     image=bpy.data.images.new(name,width=w,height=h,alpha=True)
     if noncolor:image.colorspace_settings.name='Non-Color'
     image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1],dtype=np.float32).ravel())
-    image.filepath_raw=str(directory/(name+'.png'));image.file_format='PNG';image.save()
+    publish_image(image,directory/(name+'.png'))
     bpy.data.images.remove(image)
 
 def torus(u,v,scale):

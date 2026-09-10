@@ -21,6 +21,7 @@ import {EnemyMind,enemySeed} from './enemy-mind.mjs';
 import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
+import {CAVES} from '../world/interiors.mjs';
 import {loadNavigation} from '../world/navigation-data.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 
@@ -78,7 +79,8 @@ export class GameWorld {
       const weapon=region.id==='magic'?'staff':region.id==='desert'?'bow':region.id==='wood'?'sword':'spear';
       this.spawnActor(`boss-${region.boss}`,{kind:'enemy',archetype:region.boss,name:boss.name,boss:true,level:boss.level,hp:boss.health,healthMax:boss.health,weapon},[p[0],heightAt(p[0],p[2])+1.7,p[2]]);
     }
-    this.spawnActor('cave-keeper',{kind:'enemy',archetype:'mage',name:'The Lost Bellkeeper',weapon:'staff',hp:100,healthMax:100},[38,heightAt(38,-26)+1,-26]);
+    const [kx,kz]=CAVES[0].keeper;
+    this.spawnActor('cave-keeper',{kind:'enemy',archetype:'mage',name:'The Lost Bellkeeper',weapon:'staff',hp:100,healthMax:100},[kx,heightAt(kx,kz)+1,kz]);
   }
   spawnActor(id,values={},position){
     const a=Object.assign(new Actor(),values,{id});
