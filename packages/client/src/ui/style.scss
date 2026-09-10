@@ -1,5 +1,17 @@
 @use 'tokens' as *;
 
+#capture-mouse { position:fixed; z-index:5; left:50%; bottom:90px; transform:translateX(-50%); pointer-events:auto; padding:14px 24px; background:#17221ded; border:1px solid $gold; font:16px $font-display; }
+#capture-mouse span { display:block; margin-top:5px; color:$muted; font:10px $font-body; letter-spacing:.08em; }
+.meep-world.free-look,.meep-world.free-look canvas {cursor:none;}
+.compass-window {height:44px;overflow:hidden;position:relative;mask-image:linear-gradient(90deg,transparent,#000 15%,#000 85%,transparent);border-bottom:1px solid $line;}
+#compass-track {position:absolute;inset:0;will-change:transform;}
+.compass-tick {position:absolute;bottom:0;height:5px;width:1px;background:#eee3;font-size:9px;}
+.compass-tick.major {height:29px;background:linear-gradient(transparent 77%,#eee8 77%);color:$paper;}
+.compass-tick.major::first-letter {margin-left:-4px;}
+.compass-needle {position:absolute;left:50%;top:39px;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:5px solid $gold;transform:translateX(-50%);}
+#compass-goal {position:absolute;left:50%;top:0;font-size:15px;color:$gold;will-change:transform;}
+#objective {display:block;margin-top:10px;font-size:9px;letter-spacing:.16em;}
+
 .slot:disabled { opacity: .28; cursor: default; }
 .inspector { position:fixed; z-index:20; right:20px; top:105px; width:205px; padding:14px; background:#101714ed; border:1px solid #bda57466; display:grid; gap:8px; color:#e5dfcd; font:12px 'Segoe UI',sans-serif; }
 .inspector button,.inspector select { padding:7px; background:#26302a; color:#e5dfcd; border:1px solid #bda57466; font:inherit; cursor:pointer; }
