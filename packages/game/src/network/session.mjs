@@ -49,7 +49,18 @@ class WorldPatchAction extends SimAction {
   static action_type_name='OldCircleWorldPatch';
   constructor(patch=null,networkId=0){super();this.patch=patch;this.networkId=networkId;}
   affected_components(callback,executor){const e=executor.slot_table.entity_for(this.networkId);if(e>=0)callback(e,WorldFrame);}
-  apply(world,executor){const e=executor.slot_table.entity_for(this.networkId);if(e>=0)applyWorldPatch(world.getComponent(e,WorldFrame).snapshot,this.patch);}
+  apply(world,executor){
+    const e=executor.slot_table.entity_for(this.networkId);if(e<0)return;
+    if(world.oldCircle.failure)return;
+    try{applyWorldPatch(world.getComponent(e,WorldFrame).snapshot,this.patch);}
+    catch(error){
+      // Meep signals report handler exceptions but keep dispatching. Stop this
+      // client before it can present a partially applied world as authoritative.
+      const session=world.oldCircle;
+      if(session.role==='client')session.failure=new Error(`Peer ${session.peerId}, world ${this.networkId}: ${error.message}`,{cause:error});
+      throw session.failure??error;
+    }
+  }
   serialize(buffer){buffer.writeUintVar(this.networkId);patchAdapter.serialize(buffer,this.patch);}
   deserialize(buffer){this.networkId=buffer.readUintVar();this.patch={};patchAdapter.deserialize(buffer,this.patch);}
   reset(){this.patch=null;this.networkId=0;}
@@ -85,7 +96,12 @@ export class SharedSession {
       const b=new BinaryBuffer();b.writeUint8(1);b.writeUint32(frame);this.net.peer.send_reliable_command(peer,b.raw_bytes,b.position);
     });
     if(this.role==='host'){
-      this.net.peer.replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.syncedPeers.has(peer)&&this.views.get(peer)?.networkId===id};
+      const replicator=this.net.peer.replicator,pack=replicator.pack_for_peer.bind(replicator);
+      // Entity scope does not gate global actions or records whose entity was
+      // retired. Their packet ACK would credit withheld world deltas as well.
+      // Write no action stream until the initial snapshot is acknowledged.
+      replicator.pack_for_peer=(peer,from,to,buffer,budget)=>this.syncedPeers.has(peer)?pack(peer,from,to,buffer,budget):from-1;
+      replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.views.get(peer)?.networkId===id};
       scopeInitialSnapshots(this.net,peer=>{const view=this.views.get(peer),character=view&&this.characters.get(view.playerId);return view&&character!==undefined?[view.entity,character]:[];});
       this.net.peer.onReliableCommand.add((peer,buffer,offset,length)=>{
         if(length!==5)return;buffer.position=offset;if(buffer.readUint8()!==1)return;const frame=buffer.readUint32();
@@ -168,7 +184,7 @@ export class SharedSession {
     c.actor=structuredClone(this.sim.actor(c.actor.id));c.appliedSequence=c.sequence;
   }
   tick(){if(this.failure)throw this.failure;this.net.normalize_if_dirty();this.net.tick(NET_DT);while(this.retired.length&&this.net.current_frame-this.retired[0].frame>66)this.ecd.removeEntity(this.retired.shift().e);}
-  presentation(){const f=this.worldFrame(),local=this.localCharacter();if(!f||this.role==='client'&&!local?.actor)return null;const snapshot=structuredClone(f.snapshot);if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
+  presentation(){if(this.failure)throw this.failure;const f=this.worldFrame(),local=this.localCharacter();if(!f||this.role==='client'&&!local?.actor)return null;const snapshot=structuredClone(f.snapshot);if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
   connect(peer,transport){
     this.syncedPeers.delete(peer);
     this.net.connect(peer,transport);

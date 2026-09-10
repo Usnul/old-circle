@@ -18,7 +18,7 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
   const storage=resolve(dataDir),savePath=resolve(storage,'world.meep'),clientRoot=resolve(root,'packages/client/dist');
   await mkdir(storage,{recursive:true});let saved;
   try{const bytes=await readFile(savePath),b=new BinaryBuffer();b.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(b.readUint32()!==WORLD_SAVE_VERSION)throw new Error('Unsupported world save');saved=JSON.parse(b.readUTF8String());saved.actors=saved.actors.filter(a=>a.kind!=='player');}catch(e){if(e.code!=='ENOENT')throw e;}
-  const host=await new SharedSession('host').start(saved),sockets=new Map(),reservedPeers=new Set(),serve=staticAssets(clientRoot);
+  const host=await new SharedSession('host').start(saved),sockets=new Map(),joins=new Map(),reservedPeers=new Set(),serve=staticAssets(clientRoot);
   const http=createServer(async(req,res)=>{
     if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size,capacity:maxPlayers}));return;}
     await serve(req,res);
@@ -29,22 +29,26 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
     const timeout=setTimeout(()=>socket.close(1008,'Join timed out'),5000);
     socket.on('close',()=>{
       if(closed)return;closed=true;clearTimeout(timeout);clearTimeout(readyTimeout);sockets.delete(socket);
-      if(info){host.removePlayer(info.peerId,info.playerId);queueMicrotask(()=>{host.net.drop_peer(info.peerId,'Socket closed');reservedPeers.delete(info.peerId);});}
+      if(info){if(joins.get(info.playerId)?.socket===socket)joins.delete(info.playerId);host.removePlayer(info.peerId,info.playerId);queueMicrotask(()=>{host.net.drop_peer(info.peerId,'Socket closed');reservedPeers.delete(info.peerId);});}
     });
     socket.once('message',(bytes,isBinary)=>{
       clearTimeout(timeout);
       try{
         if(isBinary)throw new Error('Expected join');const hello=JSON.parse(bytes.toString());
         if(hello.protocol!==PROTOCOL_VERSION||typeof hello.playerId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(hello.playerId))throw new Error('Incompatible join');
-        if(reservedPeers.size>=maxPlayers&&![...sockets.values()].some(p=>p.playerId===hello.playerId))throw new Error('World is full');
+        const prior=joins.get(hello.playerId);
+        if(joins.size>=maxPlayers&&!prior)throw new Error('World is full');
         let peerId=1;while(reservedPeers.has(peerId)&&peerId<=253)peerId++;if(peerId>253)throw new Error('World is full');reservedPeers.add(peerId);
-        for(const [old,prior] of sockets)if(prior.playerId===hello.playerId)old.close(1000,'Character reconnected');
         info={peerId,playerId:hello.playerId};
+        // Loading clients already own a reservation. Replace them as well as
+        // ready peers, and prevent their delayed ready packet importing a save.
+        joins.set(hello.playerId,{socket,info});prior?.socket.close(1000,'Character reconnected');
         const networkId=host.addPlayer(peerId,hello.playerId,hello.origin,hello.character);
         socket.send(JSON.stringify({type:'welcome',protocol:PROTOCOL_VERSION,peerId,networkId}));
         readyTimeout=setTimeout(()=>socket.close(1008,'Client initialization timed out'),15000);
         socket.once('message',(data,isBinary)=>{
           clearTimeout(readyTimeout);
+          if(closed||joins.get(info.playerId)?.socket!==socket)return;
           try{
             if(isBinary)throw new Error('Expected ready');const ready=JSON.parse(data.toString());if(ready.type!=='ready')throw new Error('Expected ready');
             if(ready.character)host.importReturningCharacter(hello.playerId,ready.character);

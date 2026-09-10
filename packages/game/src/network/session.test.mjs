@@ -1,4 +1,4 @@
-import {expect,test} from 'vitest';
+import {expect,test,vi} from 'vitest';
 import {LoopbackTransport} from '@woosh/meep-engine/src/engine/network/transport/LoopbackTransport.js';
 import {SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
@@ -8,6 +8,21 @@ import {charmIds} from '../content/charms.mjs';
 import {castBossMove} from '../simulation/boss-attacks.mjs';
 import {RELICS} from '../content/relics.mjs';
 import {INTEREST} from './interest.mjs';
+
+test('an invalid replicated world baseline stops prediction so the Worker can return to local authority',async()=>{
+  const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
+  const report=vi.spyOn(console,'error').mockImplementation(()=>{});
+  try{
+    client.localNetworkId=host.addPlayer(1,'missing-baseline');
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    for(let i=0;i<18;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}
+    client.net.normalize_if_dirty();client.worldFrame().snapshot.tick-=2;
+    host.tick();b.deliver_all();
+    expect(client.failure?.message).toContain('World history gap');expect(report).toHaveBeenCalled();
+    expect(()=>client.tick()).toThrow('World history gap');
+    expect(()=>client.presentation()).toThrow('World history gap');
+  }finally{report.mockRestore();await client.stop();await host.stop();}
+});
 
 test('each peer receives only its nearby world at initial sync and after crossing into another region',async()=>{
   const host=await new SharedSession('host').start(),clients=[],links=[];
