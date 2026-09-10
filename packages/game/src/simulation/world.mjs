@@ -7,7 +7,6 @@ import { RigidBody } from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.j
 import { BodyKind } from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import { Collider } from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import { CapsuleShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
-import { HeightMapShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
 import { SphereShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/SphereShape3D.js';
 import { Ray3 } from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
@@ -15,10 +14,9 @@ import { PhysicsSurfacePoint } from '@woosh/meep-engine/src/engine/physics/queri
 import { Actor, Projectile } from './components.mjs';
 import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
-import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
-import collisionAssets from '../content/colliders.json' with {type:'json'};
+import {staticGeometry} from '../world/static-geometry.mjs';
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,WORLD_BOUNDS,HEARTHS } from '../world/regions.mjs';
+import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,WORLD_BOUNDS,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
@@ -51,24 +49,12 @@ export class GameWorld {
   }
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
-    const {sampler}=terrainSurface();
-    const {minX,minZ,width,depth}=WORLD_BOUNDS;
-    this.terrainEntity=this.body([minX+width/2,-15,minZ+depth/2],HeightMapShape3D.from(sampler,width,sampler.data.reduce((h,v)=>Math.max(h,v),0)+1,depth),BodyKind.Static);
     this.layout.solids=[];
-    for(const prop of this.layout.props)for(const part of collisionAssets[prop.model]??[]){
-      const vertices=new Float32Array(part.vertices.length),min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
-      for(let i=0;i<vertices.length;i+=3){
-        const x=part.vertices[i]*prop.scale[0],y=part.vertices[i+1]*prop.scale[1],z=part.vertices[i+2]*prop.scale[2];
-        vertices[i]=Math.cos(prop.yaw)*x+Math.sin(prop.yaw)*z;vertices[i+1]=y;vertices[i+2]=-Math.sin(prop.yaw)*x+Math.cos(prop.yaw)*z;
-        for(let j=0;j<3;j++){min[j]=Math.min(min[j],vertices[i+j]+prop.position[j]);max[j]=Math.max(max[j],vertices[i+j]+prop.position[j]);}
-      }
-      // Keep each convex body's local vertices near its own centre, including
-      // masonry exported as part of a large world-space Blender collection.
-      const center=min.map((v,j)=>(v+max[j])/2);
-      for(let i=0;i<vertices.length;i++)vertices[i]-=center[i%3]-prop.position[i%3];
-      const entity=this.body(center,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
-      this.contactSurfaces.set(entity,/trunk|tree|wood|plank/i.test(prop.model)?'wood':prop.model.startsWith('frostRock')?'snow':'stone');
-      this.layout.solids.push({position:min.map((v,j)=>(v+max[j])/2),size:min.map((v,j)=>max[j]-v)});
+    for(const body of staticGeometry(this.layout)){
+      const entity=this.body(body.position,body.shape,BodyKind.Static);
+      if(body.model==='terrain'){this.terrainEntity=entity;continue;}
+      this.contactSurfaces.set(entity,/trunk|tree|wood|plank/i.test(body.model)?'wood':body.model.startsWith('frostRock')?'snow':'stone');
+      this.layout.solids.push({position:body.position,size:body.size});
     }
     if(navigation)this.navigation=await loadNavigation();
     if(populate){this.populate();this.authoredActors=new Map([...this.actors.keys()].map(id=>this.actor(id)).filter(a=>a.kind==='enemy').map(a=>[a.id,structuredClone(a)]));}

@@ -119,7 +119,7 @@ export class WorldView {
     await this.geometryCache.warm(p=>progress('Remembering the distant paths…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundMeshes);
-    this.audio=new WorldAudio(this.engine);await this.audio.start();
+    this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
     this.combatTrails=new CombatTrails(this);
