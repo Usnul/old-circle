@@ -1,6 +1,6 @@
 import './ui/style.scss';
 import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catalog.mjs';
-import { REGIONS,LANDMARKS,ROUTES,regionAt } from '@old-circle/game/world/regions.mjs';
+import { REGIONS,LANDMARKS,ROAD_PATHS,regionAt } from '@old-circle/game/world/regions.mjs';
 import {GameInput} from './input.mjs';
 import {compassMarkup,updateCompass} from './ui/compass.mjs';
 
@@ -73,7 +73,7 @@ function journal(){
 function map(){
   const x=v=>v+250,y=v=>(v+450)*.72;
   const p=snapshot.actors.find(a=>a.id===playerId);
-  modal(`<div class="panel-top"><div><div class="eyebrow">The known lands</div><h2>All roads turn inward</h2></div><button class="close" aria-label="Close">×</button></div><svg class="map" viewBox="0 0 500 420" role="img" aria-label="Map of six connected regions">${ROUTES.map(([a,b])=>{const s=LANDMARKS.find(l=>l.id===a).position,t=LANDMARKS.find(l=>l.id===b).position;return `<line x1="${x(s[0])}" y1="${y(s[2])}" x2="${x(t[0])}" y2="${y(t[2])}" stroke="#bca57255" stroke-width="1" stroke-dasharray="3 5"/>`;}).join('')}${REGIONS.map(r=>`<circle cx="${x(r.center[0])}" cy="${y(r.center[1])}" r="37" fill="${r.color}" opacity=".13"/><text x="${x(r.center[0])}" y="${y(r.center[1])}" text-anchor="middle">${r.name}</text><text class="map-level" x="${x(r.center[0])}" y="${y(r.center[1])+17}" text-anchor="middle">LEVEL ${r.level.join('–')}</text>`).join('')}<circle cx="${x(p.x)}" cy="${y(p.z)}" r="4" fill="#e6c984"/><text class="map-level" x="${x(p.x)+9}" y="${y(p.z)-6}">YOU</text><text x="470" y="25" text-anchor="middle">N ↑</text></svg><p>Meadow → forest or cinder road → glasswood and pale reach → the last crown. The Bellkeeper’s Hollow reconnects with the abbey road.</p>`);
+  modal(`<div class="panel-top"><div><div class="eyebrow">The known lands</div><h2>All roads turn inward</h2></div><button class="close" aria-label="Close">×</button></div><svg class="map" viewBox="0 0 500 420" role="img" aria-label="Map of six connected regions">${ROAD_PATHS.map(road=>`<polyline points="${road.points.map(p=>`${x(p[0])},${y(p[1])}`).join(' ')}" fill="none" stroke="#bca57277" stroke-width="1" stroke-dasharray="3 5"/>`).join('')}${REGIONS.map(r=>`<circle cx="${x(r.center[0])}" cy="${y(r.center[1])}" r="37" fill="${r.color}" opacity=".13"/><text x="${x(r.center[0])}" y="${y(r.center[1])}" text-anchor="middle">${r.name}</text><text class="map-level" x="${x(r.center[0])}" y="${y(r.center[1])+17}" text-anchor="middle">LEVEL ${r.level.join('–')}</text>`).join('')}<circle cx="${x(p.x)}" cy="${y(p.z)}" r="4" fill="#e6c984"/><text class="map-level" x="${x(p.x)+9}" y="${y(p.z)-6}">YOU</text><text x="470" y="25" text-anchor="middle">N ↑</text></svg><p>Meadow → forest or cinder road → glasswood and pale reach → the last crown. The Bellkeeper’s Hollow reconnects with the abbey road.</p>`);
 }
 for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');
 let previous=performance.now();

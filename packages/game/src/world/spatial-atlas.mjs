@@ -3,15 +3,20 @@ import { bt_mesh_from_indexed_geometry } from '@woosh/meep-engine/src/core/geom/
 import { bt_mesh_build_face_bvh } from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/query/bt_mesh_build_face_bvh.js';
 import { CapsuleShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
 import {Actor} from '../simulation/components.mjs';
-import { heightAt,LANDMARKS,ROUTES,landmarkPosition,pathDistance } from './regions.mjs';
+import { heightAt,LANDMARKS,ROAD_PATHS,landmarkPosition,pathDistance } from './regions.mjs';
 
 // Real SH, order 2 (three bands / nine coefficients), Y up. Coefficients encode
 // a directional distribution, not just an average which would cancel two-way traffic.
 export function sh9([x,y,z]){return [.2820947918,.4886025119*z,.4886025119*y,.4886025119*x,1.0925484306*x*z,1.0925484306*y*z,.3153915653*(3*y*y-1),1.0925484306*x*y,.5462742153*(x*x-z*z)];}
 export function travelSample(position){
   const coefficients=new Array(9).fill(0);let occupancy=0;
-  for(const [a,b] of ROUTES){
-    const start=landmarkPosition(a),end=landmarkPosition(b),d=end.map((v,i)=>v-start[i]),length=Math.hypot(...d);
+  for(const road of ROAD_PATHS){
+    let closest=null,best=Infinity;
+    for(let i=1;i<road.points.length;i++){
+      const p=road.points[i-1],q=road.points[i],dx=q[0]-p[0],dz=q[1]-p[1],t=Math.max(0,Math.min(1,((position[0]-p[0])*dx+(position[2]-p[1])*dz)/(dx*dx+dz*dz)));
+      const distance=Math.hypot(position[0]-p[0]-dx*t,position[2]-p[1]-dz*t);if(distance<best){best=distance;closest=[p,q];}
+    }
+    const [start,end]=closest.map(([x,z])=>[x,heightAt(x,z),z]),d=end.map((v,i)=>v-start[i]),length=Math.hypot(...d);
     const t=Math.max(0,Math.min(1,position.reduce((sum,v,i)=>sum+(v-start[i])*d[i],0)/(length*length)));
     const distance=Math.hypot(...position.map((v,i)=>v-start[i]-d[i]*t));
     const weight=Math.exp(-distance*distance/32);occupancy+=weight;
@@ -74,9 +79,9 @@ export class SpatialAtlas {
 }
 
 export const COMPOSITION_VIEWS=[
-  {id:'first-light',label:'First Light',from:'hearth',toward:'abbey',fromOffset:[0,0,4],targetOffset:[0,12,-9],yaw:0,pitch:-.05,time:15.2,requirement:'Abbey gate framed by near ruins; distant halo separates from treeline.'},
+  {id:'first-light',label:'First Light',from:'hearth',toward:'abbey',fromOffset:[0,0,4],targetOffset:[-7,18,-16],yaw:0,pitch:-.05,time:15.2,requirement:'Abbey bell tower rises from the meadow basin; the gate is framed by near ruins.'},
   {id:'bellkeeper-mouth',label:'Bellkeeper’s Mouth',from:'cave',toward:'cave',fromOffset:[0,0,18],targetOffset:[0,2.4,5],yaw:0,pitch:.1,time:16,requirement:'Warm cave entrance separates from cool vegetation; route through the arch is legible.'},
-  {id:'last-ascent',label:'Last Ascent',from:'pilgrims',toward:'halo',fromOffset:[-40,0,-25],targetOffset:[0,58,-12],yaw:.59,pitch:-.4,distance:8,time:9,requirement:'Final halo dominates the upper third; approach route remains visible.'},
+  {id:'last-ascent',label:'Last Ascent',from:'pilgrims',toward:'halo',fromOffset:[-29,0,-34],targetOffset:[0,heightAt(0,-385)-heightAt(0,-361)+40,-24],yaw:.65,pitch:-.32,distance:7,time:9,requirement:'Final halo dominates the upper third; approach route remains visible.'},
 ];
 export function compositionPoints(view){
   const base=landmarkPosition(view.from),offset=view.fromOffset??[0,0,0],x=base[0]+offset[0],z=base[2]+offset[2];

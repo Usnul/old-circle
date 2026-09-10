@@ -19,7 +19,7 @@ import { weaponPose } from './weapon-pose.mjs';
 import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
 import collisionAssets from '../content/colliders.json' with {type:'json'};
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN } from '../world/regions.mjs';
+import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION } from '../world/regions.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 
@@ -44,7 +44,7 @@ export class GameWorld {
     const samples=new Float32Array(241*321);
     for(let z=0;z<321;z++)for(let x=0;x<241;x++)samples[z*241+x]=heightAt(x*2-240,z*2-480)+15;
     const sampler=new Sampler2D(samples,1,241,321);
-    this.body([0,-15,-160],HeightMapShape3D.from(sampler,480,90,640),BodyKind.Static);
+    this.body([0,-15,-160],HeightMapShape3D.from(sampler,480,samples.reduce((h,v)=>Math.max(h,v),0)+1,640),BodyKind.Static);
     this.layout.solids=[];
     for(const prop of this.layout.props)for(const part of collisionAssets[prop.model]??[]){
       const vertices=new Float32Array(part.vertices.length),min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
@@ -91,6 +91,7 @@ export class GameWorld {
   addPlayer(id,origin='pilgrim',saved){
     const o=ORIGINS.find(x=>x.id===origin)??ORIGINS[0];
     const a=this.spawnActor(id,{kind:'player',name:o.name,origin:o.id,stats:{...o.stats},weapon:o.weapon});
+    a.checkpoint=[a.x,a.y,a.z];
     a.inventory={weapons:[...new Set(['sword',o.weapon])],arrows:30,armor:'road-worn mail'};
     a.healthMax=maxHealth(a.stats);a.hp=a.healthMax;a.staminaMax=maxStamina(a.stats);a.stamina=a.staminaMax;a.manaMax=maxMana(a.stats);a.mana=a.manaMax;
     if(saved)this.importCharacter(id,saved);
@@ -306,7 +307,7 @@ export class GameWorld {
       if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;this.teleport(a,a.home);}
     }
   }
-  exportCharacter(id){const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,inventory}=a;return {version:1,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],inventory:structuredClone(inventory)};}
+  exportCharacter(id){const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,inventory}=a;return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],inventory:structuredClone(inventory)};}
   importCharacter(id,s){
     const a=this.actor(id);if(!a||s.version!==1)throw new Error('Unsupported character save version');
     const fields=['vigor','endurance','might','insight'];
@@ -318,9 +319,20 @@ export class GameWorld {
     a.inventory=s.inventory?{weapons:[...new Set(s.inventory.weapons.filter(w=>WEAPONS[w]).concat(s.weapon))],arrows:clamp(Math.floor(Number(s.inventory.arrows)||0),0,9999),armor:String(s.inventory.armor??'road-worn mail')}:{weapons:[s.weapon,'sword'],arrows:30,armor:'road-worn mail'};
     a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
-    a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.y,s.z]);
+    a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
   }
-  snapshot(){return {version:1,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
+  snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
+  restoreWorld(snapshot){
+    this.replaceSnapshot(snapshot);
+    if(snapshot.contentVersion===WORLD_VERSION)return;
+    // Content updates may raise terrain beneath a saved position. Preserve
+    // progression while placing bodies and checkpoints back above that surface.
+    for(const id of this.actors.keys()){
+      const a=this.actor(id);this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
+      a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
+      a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);
+    }
+  }
   replaceSnapshot(snapshot,{preservePlayer}={}){
     const saved=preservePlayer?this.exportCharacter(preservePlayer):null;
     const ids=new Set(snapshot.actors.map(a=>a.id));

@@ -15,10 +15,10 @@ export function buildLayout() {
   const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
-  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14;
+  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&!(z<-284&&z>-356&&x>14&&x<82);
   // Groves share species and age structure. Meadow openings stay open; conifers
   // belong to the northern foothills instead of alternating with every oak.
-  for(let grove=0;grove<95;grove++){
+  for(let grove=0;grove<140;grove++){
     const cx=random()*420-210,cz=random()*545-415,region=regionAt(cx,cz).id;
     if(!clear(cx,cz,10)||region==='desert'||region==='crown'||(region==='meadow'&&random()<.55))continue;
     const species=region==='magic'?'magicTree':region==='tundra'?(cz>-290?'pine':'winterTree'):'tree';
@@ -53,14 +53,18 @@ export function buildLayout() {
   for(let i=0;i<4;i++) {add('block',8+i,15,[1,.9,1]);box(8+i,heightAt(8+i,15)+.45,15,1,.9,1);}
   // Circular abbey, with south and north gates open to late arrivals.
   const floor=heightAt(0,-48);
-  add('block',0,-48,[30,.65,30],0,floor-.55);box(0,floor-.225,-48,30,.65,30);
+  add('abbeyFloor',0,-48,1,0,floor-.16);
   for(let i=0;i<20;i++){
     const a=i*Math.PI*2/20,x=Math.sin(a)*16,z=-48+Math.cos(a)*16;
     if(i%5!==0)add('arch',x,z,1,a,floor);
     if(i%2===0)lamp(x*.85,-48+(z+48)*.85,floor);
   }
-  add('halo',0,-57,1.7,0,floor+12);
+  add('bellTower',-7,-64,1,0,floor-.3);
   add('arch',0,-32,1.55,0,floor);
+  for(const side of [-1,1])for(let i=0;i<4;i++){
+    add('abbeyWall',side*18,-40-i*5,1,Math.PI/2,floor-.2);
+    add('buttress',side*20,-40-i*5,1,side*Math.PI/2,floor-.2);
+  }
   // Walk-through rock hollow. Two exits, a clear floor, visible collision-sized roof.
   for(let i=0;i<8;i++){
     const z=-11-i*3.2, y=heightAt(38,z);
@@ -76,13 +80,18 @@ export function buildLayout() {
   for(let i=0;i<5;i++)add('column',sx,sz,[2-i*.3,2.5,2-i*.3],0,sy+i*10);
   add('halo',sx,sz,2,0,sy+30);
   for(let i=0;i<6;i++)add('column',75+i*8,-275,[2,3+i%2,2],0);
-  const [cx,,]=landmarkPosition('halo'),cz=-370,cy=heightAt(cx,cz);
+  const [cx,,]=landmarkPosition('halo'),cz=-385,cy=heightAt(cx,cz);
   // Open mountain courtyard: keep the naturally walkable slope through the gates.
   for(let i=-2;i<=2;i++){
-    add('column',cx+i*6,cz, [2,7-Math.abs(i),2],0,cy+.1);
-    add('arch',cx+i*6,cz+12,1.5,0,cy+.1);
+    add('bellTower',cx+i*8,cz,[1,1.6-Math.abs(i)*.3,1],0,heightAt(cx+i*8,cz)-1);
+    add('arch',cx+i*6,cz+12,1.5,0,heightAt(cx+i*6,cz+12)-.1);
   }
-  add('halo',0,-373,6,0,cy+58);
+  add('halo',0,-385,6,0,cy+40);
   for(let i=0;i<8;i++)lamp(-14+i*4,-351);
+  // Adjacent cliffs conceal the world edge and give the final crown a mountain skyline.
+  for(let i=0;i<17;i++){
+    const x=-330+i*42,z=-470-Math.sin(i*1.6)*25;
+    add('mountain',x,z,[31+(i%3)*6,46+(i%5)*13,38],i*2.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
+  }
   return {props,solids,lights};
 }

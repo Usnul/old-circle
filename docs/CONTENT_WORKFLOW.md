@@ -2,7 +2,9 @@
 
 ## One source of world truth
 
-`packages/game/src/world/regions.mjs` defines coordinates, elevations, region centers, progression, landmarks and roads. Coordinates are metres, Y up, north along −Z. `layout.mjs` places native model instances and lights. Use stable IDs: changing IDs changes how saved worlds refer to content.
+`packages/game/src/world/regions.mjs` defines coordinates, elevations, region centers, progression, landmarks and roads. Coordinates are metres, Y up, north along −Z. `layout.mjs` places native model instances and lights. Use stable IDs: changing IDs changes how saved worlds refer to content. Road control points become Meep Catmull–Rom samples shared by ground texturing, the map, placement clearance and occupancy/direction queries. Landform noise fades out over graded road beds; increasing relief must preserve route connectivity.
+
+Increment `WORLD_VERSION` when an elevation edit requires saved positions to be rebased. Character import and server world restoration preserve progression while lifting older saved positions and checkpoints above raised terrain. This migration assumes interiors remain above the heightfield; a future underground terrain revision needs its own placement policy.
 
 `tools/export-world-layout.mjs` samples that definition into ignored `.local/blender/world.json`. Blender reads those samples for terrain elevation and road materials. Never copy the height function or road coordinates into Python. Physics uses the shared height function and exported Blender convex hulls. Visual props and physical props use the same instance transforms.
 
@@ -23,7 +25,7 @@ Character export adds four joint indices/weights to native geometry and writes b
 
 The export changes Blender `(x,y,z)` into Meep `(x,z,-y)`, including normals. An asset's origin is its placement pivot. Weapons point along local +Y in Meep; the authored blade intervals must stay consistent with `simulation/weapon-pose.mjs`. Trees collide through their trunks; masonry exports one convex hull per constituent piece; foliage does not block actors. Do not export an entire arch as one convex hull, which closes its doorway.
 
-Textures and the particle sprite are also authored in Blender. `compile-assets.mjs` computes tangents and serializes geometry. `pnpm assets:compile` reruns just conversion from an existing intermediate export. Asset generation does not modify the installed engine or the separate Meep repository.
+Textures, normal maps and the particle sprite are also authored in Blender. `architecture.py` builds masonry at metre scale, including the cloister floor and bell tower; avoid stretching a unit cube to make large floors. `compile-assets.mjs` computes tangents and serializes geometry, publishing complete files atomically so a live preview cannot read a partial mesh. `pnpm assets:compile` reruns just conversion from an existing intermediate export. Asset generation does not modify the installed engine or the separate Meep repository.
 
 `ground_materials.py` authors periodic terrain detail and continuous biome/road weights. Its edge and weight-normalization checks run during every asset build. The client applies Meep's native terrain splat pass to the Blender terrain meshes, so transitions are independent of triangle boundaries. Keep texture scale in metres in the generated terrain manifest. Groves use a region's species, outcrops include buried parent rocks and smaller scree, and meadow patches mix grasses and flowers. Arches receive masonry foundations wherever their feet clear the terrain.
 

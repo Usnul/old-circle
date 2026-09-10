@@ -52,7 +52,7 @@ export class SharedSession {
   }
   async start(savedWorld){
     this.sim=await new GameWorld().start({populate:this.role==='host'});
-    if(savedWorld)this.sim.replaceSnapshot(savedWorld);
+    if(savedWorld)this.sim.restoreWorld(savedWorld);
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
     const registry=new BinarySerializationRegistry();for(const c of [WorldFrame,CharacterFrame])registry.registerAdapter(new JsonComponentAdapter(c),c.typeName);
     this.net=new NetworkSession({entity_manager:this.em,role:this.role,local_peer_id:this.peerId,binary_registry:registry,tick_rate_hz:30,simulation_delay_ticks:0,frame_capacity:64,scope_filter:this.role==='client'?{is_entity_in_scope:(_peer,id)=>id===this.localNetworkId}:null,reconnect:{enabled:false},connection_timeout_ms:3000});

@@ -6,7 +6,7 @@ Meep supplies ECS storage, physics, BVHs, navigation, rendering, particles, audi
 
 `GameWorld` is the shared 60 Hz simulation used by the server and browser Worker. The main thread renders and sends intent. A 30 Hz `SharedSession` advances two physics steps per network tick. Meep `NetworkSession`, `SimAction`, action history and authoritative reconciliation implement connected prediction and replay.
 
-The first implementation projects the simulation into `WorldFrame` and owned `CharacterFrame` components in a replication dataset. The adapters are versioned Meep binary adapters containing length-delimited JSON. `WorldFrame` includes all actors and projectiles. This makes authority replacement explicit, but repeated full-state serialization and rollback are expensive. Physics contact caches are reconstructed rather than serialized. Presentation smooths replicated poses; it does not yet use Meep's interpolation adapter.
+The first implementation projects the simulation into `WorldFrame` and owned `CharacterFrame` components in a replication dataset. The adapters are versioned Meep binary adapters containing length-delimited JSON. `WorldFrame` includes all actors and projectiles. This makes authority replacement explicit, but repeated full-state serialization and rollback are expensive. Physics contact caches are reconstructed rather than serialized. Meep's InterpolationLog, PoseInterpolationAdapter and transform codec drive characters, corpses and the camera from one presentation timeline. GPU skinning and CPU combat sockets evaluate the same Blender animation clips.
 
 ## Connection lifecycle
 

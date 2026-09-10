@@ -17,8 +17,8 @@ def torus(u,v,scale):
 
 def build_ground(root,world):
     out=root/'packages/client/public/assets/terrain';out.mkdir(parents=True,exist_ok=True)
-    palette=[('meadow',(.19,.27,.075)),('wood',(.105,.15,.055)),('desert',(.48,.30,.14)),
-             ('magic',(.09,.15,.16)),('tundra',(.65,.72,.73)),('crown',(.28,.29,.27)),('road',(.26,.22,.16))]
+    palette=[('meadow',(.25,.29,.12)),('wood',(.15,.18,.10)),('desert',(.46,.31,.19)),
+             ('magic',(.14,.20,.22)),('tundra',(.58,.65,.67)),('crown',(.28,.29,.27)),('road',(.31,.27,.20))]
     size=256;macro=np.zeros((size,size),dtype=np.float32);grain=macro.copy()
     for y in range(size):
         for x in range(size):
@@ -32,9 +32,15 @@ def build_ground(root,world):
         assert np.max(np.abs(rgba[0]-rgba[-1]))<1e-5 and np.max(np.abs(rgba[:,0]-rgba[:,-1]))<1e-5
         save_image(out,name,rgba)
     w,h=1024,1366;x=np.linspace(-240,240,w)[None,:];z=np.linspace(-480,160,h)[:,None]
-    distances=np.stack([(x-r['center'][0])**2+(z-r['center'][1])**2 for r in world['regions']])
-    weights=np.exp(-(distances-distances.min(axis=0))/1800)
+    wx=x+9*np.sin(z*.029)+4*np.sin(x*.072+z*.041);wz=z+10*np.sin(x*.028)+6*np.sin(z*.051)
+    distances=np.stack([(wx-r['center'][0])**2+(wz-r['center'][1])**2 for r in world['regions']])
+    weights=np.exp(-(distances-distances.min(axis=0))/2200)
     weights/=weights.sum(axis=0)
+    terrain=np.array(world['heights']);gz,gx=np.gradient(terrain,2)
+    slope=np.hypot(gx,gz);xs=np.linspace(0,240,w);zs=np.linspace(0,320,h)
+    detailed=np.array([np.interp(xs,np.arange(241),row) for row in slope])
+    detailed=np.stack([np.interp(zs,np.arange(321),detailed[:,i]) for i in range(w)],axis=1)
+    rock=np.clip((detailed-.45)*1.7,0,.85);weights*=1-rock;weights[5]+=rock
     road=np.full((h,w),1e6)
     for p,q in world['routes']:
         dx,dz=q[0]-p[0],q[2]-p[2];t=np.clip(((x-p[0])*dx+(z-p[2])*dz)/(dx*dx+dz*dz),0,1)

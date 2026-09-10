@@ -67,14 +67,16 @@ export class WorldView {
     this.materials.path=new StandardShadeMaterial();this.materials.path.diffuse_color.set(.28,.29,.23);
     this.materials.glassLeaf=new StandardShadeMaterial();this.materials.glassLeaf.diffuse_color.set(.12,.23,.27);
     this.materials.landscape=new StandardShadeMaterial();this.materials.landscape.roughness_factor=1;
-    const textures={};for(const name of ['stone','ground','bark','sky']){
+    this.sky=new WorldSky();
+    const textures={};for(const name of ['stone','ground','bark','stone-normal','ground-normal','bark-normal']){
       const response=await fetch(`/assets/textures/${name}.png`),bitmap=await createImageBitmap(await response.blob());
-      if(name==='sky'){this.sky=new WorldSky(bitmap);continue;}
-      const image=ShadeImage.fromImageBitmap(bitmap);image.color_space=ColorSpace.SRGB;textures[name]=ShadeTexture.from(image);
+      const image=ShadeImage.fromImageBitmap(bitmap);image.color_space=name.endsWith('-normal')?ColorSpace.None:ColorSpace.SRGB;textures[name]=ShadeTexture.from(image);
     }
     for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_albedo=textures.stone;
     for(const name of ['grass','grassLight','path'])this.materials[name].texture_albedo=textures.ground;
     this.materials.bark.texture_albedo=textures.bark;
+    for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_normal=textures['stone-normal'];
+    this.materials.landscape.texture_normal=textures['ground-normal'];this.materials.bark.texture_normal=textures['bark-normal'];
     const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json()),adapter=new MeshletGeometrySerializationAdapter();
     const entries=Object.entries(manifest.models);let complete=0;
     // Limited fetch concurrency avoids monopolizing browser networking during startup.
@@ -97,10 +99,12 @@ export class WorldView {
       this.emitter('embers',p,22);
     }
     this.motes=this.emitter('motes',[0,3,10],80);
-    const fog=new ParticipatingMedia();fog.target_extinction=.0017;fog.fade_distance=20;
+    const fog=new ParticipatingMedia();fog.target_extinction=.0006;fog.fade_distance=30;
     const ft=new Transform64();ft.setTranslation(0,24,-120);ft.setScale(650,140,800);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
-    const low=new ParticipatingMedia();low.target_extinction=.025;low.fade_distance=6;
-    const lt=new Transform64();lt.setTranslation(0,1,-48);lt.setScale(130,4,100);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
+    for(const [x,z,w,d,strength] of [[-85,-55,65,90,.012],[35,-185,38,70,.014],[-112,-210,90,80,.009],[95,-248,85,80,.004],[0,-78,42,22,.009]]){
+      const low=new ParticipatingMedia();low.target_extinction=strength;low.fade_distance=7;
+      const lt=new Transform64();lt.setTranslation(x,heightAt(x,z)+2,z);lt.setScale(w,9,d);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
+    }
     progress('The circle opens.',1);return this;
   }
   model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null){
@@ -168,7 +172,7 @@ export class WorldView {
       this.motes.t.setTranslation(player.x,player.y+2,player.z);this.motes.t.updateMatrix();t64_announce_change(this.ecd,this.motes.id);
     }
     const daylight=Math.max(.08,Math.sin((snapshot.time-6)/24*Math.PI*2));
-    this.sun.l.intensity.set(.5+daylight*2.8);this.sun.l.color.set(.6+daylight*.4,.72+daylight*.23,1-daylight*.17);this.sky.update(this.scene,daylight);
+    this.sun.l.intensity.set(.16+daylight*3.6);this.sun.l.color.set(.62+daylight*.38,.70+daylight*.16,.93-daylight*.23);this.sky.update(this.scene,daylight);
     t64_look_rotation(this.sun.t,-.6,-Math.max(.08,daylight),-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
   }

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink, rename } from 'node:fs/promises';
+import {setTimeout as delay} from 'node:timers/promises';
 import { resolve } from 'node:path';
 const require = createRequire(new URL('../packages/game/package.json', import.meta.url));
 const meep = async path => import(pathToFileURL(require.resolve(`@woosh/meep-engine/src/${path}`)).href);
@@ -20,7 +21,17 @@ const serializer = new MeshletGeometrySerializationAdapter();
 async function writeChanged(path,bytes){
   const next=Buffer.from(bytes);let current;
   try{current=await readFile(path);}catch(error){if(error.code!=='ENOENT')throw error;}
-  if(!current?.equals(next))await writeFile(path,next);
+  if(current?.equals(next))return;
+  const temporary=`${path}.${process.pid}.tmp`;
+  try{
+    await writeFile(temporary,next);
+    // Asset readers and antivirus can briefly hold a Windows file open. Publish
+    // complete geometry atomically so a live preview never reads half a mesh.
+    for(let attempt=0;;attempt++){
+      try{await rename(temporary,path);break;}
+      catch(error){if(attempt===6||!['EBUSY','EPERM','EACCES','UNKNOWN'].includes(error.code))throw error;await delay(50*(attempt+1));}
+    }
+  }finally{await unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
 }
 for (const [name, chunks] of Object.entries(meshes)) {
   manifest.models[name] = [];

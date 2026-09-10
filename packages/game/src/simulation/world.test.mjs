@@ -31,6 +31,13 @@ test('restoring an unchanged snapshot does not teleport or wake every actor',asy
   const original=w.physics.setPose.bind(w.physics);w.physics.setPose=(...args)=>{calls++;return original(...args);};
   w.replaceSnapshot(w.snapshot());expect(calls).toBe(0);
 });
+
+test('older world saves retain progression above a raised terrain surface',async()=>{
+  const w=await setup(),p=w.addPlayer('returning');p.embers=345;p.seals=['Dawn'];
+  const saved=w.snapshot();delete saved.contentVersion;saved.actors[0].y=-2;saved.actors[0].checkpoint=[0,0,24];
+  w.restoreWorld(saved);expect(p.embers).toBe(345);expect(p.seals).toEqual(['Dawn']);
+  expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));expect(p.checkpoint[1]).toBeGreaterThan(heightAt(0,24));
+});
 test('PvP requires both participants to opt in; collisions apply knockback',async()=>{
   const w=await setup(),a=w.addPlayer('attacker'),b=w.addPlayer('victim');w.teleport(b,[2,a.y,a.z]);const hp=b.hp;
   expect(w.damage(a,b,20,300)).toBe(false);a.pvp=true;expect(w.damage(a,b,20,300)).toBe(false);b.pvp=true;
@@ -41,7 +48,7 @@ test('death removes the standing collision capsule and respawn restores it',asyn
   const w=await setup(),p=w.addPlayer('fallen'),enemy=w.spawnActor('attacker',{},[2,3,24]),e=w.actors.get(p.id);
   w.setCrouch(p,true);w.damage(enemy,p,1000,200);expect(w.ecd.getComponent(e,Collider)).toBeUndefined();
   const snapshot=w.snapshot();snapshot.actors.find(a=>a.id===p.id).crouch=false;w.replaceSnapshot(snapshot);expect(w.ecd.getComponent(e,Collider)).toBeUndefined();
-  w.respawn(p);expect(w.ecd.getComponent(e,Collider)).toBeDefined();expect(p.hp).toBe(p.healthMax);expect(p.crouch).toBe(false);
+  w.respawn(p);expect(w.ecd.getComponent(e,Collider)).toBeDefined();expect(p.hp).toBe(p.healthMax);expect(p.crouch).toBe(false);expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));
 });
 test('Meep line-of-sight queries and nova damage respect cover',async()=>{
   const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,heightAt(100,30)+1,30]);

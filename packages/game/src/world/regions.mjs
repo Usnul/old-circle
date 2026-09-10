@@ -1,5 +1,7 @@
+import {computeCatmullRomSpline} from '@woosh/meep-engine/src/core/math/spline/computeCatmullRomSpline.js';
+import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/create_simplex_noise_2d.js';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
-export const WORLD_VERSION = 1;
+export const WORLD_VERSION = 2;
 export const SPAWN = [0, 0, 24];
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },
@@ -24,9 +26,37 @@ export const ROUTES = [
   ['abbey', 'aqueduct'], ['oak', 'spire'], ['aqueduct', 'pilgrims'],
   ['spire', 'pilgrims'], ['spire', 'halo'], ['pilgrims', 'halo'],
 ];
+const bends={
+  'hearth:abbey':[[5,3],[-4,-19]],'hearth:cave':[[19,15],[30,2]],'cave:abbey':[[38,-35],[22,-43]],
+  'abbey:oak':[[-28,-60],[-62,-73],[-94,-57]],'abbey:aqueduct':[[33,-71],[71,-81],[101,-103]],
+  'oak:spire':[[-147,-100],[-149,-148],[-123,-184]],'aqueduct:pilgrims':[[153,-152],[131,-202],[105,-228]],
+  'spire:pilgrims':[[-64,-242],[-16,-252],[40,-245]],'spire:halo':[[-117,-270],[-78,-318],[-31,-337]],
+  'pilgrims:halo':[[66,-299],[34,-318],[25,-342]],
+};
+export const ROAD_PATHS=ROUTES.map(([a,b])=>{
+  const start=LANDMARKS.find(l=>l.id===a).position,end=LANDMARKS.find(l=>l.id===b).position;
+  const points=[[start[0],start[2]],...(bends[`${a}:${b}`]??[]),[end[0],end[2]]],flat=[];
+  computeCatmullRomSpline(flat,points.flat(),points.length,2,points.length*7);
+  return {from:a,to:b,points:Array.from({length:flat.length/2},(_,i)=>[flat[i*2],flat[i*2+1]])};
+});
+const hills=[
+  [0,32,7,58,38],[-85,5,19,42,53],[80,8,19,33,47],
+  [-67,-156,33,32,79],[59,-158,35,29,65],[150,-116,8,70,45],
+  [-200,-200,39,45,105],[197,-210,33,38,66],[0,-392,29,83,72],
+  [-183,-354,61,35,70],[168,-365,67,35,78],[8,-463,44,100,34],
+];
+const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+let terrainSeed=81731;
+const noise=create_simplex_noise_2d(()=>{terrainSeed=(Math.imul(terrainSeed,1664525)+1013904223)>>>0;return terrainSeed/4294967296;});
 export function heightAt(x, z) {
-  const rise = Math.max(0, -z - 110) * .16;
-  return rise + Math.sin(x * .026) * 2.4 + Math.sin(z * .036) * 1.8 + Math.sin(x * .061 + z * .027) * .8;
+  let y=Math.max(0,-z-100)*.17+Math.sin(x*.026)*1.4+Math.sin(z*.036)*1.1+Math.sin(x*.061+z*.027)*.5;
+  for(const [cx,cz,h,rx,rz] of hills)y+=h*Math.exp(-(((x-cx)/rx)**2+((z-cz)/rz)**2));
+  const roughness=1.2+smooth((-z-60)/240)*5;
+  // Preserve the graded road bed while allowing broken terrain beside it.
+  y+=roughness*(noise(x*.035,z*.035)+noise(x*.085+41,z*.085)*.22)*smooth((pathDistance(x,z)-5)/18);
+  // The abbey was cut into a level basin. The shoulder eases into the hillside.
+  const abbey=smooth((Math.hypot(x/1.05,z+48)-19)/17);y=.65+(y-.65)*abbey;
+  return y;
 }
 export function regionAt(x, z) {
   return REGIONS.reduce((a, b) => Math.hypot(x - a.center[0], z - a.center[1]) < Math.hypot(x - b.center[0], z - b.center[1]) ? a : b);
@@ -38,11 +68,10 @@ export function landmarkPosition(id) {
 }
 export function pathDistance(x, z) {
   let best = Infinity;
-  for (const [a, b] of ROUTES) {
-    const p = landmarkPosition(a), q = landmarkPosition(b);
-    const dx = q[0] - p[0], dz = q[2] - p[2];
-    const t = Math.max(0, Math.min(1, ((x-p[0])*dx+(z-p[2])*dz)/(dx*dx+dz*dz)));
-    best = Math.min(best, Math.hypot(x-p[0]-dx*t, z-p[2]-dz*t));
+  for(const road of ROAD_PATHS)for(let i=1;i<road.points.length;i++){
+    const p=road.points[i-1],q=road.points[i],dx=q[0]-p[0],dz=q[1]-p[1];
+    const t=Math.max(0,Math.min(1,((x-p[0])*dx+(z-p[1])*dz)/(dx*dx+dz*dz)));
+    best=Math.min(best,Math.hypot(x-p[0]-dx*t,z-p[1]-dz*t));
   }
   return best;
 }

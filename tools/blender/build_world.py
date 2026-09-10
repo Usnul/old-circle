@@ -3,6 +3,7 @@ Run pnpm assets:blender, which exports the shared world data first.
 No GPU allocation: modeling/export only. Coordinates converted from Blender Z-up to Meep Y-up.
 """
 import bpy, math, random, json, sys
+import numpy as np
 from pathlib import Path
 from mathutils import Vector, noise
 
@@ -59,9 +60,16 @@ for kind in ['stone','ground','bark','sky']:
    else:
     grain=noise.noise(torus(u,v,6))
     groove=(max(0,math.sin(u*math.tau*16+n*7))**8)*.22 if kind=='bark' else 0
-    k=max(.2,min(1,.80+n*(.09 if kind=='ground' else .22)+grain*.04-groove));rgb=(k,k*.98,k*.94)
+    k=max(.2,min(1,.82+n*(.09 if kind=='ground' else .12)+grain*.08-groove));rgb=(k,k*.98,k*.95)
    data.extend((*rgb,1))
  image.pixels=data;image.filepath_raw=str(textures/(kind+'.png'));image.file_format='PNG';image.save()
+ if kind!='sky':
+  heights=np.array(data,dtype=np.float32).reshape(h,w,4)[:-1,:-1,0]
+  dx=(np.roll(heights,-1,axis=1)-np.roll(heights,1,axis=1))*2.5
+  dy=(np.roll(heights,-1,axis=0)-np.roll(heights,1,axis=0))*2.5
+  normal=np.stack((-dx,-dy,np.ones_like(dx)),axis=-1);normal/=np.linalg.norm(normal,axis=-1,keepdims=True)
+  normal=np.pad(normal,((0,1),(0,1),(0,0)),mode='wrap');rgba=np.ones((h,w,4),dtype=np.float32);rgba[:,:,:3]=normal*.5+.5
+  bump=bpy.data.images.new(kind+'-normal',width=w,height=h,alpha=True);bump.colorspace_settings.name='Non-Color';bump.pixels.foreach_set(rgba.ravel());bump.filepath_raw=str(textures/(kind+'-normal.png'));bump.file_format='PNG';bump.save()
 
 def keep(obj, mat):
  obj.data.materials.append(materials[mat]); current.append(obj); return obj
@@ -106,13 +114,13 @@ def leaf_spray(p,mat):
    faces.append(tuple(k+j for j in tri));faces.append(tuple(k+j for j in reversed(tri)))
  return mesh('Leaf spray',verts,faces,mat)
 
-def finish(name):
+def finish(name,collision_parts=None):
  global current
  collection=bpy.data.collections.new(name); bpy.context.scene.collection.children.link(collection)
  chunks=[]
  deps=bpy.context.evaluated_depsgraph_get()
- if name in ['block','column','arch','rock0','rock1','rock2','tree','pine','magicTree','winterTree']:
-  parts=current[:1] if name in ['tree','pine','magicTree','winterTree'] else current
+ if collision_parts is not None or name in ['block','column','arch','rock0','rock1','rock2','tree','pine','magicTree','winterTree']:
+  parts=collision_parts if collision_parts is not None else current[:1] if name in ['tree','pine','magicTree','winterTree'] else current
   hulls=[]
   for o in parts:
    ev=o.evaluated_get(deps);m=ev.to_mesh();m.calc_loop_triangles();verts=[]
@@ -166,6 +174,8 @@ for j in range(28):
  verts=[(r*math.cos(t),y,r*math.sin(t)) for y in [-.25,.25] for r in [4.3,4.95] for t in [a,b]]
  mesh('Halo segment',verts,[(0,1,3,2),(4,6,7,5),(0,4,5,1),(2,3,7,6),(0,2,6,4),(1,5,7,3)],'stoneLight')
 finish('halo')
+from architecture import build_architecture
+build_architecture(cube,cone,beam,ico,mesh,finish,current)
 for i in range(3):
  random.seed(193+i)
  ico((0,0,.6),(1.4,1.1,1),'stone',2)
