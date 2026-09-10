@@ -8,3 +8,4 @@ coverage/
 *.blend2
 __pycache__/
 *.log
+AGENTS.md
