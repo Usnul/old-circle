@@ -15,11 +15,8 @@ import { LightSystem } from '@woosh/meep-engine/src/engine/graphics3/LightSystem
 import { Light } from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import { ParticipatingMediaSystem } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMediaSystem.js';
 import { ParticipatingMedia } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMedia.js';
-import { MeshletGeometry } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
-import { MeshletGeometrySerializationAdapter } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import { StandardShadeMaterial } from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
-import { BinaryBuffer } from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import { ShadeImage } from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
 import { ColorSpace } from '@woosh/meep-engine/src/shade/renderer/texture/ColorSpace.js';
@@ -39,13 +36,16 @@ import {BossHazards,isBossHazard} from './boss-hazards.mjs';
 import {DecalSystem} from '@woosh/meep-engine/src/engine/graphics3/DecalSystem.js';
 import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundListenerSystem.js';
 import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
+import {ModelStore} from './model-store.mjs';
+import {WorldStream} from './world-stream.mjs';
+import {GeometryCache} from './geometry-cache.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
 export class WorldView {
   constructor(){this.models=new Map();this.characters=new Map();this.corpses=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
-  async start(progress=()=>{}){
+  async start(progress=()=>{},position=[0,heightAt(0,23)+1,23]){
     progress('Kindling the light…',.1);
     this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
@@ -103,35 +103,24 @@ export class WorldView {
         material[`texture_${channel}`]=ShadeTexture.from(image);
       }
     }
-    const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json()),adapter=new MeshletGeometrySerializationAdapter();
-    const entries=Object.entries(manifest.models);let complete=0;
-    // Limited fetch concurrency avoids monopolizing browser networking during startup.
-    for(let start=0;start<entries.length;start+=8){
-      await Promise.all(entries.slice(start,start+8).map(async([name,chunks])=>{
-        this.models.set(name,await Promise.all(chunks.map(async c=>{
-          const response=await fetch(`/assets/geometry/${c.file}`);if(!response.ok)throw new Error(`Missing asset ${c.file}`);
-          const buffer=new BinaryBuffer();buffer.fromArrayBuffer(await response.arrayBuffer());const geometry=new MeshletGeometry();adapter.deserialize(buffer,geometry);
-          return {geometry,material:this.materials[c.material]};
-        })));complete++;progress('Remembering the old road…',.15+complete/entries.length*.65);
-      }));
-    }
-    const layout=buildLayout(),groundMeshes=[];this.reliquaries=new Map();
-    for(const p of layout.props){
-      const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);
-      if(p.relic)this.reliquaries.set(p.relic,{prop:p,parts,opened:false});
-      if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);
-    }
+    const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json());
+    const gpuGeometry=renderer.scenes.obtain(this.scene).geometries;
+    this.gpuGeometry=gpuGeometry;
+    this.geometryCache=new GeometryCache(manifest);
+    this.modelStore=new ModelStore({manifest,materials:this.materials,models:this.models,read:file=>this.geometryCache.read(file),residentCache:true,dispose:geometry=>gpuGeometry.remove(geometry)});
+    const core=Object.keys(manifest.models).filter(name=>name==='pilgrim'||name==='briarHound'||name==='votiveBanner'||name.startsWith('armor_')||name.startsWith('boss_'));
+    core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
+    await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
+    const layout=buildLayout();this.streaming=new WorldStream(this,layout,this.modelStore);
+    await this.streaming.start(position,p=>progress('Remembering the old road…',.15+p*.5));
+    await this.geometryCache.warm(p=>progress('Remembering the distant paths…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
+    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
-    for(let i=0;i<layout.lights.length;i++){
-      const p=layout.lights[i];this.light(p,[1,.48,.13],42,Light.Type.POINT,i%5===0,8);
-      this.emitter('embers',p,22);
-    }
     this.ambient=new WorldAmbient(this);
     const fog=new ParticipatingMedia();fog.target_extinction=.0006;fog.fade_distance=30;
     const ft=new Transform64();ft.setTranslation(0,24,-120);ft.setScale(650,140,800);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
@@ -200,7 +189,7 @@ export class WorldView {
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
-      for(const [id,reliquary] of this.reliquaries){const opened=(player.relics??[]).includes(id);if(opened!==reliquary.opened){this.remove(reliquary.parts);const p=reliquary.prop;reliquary.parts=this.model(opened?'reliquarySpent':'reliquary',p.position,p.scale,p.yaw);reliquary.opened=opened;}}
+      this.streaming.update(player,dt);
       const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);
@@ -211,7 +200,7 @@ export class WorldView {
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
       this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
       this.ambient.update(player,snapshot.time,dt);
-      this.banners.update(dt);
+      this.banners.update(dt,player);
     }
     const sky=this.sky.update(this.scene,snapshot.time);
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);

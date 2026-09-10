@@ -32,6 +32,6 @@ export function installInspector({send,getView,getSnapshot,playerId}){
       }
       output.textContent=`${data.faces} nav faces · ${data.samples.length} occupancy samples · nine SH coefficients per sample`;
     },
-    update(state){if(!flowVisible&&state&&performance.now()>messageUntil){const p=state.actors.find(a=>a.id===playerId);if(p)output.textContent=`${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · HP ${p.hp.toFixed(0)} · tick ${state.tick}`;}}
+    update(state){if(!flowVisible&&state&&performance.now()>messageUntil){const p=state.actors.find(a=>a.id===playerId),view=getView(),s=view.streaming?.stats;if(p)output.textContent=`${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · HP ${p.hp.toFixed(0)} · tick ${state.tick}${s?` · ${s.props}/${s.totalProps} props · ${s.nearTerrain}/48 detailed terrain · ${(s.bytes/1048576).toFixed(1)} MiB active / ${((s.bytes+s.cachedBytes)/1048576).toFixed(1)} visited · ${(view.gpuGeometry.gpu_memory_usage/1048576).toFixed(1)} MiB GPU geometry · ${view.scene.instance_count} meshes · ${view.fps.toFixed(0)} fps · ${s.loading} loading`:''}`;}}
   };
 }

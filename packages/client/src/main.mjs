@@ -48,7 +48,7 @@ async function start(character){
   try{
     if(!navigator.gpu)throw new Error('Old Circle requires WebGPU. Open this game in a WebGPU-capable desktop browser.');
     const {WorldView}=await import('./render/scene.mjs');view=new WorldView();if(Number.isFinite(character?.motion?.yaw))view.yaw=character.motion.yaw;
-    await view.start((text,p)=>{$('#loading-text').textContent=text;$('#loading-progress').style.width=`${p*100}%`;});
+    await view.start((text,p)=>{$('#loading-text').textContent=text;$('#loading-progress').style.width=`${p*100}%`;},character&&[character.x,character.y,character.z].every(Number.isFinite)?[character.x,character.y,character.z]:undefined);
     input=await new GameInput(view.engine,{
       action:name=>{if(!started)return;if(['journal','map','escape'].includes(name)){menu?closeModal():name==='map'?map():journal();}else send({type:'equip',weapon:name});},
       look:(x,y)=>{view.yaw-=x*.0025;view.pitch=Math.max(-.45,Math.min(.95,view.pitch+y*.002));},
@@ -120,6 +120,7 @@ for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({ty
 let previous=performance.now();
 function frame(now){
   const dt=Math.min(.1,(now-previous)/1000);previous=now;
+  if(view.streaming.error){toast('Part of the road could not load. Retrying…');console.warn(view.streaming.error);view.streaming.error=null;}
   if(!menu){
     input.update(dt);send({type:'input',intent:input.sample(view.yaw)});
   }

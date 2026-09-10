@@ -14,7 +14,8 @@ export function encodeNavigation(atlas){
   return new Uint8Array(b.data,0,b.position);
 }
 
-export function decodeNavigation(bytes){
+export function decodeNavigation(bytes,{maxTiles=32}={}){
+  if(!Number.isInteger(maxTiles)||maxTiles<1)throw new Error('Invalid navigation cache budget');
   const b=new BinaryBuffer();b.fromArrayBuffer(bytes);
   if(b.readUint32()!==1||b.readUint32()!==WORLD_VERSION)throw new Error('Navigation needs rebuilding for this world version');
   const spacing=b.readFloat32(),vertexValues=b.readUint32(),indexValues=b.readUint32();
@@ -23,9 +24,9 @@ export function decodeNavigation(bytes){
   b.readFloat32Array(positions,0,vertexValues);b.readUint32Array(indices,0,indexValues);
   if(!positions.every(Number.isFinite)||!indices.every(i=>i<vertexValues/3))throw new Error('Malformed navigation vertices');
   const tiles=new Map();
-  return {spacing,faceCount:indexValues/3,tile(home){
+  return {spacing,faceCount:indexValues/3,cacheStats:()=>({tiles:tiles.size,maxTiles}),tile(home){
     const x=Math.floor(home[0]/40)*40,z=Math.floor(home[2]/40)*40,key=`${x},${z}`;
-    if(tiles.has(key))return tiles.get(key);
+    if(tiles.has(key)){const tile=tiles.get(key);tiles.delete(key);tiles.set(key,tile);return tile;}
     const bounds=[x-32,z-32,x+72,z+72],vertices=[],faces=[],mapping=new Map();
     for(let i=0;i<indices.length;i+=3){
       const corners=[indices[i],indices[i+1],indices[i+2]];
@@ -34,7 +35,7 @@ export function decodeNavigation(bytes){
     }
     const atlas=new SpatialAtlas(null,{bounds,spacing});atlas.nav=new NavigationMesh();
     bt_mesh_from_indexed_geometry(atlas.nav.topology,faces,vertices);bt_mesh_build_face_bvh(atlas.nav.bvh,atlas.nav.topology);atlas.faceCount=faces.length/3;
-    tiles.set(key,atlas);return atlas;
+    tiles.set(key,atlas);while(tiles.size>maxTiles)tiles.delete(tiles.keys().next().value);return atlas;
   }};
 }
 
