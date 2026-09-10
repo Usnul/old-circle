@@ -1,7 +1,14 @@
 // Authored metres: local X runs east, N runs north. Floor surfaces, Blender
 // masonry, encounter placement and layered navigation share these definitions.
+export const DUNGEON_MATERIALS=Object.fromEntries(Object.entries({
+  Meadow:[.56,.56,.48],Wood:[.42,.47,.34],Sand:[.70,.52,.32],Glass:[.33,.42,.48],Snow:[.73,.75,.68],Crown:[.50,.48,.40],
+}).flatMap(([region,color])=>[
+  ['masonry'+region,{texture:'masonry',color}],
+  ['flagstone'+region,{texture:'flagstone',color:color.map(c=>c*.82)}],
+]));
 export const DUNGEONS=[{
   id:'reliquary',name:'The Bellkeeper’s Reliquary',region:'meadow',origin:[38,-48],elevation:4.3,
+  materials:{floor:'flagstoneMeadow',wall:'masonryMeadow',trim:'stoneLight',roof:'stoneDark'},
   rooms:[
     {id:'vestibule',name:'The Unlit Vestibule',rect:[-6,0,6,10],level:0,roof:false},
     {id:'burial',name:'Hall of Quiet Bells',rect:[-18,4,-6,14],level:0,roof:true},
@@ -36,7 +43,7 @@ export const DUNGEONS=[{
   treasure:{id:'quiet-flame',name:'The Quiet Flame',at:[0,27,4.8],embers:450,flasks:1,description:'A lantern flame carried through the dark. Resting now restores one additional flask.'},
 },{
   id:'root-cloister',name:'The Rootbound Cloister',region:'wood',level:8,origin:[-115,-86],elevation:2.4,
-  materials:{floor:'stoneDark',wall:'stone',trim:'bark',roof:'bark'},
+  materials:{floor:'flagstoneWood',wall:'masonryWood',trim:'bark',roof:'bark'},
   rooms:[
     {id:'court',name:'The Rain Court',rect:[-14,0,14,10],level:0,roof:false},
     {id:'chapel',name:'Chapel of Fallen Leaves',rect:[-14,10,-4,24],level:0,roof:true},
@@ -53,7 +60,7 @@ export const DUNGEONS=[{
   treasure:{id:'briar-knot',name:'The Briar Knot',at:[-9,23,4.8],embers:650,charm:'briar',description:'Unlocks the Briar Knot charm: faster stamina recovery, at the cost of protection. Choose a charm at a hearth.'},
 },{
   id:'ashen-cistern',name:'The Ashen Cistern',region:'desert',level:13,origin:[178,-128],elevation:22,
-  materials:{floor:'sand',wall:'sand',trim:'brass',roof:'stoneDark'},
+  materials:{floor:'flagstoneSand',wall:'masonrySand',trim:'brass',roof:'stoneDark'},
   rooms:[
     {id:'court',name:'The Dry Fountain',rect:[-10,0,14,6],level:0,roof:false},
     {id:'west',name:'The Salt Descent',rect:[-10,6,-6,22],level:0,rise:-4.8,roof:false},
@@ -69,7 +76,7 @@ export const DUNGEONS=[{
   treasure:{id:'ashen-lens',name:'The Ashen Lens',at:[3,13,-4.8],embers:900,charm:'ash',description:'Unlocks the Ashen Lens charm: stronger arrows in exchange for weaker melee blows. Choose a charm at a hearth.'},
 },{
   id:'glass-observatory',name:'The Listening Observatory',region:'magic',level:19,origin:[-169,-216],elevation:43,
-  materials:{floor:'stoneDark',wall:'stoneDark',trim:'ice',roof:'iron'},
+  materials:{floor:'flagstoneGlass',wall:'masonryGlass',trim:'ice',roof:'iron'},
   rooms:[
     {id:'court',name:'The Astronomer’s Court',rect:[-12,0,8,8],level:0,roof:false},
     {id:'first-stair',name:'The Moon Stair',rect:[-12,8,-8,24],level:0,rise:4.8,roof:false},
@@ -88,7 +95,7 @@ export const DUNGEONS=[{
   treasure:{id:'listening-glass',name:'The Listening Glass',at:[1,31,9.6],embers:1250,charm:'glass',description:'Unlocks the Listening Glass charm: cheaper, stronger spells, with greater vulnerability to incoming damage. Choose a charm at a hearth.'},
 },{
   id:'white-ossuary',name:'The White Ossuary',region:'tundra',level:25,origin:[153,-270],elevation:49,
-  materials:{floor:'stoneLight',wall:'bone',trim:'ice',roof:'snow'},
+  materials:{floor:'flagstoneSnow',wall:'masonrySnow',trim:'ice',roof:'snow'},
   rooms:[
     {id:'hall',name:'The Pilgrims’ Rest',rect:[-6,0,18,8],level:0,roof:true},
     {id:'ascent',name:'The Wind Stair',rect:[-6,8,-2,28],level:0,rise:4.8,roof:false},
@@ -104,7 +111,7 @@ export const DUNGEONS=[{
   treasure:{id:'frozen-heart',name:'The Frozen Heart',at:[10,33,4.8],embers:1700,charm:'frost',description:'Unlocks the Frozen Heart charm: stronger protection, slower movement and slower focus recovery. Choose a charm at a hearth.'},
 },{
   id:'uncrowned-archive',name:'The Uncrowned Archive',region:'crown',level:32,origin:[64,-362],elevation:59,
-  materials:{floor:'stoneDark',wall:'stone',trim:'brass',roof:'iron'},
+  materials:{floor:'flagstoneCrown',wall:'masonryCrown',trim:'brass',roof:'iron'},
   rooms:[
     {id:'vestibule',name:'The Oathless Gate',rect:[-12,0,12,10],level:0,roof:false},
     {id:'archive',name:'The Ledger of Kings',rect:[-8,10,8,28],level:0,roof:true},

@@ -87,7 +87,7 @@ export class Characters {
       clip.weight.set(p.weight);clip.poseTime=p.time;
     }
     for(const playback of view.animations.playbacks_of(rig.id)){playback.elapsed=playback.clip.poseTime??0;playback.finished=false;}
-    if(rig.weaponName!==a.weapon&&rig.weapon){view.remove(rig.weapon);rig.weapon=view.model(a.weapon);rig.weaponName=a.weapon;}
+    if(rig.weaponName!==a.weapon&&rig.weapon){this.clearViewAlpha(rig);view.remove(rig.weapon);rig.weapon=view.model(a.weapon);rig.weaponName=a.weapon;}
     if(rig.weapon){
       const pose=weaponPose(a);for(const {id,t} of rig.weapon){t.setTranslation(...pose.origin);t.setScale(scale,scale,scale);t.setRotation(...pose.rotation);t.updateMatrix();t64_announce_change(view.ecd,id);}
     }
@@ -96,6 +96,36 @@ export class Characters {
       actorSocket(rig.lantern.socket,a,'hips');this.lanternPose(rig,rig.lantern.socket,1);
     }
   }
+  viewAlpha(rig,alpha){
+    if(rig.dead)return;
+    alpha=Math.max(0,Math.min(1,alpha));
+    const {view}=this;
+    // Each actor owns its fade materials. Keep the clones across wall contacts:
+    // the shared outfit, remote pilgrims and pooled skins must stay opaque.
+    if(alpha<1&&!rig.viewMaterials){
+      if(!view.meshSystem.instance_of(rig.id))return;
+      rig.viewMaterials=[];
+      const remember=(material,apply)=>{
+        const faded=material.clone();faded.transparency_mode=TransparencyMode.Transparent;
+        rig.viewMaterials.push({material,faded,apply});
+      };
+      view.meshSystem.traverse_meshes(rig.id,mesh=>remember(mesh.material,material=>{mesh.material=material;mesh.updateMatrices();}));
+      for(const {id} of [...rig.weapon??[],...rig.lantern?.parts??[]]){
+        const geometry=view.ecd.getComponent(id,ShadedGeometry);
+        remember(geometry.material,material=>{
+          view.ecd.removeComponentFromEntity(id,ShadedGeometry);
+          view.ecd.addComponentToEntity(id,material===geometry.material?geometry:ShadedGeometry.from(geometry.geometry,material));
+        });
+      }
+    }
+    const fading=alpha<1;
+    if(fading!==!!rig.viewFaded){
+      for(const entry of rig.viewMaterials??[])entry.apply(fading?entry.faded:entry.material);
+      rig.viewFaded=fading;
+    }
+    if(fading)for(const {faded,material} of rig.viewMaterials)faded.diffuse_color.setA(material.diffuse_color.a*alpha);
+  }
+  clearViewAlpha(rig){this.viewAlpha(rig,1);rig.viewMaterials=null;}
   lanternPose(rig,socket,alpha){
     const {view}=this,{parts,light,position}=rig.lantern;
     position.set(-.32,.10,-.08).applyMatrix4(socket);
@@ -107,6 +137,7 @@ export class Characters {
   corpse(rig,state){
     const {view}=this;
     if(!rig.dead){
+      this.clearViewAlpha(rig);
       view.ecd.removeComponentFromEntity(rig.id,Animation);rig.dead=true;rig.t.makeIdentity();t64_announce_change(view.ecd,rig.id);
       if(rig.telegraph){view.remove(rig.telegraph);delete rig.telegraph;}
       rig.worldPoses=state.joints.map(()=>new Transform64());rig.inverse=new Float64Array(16);rig.matrix=new Float64Array(16);
@@ -146,6 +177,7 @@ export class Characters {
     }
   }
   remove(rig){
+    this.clearViewAlpha(rig);
     const {view}=this;if(view.ecd.getComponent(rig.id,Animation))view.ecd.removeComponentFromEntity(rig.id,Animation);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
     if(rig.lantern){view.remove(rig.lantern.parts);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}

@@ -24,6 +24,7 @@ import { WorldAudio } from './audio.mjs';
 import { WorldSky } from './sky.mjs';
 import { buildLayout } from '@old-circle/game/world/layout.mjs';
 import { heightAt } from '@old-circle/game/world/regions.mjs';
+import {DUNGEON_MATERIALS} from '@old-circle/game/world/dungeons.mjs';
 import { effect } from './effects.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
@@ -75,7 +76,7 @@ export class WorldView {
     const camera=new Camera();camera.fov.set(57);camera.clip_near=.12;camera.clip_far=1100;
     this.cameraTransform=new Transform64();this.cameraEntity=new Entity().add(camera).add(this.cameraTransform).build(this.ecd);
     this.listenerTransform=new Transform64();this.listenerEntity=new Entity().add(new SoundListener()).add(this.listenerTransform).build(this.ecd);
-    this.materials={};for(const [key,color] of Object.entries(PALETTE)){
+    this.materials={};for(const [key,color] of Object.entries({...PALETTE,...Object.fromEntries(Object.entries(DUNGEON_MATERIALS).map(([name,spec])=>[name,spec.color]))})){
       const m=new StandardShadeMaterial();m.diffuse_color.set(...color);m.roughness_factor=key==='iron'?.43:key==='brass'?.38:.92;m.metallic_factor=key==='iron'?.7:key==='brass'?.78:0;
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
       this.materials[key]=m;
@@ -98,12 +99,16 @@ export class WorldView {
     this.materials.bark.texture_albedo=textures.bark;
     for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_normal=textures['stone-normal'];
     this.materials.landscape.texture_normal=textures['ground-normal'];this.materials.bark.texture_normal=textures['bark-normal'];
-    for(const name of ['iron','brass','leather','cloth','cloak','limestone']){
+    for(const name of ['iron','brass','leather','cloth','cloak','limestone',...Object.keys(DUNGEON_MATERIALS)]){
       const material=this.materials[name];material.roughness_factor=1;material.metallic_factor=name==='iron'||name==='brass'?1:0;
       for(const [suffix,channel] of [['','albedo'],['-normal','normal'],['-orm','orm']]){
-        const response=await fetch(`/assets/textures/${name}${suffix}.png`);if(!response.ok)throw new Error(`Missing material ${name}${suffix}`);
-        const image=ShadeImage.fromImageBitmap(await createImageBitmap(await response.blob()));image.color_space=suffix?ColorSpace.None:ColorSpace.SRGB;
-        material[`texture_${channel}`]=ShadeTexture.from(image);
+        const texture=(DUNGEON_MATERIALS[name]?.texture??name)+suffix;
+        if(!textures[texture]){
+          const response=await fetch(`/assets/textures/${texture}.png`);if(!response.ok)throw new Error(`Missing material ${texture}`);
+          const image=ShadeImage.fromImageBitmap(await createImageBitmap(await response.blob()));image.color_space=suffix?ColorSpace.None:ColorSpace.SRGB;
+          textures[texture]=ShadeTexture.from(image);
+        }
+        material[`texture_${channel}`]=textures[texture];
       }
     }
     const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json());
@@ -175,6 +180,7 @@ export class WorldView {
         rig.telegraph??=this.model('dangerRing');this.pose(rig.telegraph,[a.x,heightAt(a.x,a.z)+.13,a.z],8);
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
       this.characterRenderer.update(rig,a);
+      if(a.id!==playerId&&rig.viewFaded)this.characterRenderer.viewAlpha(rig,1);
     }
     const dead=new Set();
     for(const state of snapshot.ragdolls??[]){
@@ -201,6 +207,7 @@ export class WorldView {
       const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
+      const playerRig=this.characters.get(playerId);if(playerRig)this.characterRenderer.viewAlpha(playerRig,(this.cameraDistance-1)/1.2);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
       this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
       this.ambient.update(player,snapshot.time,dt);

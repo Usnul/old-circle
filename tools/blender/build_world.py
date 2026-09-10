@@ -18,9 +18,11 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from ground_materials import build_ground,torus,publish_image
 from equipment_materials import build_equipment_materials,apply_equipment_materials
 from caves import build_caves,build_cave_materials
+from masonry_materials import build_masonry_materials
 build_ground(ROOT,WORLD)
 build_equipment_materials(ROOT)
 build_cave_materials(ROOT)
+build_masonry_materials(ROOT)
 vfx=ROOT/'packages/client/public/assets/vfx'
 vfx.mkdir(parents=True,exist_ok=True)
 sprite=bpy.data.images.new('Soft emissive mote',width=64,height=64,alpha=True)
@@ -45,10 +47,12 @@ PALETTE = {
  'limestone':(1,1,1),
 }
 materials = {}
+PALETTE.update({name:spec['color'] for name,spec in WORLD['dungeonMaterials'].items()})
 for name, rgb in PALETTE.items():
  m = bpy.data.materials.new(name); m.diffuse_color = (*rgb,1); materials[name] = m
 apply_equipment_materials(materials,ROOT)
 apply_equipment_materials(materials,ROOT,['limestone'])
+apply_equipment_materials(materials,ROOT,WORLD['dungeonMaterials'],{name:spec['texture'] for name,spec in WORLD['dungeonMaterials'].items()})
 assets = {}
 colliders = {}
 current = []
@@ -124,6 +128,18 @@ def leaf_spray(p,mat):
 
 def finish(name,collision_parts=None):
  global current
+ if name.startswith('dungeon_'):
+  # Store the runtime's world projection on the source meshes as actual UVs,
+  # including their distant copies, so the packed Blender material is faithful.
+  for o in current:
+   if o.get('export_uv'):continue
+   uv=o.data.uv_layers.new(name='World metres');normal_matrix=o.matrix_world.to_3x3().inverted().transposed()
+   for poly in o.data.polygons:
+    for li in poly.loop_indices:
+     vertex=o.data.vertices[o.data.loops[li].vertex_index];v=o.matrix_world@vertex.co
+     n=(normal_matrix@(vertex.normal if poly.use_smooth else poly.normal)).normalized()
+     uv.data[li].uv=(v.x*.45,v.y*.45) if abs(n.z)>.65 else (v.y*.45,v.z*.45) if abs(n.x)>abs(n.y) else (v.x*.45,v.z*.45)
+   o['export_uv']=True
  collection=bpy.data.collections.new(name); bpy.context.scene.collection.children.link(collection)
  chunks=[]
  deps=bpy.context.evaluated_depsgraph_get()
