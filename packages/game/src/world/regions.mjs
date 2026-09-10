@@ -3,7 +3,7 @@ import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/cr
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
-export const WORLD_VERSION = 4;
+export const WORLD_VERSION = 5;
 export const WORLD_BOUNDS=Object.freeze({minX:-240,minZ:-480,width:480,depth:640});
 export const SPAWN = [0, 0, 23];
 export const REGIONS = [
@@ -29,6 +29,7 @@ export const ROUTES = [
   ['hearth', 'abbey'], ['hearth', 'cave'], ['cave', 'abbey'], ['abbey', 'oak'],
   ['abbey', 'aqueduct'], ['oak', 'spire'], ['aqueduct', 'pilgrims'],
   ['spire', 'pilgrims'], ['spire', 'halo'], ['pilgrims', 'halo'],
+  ['oak','root-cloister'],['aqueduct','ashen-cistern'],['spire','glass-observatory'],['pilgrims','white-ossuary'],['halo','uncrowned-archive'],
 ];
 const bends={
   'hearth:abbey':[[5,3],[-4,-19]],'hearth:cave':[[19,15],[30,2]],'cave:abbey':[[38,-35],[22,-43]],
@@ -36,6 +37,8 @@ const bends={
   'oak:spire':[[-147,-100],[-149,-148],[-123,-184]],'aqueduct:pilgrims':[[153,-152],[131,-202],[105,-228]],
   'spire:pilgrims':[[-64,-242],[-16,-252],[40,-245]],'spire:halo':[[-117,-270],[-78,-318],[-31,-337]],
   'pilgrims:halo':[[66,-299],[34,-318],[25,-342]],
+  'spire:glass-observatory':[[-125,-202],[-146,-191]],
+  'pilgrims:white-ossuary':[[117,-244],[136,-229]],
 };
 export const ROAD_PATHS=ROUTES.map(([a,b])=>{
   const start=LANDMARKS.find(l=>l.id===a).position,end=LANDMARKS.find(l=>l.id===b).position;
@@ -66,7 +69,7 @@ const hills=[
 const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
 let terrainSeed=81731;
 const noise=create_simplex_noise_2d(()=>{terrainSeed=(Math.imul(terrainSeed,1664525)+1013904223)>>>0;return terrainSeed/4294967296;});
-function sculptedHeightAt(x, z) {
+function naturalHeightAt(x, z) {
   let y=Math.max(0,-z-100)*.17+Math.sin(x*.026)*1.4+Math.sin(z*.036)*1.1+Math.sin(x*.061+z*.027)*.5;
   for(const [cx,cz,h,rx,rz] of hills)y+=h*Math.exp(-(((x-cx)/rx)**2+((z-cz)/rz)**2));
   const roughness=1.2+smooth((-z-60)/240)*5;
@@ -74,14 +77,44 @@ function sculptedHeightAt(x, z) {
   y+=roughness*(noise(x*.035,z*.035)+noise(x*.085+41,z*.085)*.22)*smooth((pathDistance(x,z)-5)/18);
   // The abbey was cut into a level basin. The shoulder eases into the hillside.
   const abbey=smooth((Math.hypot(x/1.05,z+48)-19)/17);y=.65+(y-.65)*abbey;
+  return y;
+}
+let dungeonRoadGrades;
+function sculptedHeightAt(x,z){
+  let y=naturalHeightAt(x,z);
+  dungeonRoadGrades??=ROAD_PATHS.filter(r=>DUNGEONS.slice(1).some(d=>d.id===r.to)).map(r=>{
+    const lengths=[0];for(let i=1;i<r.points.length;i++)lengths.push(lengths[i-1]+Math.hypot(r.points[i][0]-r.points[i-1][0],r.points[i][1]-r.points[i-1][1]));
+    const start=naturalHeightAt(...r.points[0]),end=naturalHeightAt(...r.points.at(-1));
+    return r.points.map((p,i)=>[...p,start+(end-start)*lengths[i]/lengths.at(-1)]);
+  });
+  // A carved grade gives the side roads an even climb through steep natural
+  // shoulders. Its endpoint extends into a level landing before each ramp.
+  let roadDistance=Infinity,roadHeight=0;
+  for(const points of dungeonRoadGrades)for(let i=1;i<points.length;i++){
+    const a=points[i-1],b=points[i],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz)));
+    const distance=Math.hypot(x-a[0]-t*dx,z-a[1]-t*dz);if(distance<roadDistance){roadDistance=distance;roadHeight=a[2]+t*(b[2]-a[2]);}
+  }
+  if(roadDistance<8)y=roadHeight+(y-roadHeight)*smooth((roadDistance-3.5)/4.5);
+  // Continue the road grade beneath each entrance. Leaving the natural hill
+  // under a long masonry ramp creates abrupt terrain contacts through its floor.
+  for(const d of DUNGEONS){
+    const px=x-d.origin[0],n=d.origin[1]-z,start=d.entrance[1];
+    if(n<start||n>0)continue;
+    const distance=Math.max(Math.abs(px)-2,0);if(distance>=4)continue;
+    const toe=naturalHeightAt(d.origin[0],d.origin[1]-start),t=(n-start)/-start;
+    const target=toe+(d.elevation-toe)*t-.35,blend=smooth((n-start)/4)*(1-smooth(distance/4));
+    y+=(target-y)*blend;
+  }
   // Excavated foundations keep the authored lower rooms clear of the hill.
   // Their shoulders ease into the same native terrain sampler as the road.
+  let foundation=Infinity;
   for(const d of DUNGEONS)for(const room of d.rooms){
-    if(room.level!==0||room.rise)continue;
     const px=x-d.origin[0],n=d.origin[1]-z,[x0,n0,x1,n1]=room.rect;
     const distance=Math.hypot(Math.max(x0-px,0,px-x1),Math.max(n0-n,0,n-n1));
-    if(distance<4)y=d.elevation-.35+(y-d.elevation+.35)*smooth(distance/4);
+    const target=d.elevation+room.level+(room.rise??0)*Math.max(0,Math.min(1,(n-n0)/(n1-n0)))-.35;
+    if(distance<4&&(room.level<=0||y>target))foundation=Math.min(foundation,target+(y-target)*smooth(distance/4));
   }
+  if(foundation!==Infinity)y=foundation;
   return y;
 }
 let surface;

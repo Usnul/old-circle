@@ -13,6 +13,8 @@
 .equipment-actions { display:flex;flex-wrap:wrap;gap:$space; }
 .armor-row { padding:$space*2;border:1px solid $line;display:grid;grid-template-columns:1fr auto;gap:$space*2;align-items:center; }
 .armor-row.selected { border-color:$gold;background:rgba($gold,.07); }
+.charm-description {display:flex;align-items:center;gap:$space*2;}
+.charm-description img {width:$space*7;height:$space*7;object-fit:cover;flex-shrink:0;}
 .armor-row dl { display:flex;flex-wrap:wrap;gap:$space $space*2;margin:0;font:12px $font-body; }
 .armor-row dt { color:$muted; }.armor-row dd { margin:$space*.5 0 0;color:$paper; }
 .panel h3 { font:24px $font-display;font-weight:400;color:$gold;margin:$space*3 0 $space; }

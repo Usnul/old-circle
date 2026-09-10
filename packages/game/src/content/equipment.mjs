@@ -1,4 +1,5 @@
 import {WEAPONS,BOSSES} from './catalog.mjs';
+import {CHARMS,charmDamage} from './charms.mjs';
 
 // Fractions are reductions; regeneration values are resources per second.
 // Every set exchanges protection for mobility, quiet movement or focus.
@@ -19,15 +20,16 @@ export const reinforcementCost=(actor,weapon)=>160+120*reinforcement(actor,weapo
 export function weaponDamage(actor,weapon=actor.weapon){
   const w=WEAPONS[weapon],{might,insight}=actor.stats;
   const scaling=w.style==='melee'?might*.75:w.style==='ranged'?might*.45+insight*.3:insight*.85;
-  return (w.damage+scaling)*(1+.18*reinforcement(actor,weapon));
+  return (w.damage+scaling)*(1+.18*reinforcement(actor,weapon))*charmDamage(actor,w.style);
 }
 
 // Version-one characters had an arbitrary armor label and no item collection.
 // Unknown content is removed, while known owned equipment survives reconnect.
-export function migrateInventory(saved,weapon='sword',seals=[]){
+export function migrateInventory(saved,weapon='sword',seals=[],relics=[]){
   const armor=Object.hasOwn(ARMOR,saved?.armor)?saved.armor:'mail';
   const weapons=[...new Set(['sword',weapon,...(saved?.weapons??[]).filter(w=>Object.hasOwn(WEAPONS,w))])];
   const armors=[...new Set(['mail',armor,...(Array.isArray(saved?.armors)?saved.armors.filter(id=>Object.hasOwn(ARMOR,id)):[]),...armorIds.filter(id=>seals.includes(ARMOR[id].seal))])];
   const reinforcements=Object.fromEntries(weapons.map(id=>[id,Math.max(0,Math.min(6,Math.floor(Number(saved?.reinforcements?.[id])||0)))]));
-  return {weapons,arrows:Math.max(0,Math.min(9999,Math.floor(Number(saved?.arrows??30)||0))),armor,armors,reinforcements};
+  const charm=CHARMS[saved?.charm]&&relics.includes(CHARMS[saved.charm].relic)?saved.charm:'none';
+  return {weapons,arrows:Math.max(0,Math.min(9999,Math.floor(Number(saved?.arrows??30)||0))),armor,armors,reinforcements,charm};
 }

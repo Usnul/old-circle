@@ -87,6 +87,16 @@ export const COMPOSITION_VIEWS=[
   {id:'last-ascent',label:'Last Ascent',from:'pilgrims',toward:'halo',fromOffset:[-29,0,-34],targetOffset:[0,heightAt(0,-385)-heightAt(0,-361)+40,-24],yaw:.65,pitch:-.32,distance:7,time:9,requirement:'Final halo dominates the upper third; approach route remains visible.'},
   {id:'reliquary-court',label:'Reliquary · Lower Court',fromPosition:dungeonPoint(DUNGEONS[0],[0,3,0]),targetPosition:dungeonPoint(DUNGEONS[0],[0,12,1.7]),yaw:0,pitch:.1,distance:4,time:15,requirement:'The chapter doorway and side burial route are legible below the returning bridge.'},
   {id:'reliquary-lantern',label:'Reliquary · Lantern Chamber',fromPosition:dungeonPoint(DUNGEONS[0],[0,23,4.8]),targetPosition:dungeonPoint(DUNGEONS[0],[0,27,6]),yaw:0,pitch:.15,distance:2.8,time:23,requirement:'The Quiet Flame draws the eye through a sheltered upper chamber at night.'},
+  ...DUNGEONS.slice(1).flatMap(d=>{
+    const stair=d.connections.find(([a,b])=>a===d.rooms[0].id&&d.rooms.some(r=>r.id===b&&r.rise));
+    const from=dungeonPoint(d,[0,2,0]),to=dungeonPoint(d,stair[2]);to[1]+=1.4;
+    const at=d.treasure.at,room=d.rooms.find(r=>r.level===at[2]&&at[0]>r.rect[0]&&at[0]<r.rect[2]&&at[1]>r.rect[1]&&at[1]<r.rect[3]);
+    const reverse=at[1]-room.rect[1]<5&&room.rect[3]-at[1]>5;
+    return [
+      {id:d.id+'-approach',label:d.name+' · Approach',fromPosition:from,targetPosition:to,yaw:Math.atan2(from[0]-to[0],from[2]-to[2]),pitch:.1,distance:4,time:15,requirement:'The entrance leads clearly toward the connecting stair, with the upper return route visible.'},
+      {id:d.id+'-treasure',label:d.name+' · Relic',fromPosition:dungeonPoint(d,[at[0],at[1]+(reverse?3.5:-Math.min(3.5,at[1]-room.rect[1]-1.2)),at[2]]),targetPosition:dungeonPoint(d,[at[0],at[1],at[2]+1]),yaw:reverse?Math.PI:0,pitch:.15,distance:2.8,time:23,requirement:'The personal relic is readable under automatic exposure in its sheltered chamber at night.'},
+    ];
+  }),
 ];
 export function compositionPoints(view){
   if(view.fromPosition)return {from:[...view.fromPosition],to:[...view.targetPosition]};

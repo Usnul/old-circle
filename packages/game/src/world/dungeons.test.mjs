@@ -10,6 +10,18 @@ async function setup(populate=false){const w=await new GameWorld().start({popula
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
 const foot=a=>[a.x,a.y-.845,a.z];
 const run=(w,n)=>{for(let i=0;i<n;i++)w.step();};
+function walk(w,p,route){
+  expect(route.reachable).toBe(true);
+  for(const target of route.points){
+    const budget=180+Math.ceil(Math.hypot(...target.map((v,i)=>v-foot(p)[i]))*60/2);
+    let steps=0;
+    while(Math.hypot(...target.map((v,i)=>v-foot(p)[i]))>.32&&steps++<budget){
+      const dx=target[0]-p.x,dz=target[2]-p.z,length=Math.hypot(dx,dz);
+      w.input(p.id,{x:dx/Math.max(.01,length),z:dz/Math.max(.01,length),yaw:Math.atan2(-dx,-dz),buttons:0});w.step();
+    }
+    expect(steps,`Motor stalled at ${foot(p)} toward ${target}`).toBeLessThan(budget);
+  }
+}
 
 test('stacked rooms retain their own navigation layer and connect through the ascent',async()=>{
   const nav=await loadNavigation(),d=DUNGEONS[0],lower=dungeonPoint(d,[0,18,0]),upper=dungeonPoint(d,[0,18,4.8]);
@@ -26,23 +38,27 @@ test('stacked rooms retain their own navigation layer and connect through the as
   for(const from of samples)for(const to of samples)expect(nav.tile(from).path(from,to).reachable,`${from} → ${to}`).toBe(true);
 });
 
-test('the native character motor can walk from the hollow approach to the upper relic and use the drop shortcut',async()=>{
-  const w=await setup(),p=w.addPlayer('walker'),d=DUNGEONS[0],r=RELICS[0],start=dungeonPoint(d,d.entrance);
+test.each(DUNGEONS)('$name has connected room floors and a physically walkable route from the approach to its personal reward',async d=>{
+  const w=await setup(),p=w.addPlayer('walker'),r=RELICS.find(r=>r.id===d.treasure.id),start=dungeonPoint(d,d.entrance);
   start[1]=heightAt(start[0],start[2]);w.teleport(p,[start[0],start[1]+.9,start[2]]);run(w,30);
+  const samples=d.rooms.map(r=>dungeonPoint(d,[(r.rect[0]+r.rect[2])/2,(r.rect[1]+r.rect[3])/2,r.level+(r.rise??0)/2]));
+  for(const from of samples)for(const to of samples)expect(w.navigation.tile(from).path(from,to).reachable,`${from} → ${to}`).toBe(true);
   const goal=[r.position[0],r.position[1],r.position[2]+1.5],route=w.navigation.tile(start).path(foot(p),goal);
-  expect(route.reachable).toBe(true);
-  for(const target of route.points){
-    let steps=0;
-    while(Math.hypot(...target.map((v,i)=>v-foot(p)[i]))>.32&&steps++<500){
-      const dx=target[0]-p.x,dz=target[2]-p.z,length=Math.hypot(dx,dz);
-      w.input(p.id,{x:dx/Math.max(.01,length),z:dz/Math.max(.01,length),yaw:Math.atan2(-dx,-dz),buttons:0});w.step();
-    }
-    expect(steps,`Motor stalled at ${foot(p)} toward ${target}`).toBeLessThan(500);
+  walk(w,p,route);
+  expect(p.y-.845).toBeCloseTo(r.position[1],1);expect(w.interact(p)).toBe(true);
+  expect(p.relics).toContain(r.id);
+  if(d.id==='ashen-cistern'){
+    // The cistern has a second ascent instead of an exposed drop.
+    const east=dungeonPoint(d,[12,24,-4.8]);walk(w,p,w.navigation.tile(foot(p)).path(foot(p),east));
+    walk(w,p,w.navigation.tile(foot(p)).path(foot(p),start));
+    expect(Math.hypot(...start.map((v,i)=>v-foot(p)[i]))).toBeLessThan(.35);
+  }else{
+    const bridge=dungeonPoint(d,[d.exit[0],d.exit[1]+2,d.exit[2]]);
+    w.teleport(p,[bridge[0],bridge[1]+.9,bridge[2]]);w.input(p.id,{x:0,z:1,yaw:Math.PI,buttons:0});
+    let steps=0;while(p.y-.845>bridge[1]-1&&steps++<360)w.step();
+    expect(steps,`Return stalled at ${foot(p)}`).toBeLessThan(360);expect(p.hp).toBeGreaterThan(0);
+    expect(p.z).toBeGreaterThan(d.origin[1]-d.exit[1]);
   }
-  expect(p.y-.845).toBeCloseTo(d.elevation+4.8,1);expect(w.interact(p)).toBe(true);
-  // The bridge opens only onto the lower approach: a short fall returns to the entrance.
-  const bridge=dungeonPoint(d,[0,2,4.8]);w.teleport(p,[bridge[0],bridge[1]+.9,bridge[2]]);w.input(p.id,{x:0,z:1,yaw:Math.PI,buttons:0});run(w,150);
-  expect(p.z).toBeGreaterThan(d.origin[1]+3);expect(p.y).toBeLessThan(d.elevation+2);expect(p.hp).toBeGreaterThan(0);
 },30000);
 
 test('a relic is personal, collected once, and survives save, rest and death',async()=>{
@@ -76,6 +92,7 @@ test('an older persistent world gains new authored encounters while keeping deat
   saved.actors.find(a=>a.id===p.id).embers=734;
   w.restoreWorld(saved);
   expect(w.actor(boss.id).hp).toBe(0);expect(w.actor(boss.id).deadTime).toBe(7);expect(w.actor(p.id).embers).toBe(734);
+  for(const dungeon of DUNGEONS)expect([...w.actors.keys()].map(id=>w.actor(id)).filter(a=>a.dungeon===dungeon.id)).toHaveLength(dungeon.encounters.length);
   const d=DUNGEONS[0],lookout=w.actor(`${d.id}-gallery`);
   expect(lookout.dungeon).toBe(d.id);expect(lookout.home[1]).toBeCloseTo(d.elevation+4.8+.85);
   expect([...w.actors.keys()].filter(id=>w.actor(id).dungeon===d.id)).toHaveLength(d.encounters.length);

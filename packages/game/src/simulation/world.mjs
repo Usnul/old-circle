@@ -28,6 +28,7 @@ import {updateStamina} from './stamina.mjs';
 import {BOSS_MOVES} from '../content/boss-moves.mjs';
 import {stepHazard,clearBossHazards} from './boss-attacks.mjs';
 import {knownRelics,flaskCapacity,nearbyRelic} from '../content/relics.mjs';
+import {CHARMS,ownsCharm,charmFor,focusCost,charmDamage} from '../content/charms.mjs';
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
@@ -87,7 +88,7 @@ export class GameWorld {
     this.spawnActor('cave-keeper',{kind:'enemy',archetype:'mage',name:'The Lost Bellkeeper',weapon:'staff',hp:100,healthMax:100},[kx,heightAt(kx,kz)+1,kz]);
     for(const dungeon of DUNGEONS)for(const enemy of dungeon.encounters){
       const p=dungeonPoint(dungeon,enemy.at);p[1]+=.85;
-      this.spawnActor(`${dungeon.id}-${enemy.id}`,{kind:'enemy',archetype:enemy.type,name:enemy.name,weapon:ENEMIES[enemy.type].weapon,hp:enemy.health,healthMax:enemy.health,dungeon:dungeon.id},p);
+      this.spawnActor(`${dungeon.id}-${enemy.id}`,{kind:'enemy',archetype:enemy.type,name:enemy.name,level:dungeon.level??3,weapon:ENEMIES[enemy.type].weapon,hp:enemy.health,healthMax:enemy.health,dungeon:dungeon.id},p);
     }
   }
   spawnActor(id,values={},position){
@@ -116,6 +117,11 @@ export class GameWorld {
     const a=this.actor(id);
     if(!a||!Object.hasOwn(ARMOR,armor)||!a.inventory.armors.includes(armor)||restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
     a.inventory.armor=armor;this.event('armor-equipped',a,{armor});return true;
+  }
+  equipCharm(id,charm){
+    const a=this.actor(id);
+    if(!a||a.kind!=='player'||!Object.hasOwn(CHARMS,charm)||!ownsCharm(a,charm)||restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
+    a.inventory.charm=charm;this.event('charm-equipped',a,{charm});return true;
   }
   reinforce(id,weapon){
     const a=this.actor(id);
@@ -150,8 +156,8 @@ export class GameWorld {
       this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       if(a.landingAge>=0){a.landingAge+=dt;if(a.landingAge>.22)a.landingAge=-1;}
-      const armor=a.kind==='player'?armorFor(a):null;
-      a.mana=Math.min(a.manaMax,a.mana+dt*(armor?.focus??3));
+      const armor=a.kind==='player'?armorFor(a):null,charm=charmFor(a);
+      a.mana=Math.min(a.manaMax,a.mana+dt*(armor?.focus??3)*(charm.focus??1));
       if(a.kind==='enemy'&&!predicted)this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
       if(!!(buttons&BUTTON.CROUCH)!==a.crouch)this.setCrouch(a,!!(buttons&BUTTON.CROUCH));a.yaw=input.yaw;
@@ -165,8 +171,8 @@ export class GameWorld {
       }else{a.airTime+=dt;a.fallSpeed=Math.max(a.fallSpeed,-b.linearVelocity[1]);}
       const normal=a.grounded?Array.from(this.hit.normal):[0,1,0],radius=.32*(a.boss?1.5:1);
       const supportGap=a.grounded?this.hit.t-halfHeight-radius*(1/normal[1]-1):0;
-      const len=Math.hypot(input.x,input.z),sprinting=updateStamina(a,dt,{held:!!(buttons&BUTTON.SPRINT),moving:len>0,regeneration:armor?.stamina??22});
-      const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):(a.crouch?1.65:sprinting?6.7:3.5)*armor.speed;
+      const len=Math.hypot(input.x,input.z),sprinting=updateStamina(a,dt,{held:!!(buttons&BUTTON.SPRINT),moving:len>0,regeneration:(armor?.stamina??22)*(charm.stamina??1)});
+      const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):(a.crouch?1.65:sprinting?6.7:3.5)*armor.speed*(charm.speed??1);
       const blend=Math.min(1,dt*(a.grounded?15:4)),control=a.hurtTime>0?.18:1;
       if(len>0||supportGap>.025||(pressed&BUTTON.JUMP))this.physics.wake(b);
       b.linearVelocity[0]+=(input.x/Math.max(1,len)*speed-b.linearVelocity[0])*blend*control;
@@ -201,7 +207,7 @@ export class GameWorld {
         }
       }
       if((buttons&BUTTON.ATTACK)&&a.cooldown===0)this.attack(a);
-      if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=28){a.mana-=28;a.cooldown=1.2;this.nova(a,6.5,30+a.stats.insight*.85,'frost');}
+      if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=focusCost(a,28)){a.mana-=focusCost(a,28);a.cooldown=1.2;this.nova(a,6.5,(30+a.stats.insight*.85)*charmDamage(a,'magic'),'frost');}
       if((pressed&BUTTON.HEAL)&&a.flasks>0&&a.hp<a.healthMax){a.flasks--;a.hp=Math.min(a.healthMax,a.hp+70);this.event('heal',a);}
       if((pressed&BUTTON.INTERACT)&&a.kind==='player')this.interact(a);
       if(a.attackAge>=0)this.advanceAttack(a,dt);
@@ -218,9 +224,9 @@ export class GameWorld {
   }
   think(a,dt){this.mind.tick(a,dt);}
   attack(a){
-    const w=WEAPONS[a.weapon];if(a.stamina<w.stamina||a.mana<(w.mana??0))return;
+    const w=WEAPONS[a.weapon],mana=focusCost(a,w.mana??0);if(a.stamina<w.stamina||a.mana<mana)return;
     if(a.kind==='player'&&a.weapon==='bow'){if(a.inventory.arrows<=0)return;a.inventory.arrows--;}
-    a.stamina-=w.stamina;a.mana-=w.mana??0;a.cooldown=w.cooldown;a.attackAge=0;a.attackId++;a.hitIds=[];a.attackKind='weapon';a.projectileReleased=false;
+    a.stamina-=w.stamina;a.mana-=mana;a.cooldown=w.cooldown;a.attackAge=0;a.attackId++;a.hitIds=[];a.attackKind='weapon';a.projectileReleased=false;
     this.event('attack',a,{weapon:a.weapon});
   }
   advanceAttack(a,dt){
@@ -264,7 +270,7 @@ export class GameWorld {
   damage(a,v,amount,impulse,type='physical'){
     if(!canDamage(a,v))return false;
     const armor=v.kind==='player'?armorFor(v):null;
-    amount*=1-(armor?.[type]??0);impulse*=1-(armor?.poise??0);
+    amount*=(1-(armor?.[type]??0))*(charmFor(v).received??1);impulse*=1-(armor?.poise??0);
     v.hp=Math.max(0,v.hp-amount);v.hurtTime=.35*(1-(armor?.poise??0));
     if(v.kind==='enemy'){v.targetId=a.id;v.memory=8;}
     const dx=v.x-a.x,dz=v.z-a.z,d=Math.max(.01,Math.hypot(dx,dz)),b=this.ecd.getComponent(this.actors.get(v.id),RigidBody);
@@ -393,7 +399,7 @@ export class GameWorld {
     Object.assign(a,{origin:s.origin,weapon:s.weapon,stats:{...s.stats},level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
     a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
     a.hearths=[...new Set(['hearth',a.checkpointId,...(Array.isArray(s.hearths)?s.hearths.filter(id=>HEARTHS.some(h=>h.id===id)):[])])];
-    a.inventory=migrateInventory(s.inventory,s.weapon,a.seals);
+    a.inventory=migrateInventory(s.inventory,s.weapon,a.seals,knownRelics(s.relics));
     a.relics=knownRelics(s.relics);a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,flaskCapacity(a));
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
@@ -415,7 +421,7 @@ export class GameWorld {
     // progression while placing bodies and checkpoints back above that surface.
     for(const id of this.actors.keys()){
       const a=this.actor(id),definition=authored.get(id),home=definition?.home;
-      a.inventory=migrateInventory(a.inventory,a.weapon,a.seals);
+      a.inventory=migrateInventory(a.inventory,a.weapon,a.seals,knownRelics(a.relics));
       a.relics=knownRelics(a.relics);
       if(home){
         a.dungeon=definition.dungeon;

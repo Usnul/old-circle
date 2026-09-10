@@ -1,5 +1,5 @@
 {
-  "contentVersion": 4,
+  "contentVersion": 5,
   "bounds": {
     "minX": -240,
     "minZ": -480,
@@ -7,7 +7,7 @@
     "depth": 640
   },
   "projection": "north-up; one map unit per world metre",
-  "props": 3826,
+  "props": 3734,
   "waterFootprints": 0,
-  "sourceHash": "f7a7fcca568c9260b53b45567ada8d2573bdfd108b0dd363a84b626017c01fb5"
+  "sourceHash": "bd184518e6cdd1b5df62ed13459531f9d97c9ca8fdd8c2104a8b470f696420b5"
 }

@@ -5,6 +5,9 @@ import {WorldStream,propBounds,sceneryModel} from './world-stream.mjs';
 import {WorldBanners} from './banners.mjs';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
 import {HEARTHS} from '@old-circle/game/world/regions.mjs';
+import {DUNGEONS,dungeonPoint} from '@old-circle/game/world/dungeons.mjs';
+import {MeshShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/MeshShape3D.js';
+import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
 import {geometry_build_from_meshlet_geometry} from '@woosh/meep-engine/src/shade/renderer/geometry/geometry_build_from_meshlet_geometry.js';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
@@ -26,6 +29,22 @@ test('every distant terrain tile meets its full-detail perimeter without cracks'
       return points;
     };
     expect(perimeter(far)).toEqual(perimeter(near));expect(far[0].geometry.primitive_count).toBeLessThan(near[0].geometry.primitive_count/4);
+  }
+});
+
+test('distant dungeon geometry preserves the floors and walls visible in the detailed model',async()=>{
+  const store=new ModelStore({manifest,materials,read}),ray=new Ray3(),hit=new Float32Array(6);
+  const surfaces=parts=>parts.map(part=>{const g=geometry_build_from_meshlet_geometry(part.geometry),s=new MeshShape3D();s.positions=g.getAttribute('position').data;s.indices=g.index.data;return s;});
+  const nearest=shapes=>{let distance=Infinity;for(const shape of shapes)if(shape.raycast(hit,ray))distance=Math.min(distance,Math.hypot(hit[0]-ray[0],hit[1]-ray[1],hit[2]-ray[2]));return distance;};
+  for(const d of DUNGEONS){
+    const name='dungeon_'+d.id,[near,far]=await Promise.all([store.load(name),store.load(manifest.lods[name])]),a=surfaces(near),b=surfaces(far);
+    for(const room of d.rooms)for(const u of [.2,.5,.8])for(const v of [.2,.5,.8]){
+      const [x0,n0,x1,n1]=room.rect,p=dungeonPoint(d,[x0+(x1-x0)*u,n0+(n1-n0)*v,room.level+(room.rise??0)*v]);
+      for(const direction of [[0,-1,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]]){
+        ray.set([p[0],p[1]+.7,p[2],...direction,direction[1]?1:25]);const close=nearest(a);
+        if(Number.isFinite(close))expect(Math.abs(nearest(b)-close),`${d.id}/${room.id} ${u},${v} along ${direction}`).toBeLessThan(.15);
+      }
+    }
   }
 });
 

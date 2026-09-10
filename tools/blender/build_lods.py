@@ -13,8 +13,8 @@ world=json.loads((OUT/'world.json').read_text())
 source=ROOT/'assets/blender/old-circle-kit.blend'
 with bpy.data.libraries.load(str(source),link=False) as (available,loaded):
  loaded.collections=[name for name in available.collections if name in
-  ['tree','pine','magicTree','winterTree','bellTower','abbeyFloor','dungeon_reliquary',
-   'bellkeeperHollow','mountain','mountainRidge','mountainShoulder','abbeyWall','arch']]
+  ['tree','pine','magicTree','winterTree','bellTower','abbeyFloor',
+   'bellkeeperHollow','mountain','mountainRidge','mountainShoulder','abbeyWall','arch'] or name.startswith('dungeon_')]
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 assets={}
 
@@ -54,8 +54,13 @@ for collection in loaded.collections:
   o=original.copy();o.data=original.data.copy();bpy.context.scene.collection.objects.link(o)
   # Welding is local to each authored object and never crosses material seams.
   bm=bmesh.new();bm.from_mesh(o.data);bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=.0001);bm.to_mesh(o.data);bm.free()
-  mod=o.modifiers.new('Distant silhouette','DECIMATE');mod.ratio=.22 if collection.name in ['tree','pine','magicTree'] else .3
-  mod.use_collapse_triangulate=True;objects.append(o)
+  # An eight-vertex masonry prism is already a minimal closed solid. Collapsing
+  # it to three triangles removes whole walls and floors from the silhouette.
+  # Bevelled trim and complex organic meshes still benefit from decimation.
+  if o.modifiers or len(o.data.polygons)>12:
+   mod=o.modifiers.new('Distant silhouette','DECIMATE');mod.ratio=.22 if collection.name in ['tree','pine','magicTree'] else .3
+   mod.use_collapse_triangulate=True
+  objects.append(o)
  export(collection.name+'_distant',objects)
  bpy.data.collections.remove(collection)
 

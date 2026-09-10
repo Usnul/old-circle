@@ -4,6 +4,7 @@ import {SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {armorIds} from '../content/equipment.mjs';
+import {charmIds} from '../content/charms.mjs';
 import {castBossMove} from '../simulation/boss-attacks.mjs';
 import {RELICS} from '../content/relics.mjs';
 import {INTEREST} from './interest.mjs';
@@ -84,10 +85,10 @@ test('a late joining peer sees a pending root trap and receives its damage only 
   }finally{await client.stop();await host.stop();await sim.stop();}
 },30000);
 
-test('hearth equipment commands replay once and replicate owned armor and reinforcement',async()=>{
+test('hearth equipment commands replay once and replicate owned armor, reinforcement and charms',async()=>{
   const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
   try{
-    const p=host.sim.addPlayer('smith','wayfarer');p.embers=2000;p.seals=['Dawn'];
+    const p=host.sim.addPlayer('smith','wayfarer');p.embers=2000;p.seals=['Dawn'];p.relics=['listening-glass'];
     client.localNetworkId=host.addPlayer(1,p.id,'wayfarer',host.sim.exportCharacter(p.id));
     const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
     const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
@@ -99,6 +100,12 @@ test('hearth equipment commands replay once and replicate owned armor and reinfo
     client.localInput={...client.localInput,sequence:3,armor:0,levelStat:1};frames(20);
     expect(host.sim.actor(p.id).level).toBe(2);expect(client.localCharacter().actor.stats.vigor).toBe(11);
     expect(host.sim.actor(p.id).embers).toBe(1717);
+    client.localInput={...client.localInput,sequence:4,levelStat:0,charm:charmIds.indexOf('glass')+1};
+    for(let i=0;i<10;i++){client.tick();host.tick();b.deliver_all();}a.deliver_all();frames(24);
+    expect(host.sim.actor(p.id).inventory.charm).toBe('glass');expect(client.localCharacter().actor.inventory.charm).toBe('glass');
+    expect(host.sim.actor(p.id).embers).toBe(1717);
+    client.localInput={...client.localInput,sequence:5,charm:charmIds.indexOf('crown')+1};frames(20);
+    expect(host.sim.actor(p.id).inventory.charm).toBe('glass');expect(client.localCharacter().actor.inventory.charm).toBe('glass');
   }finally{await client.stop();await host.stop();}
 });
 test('Meep initial sync, owned input prediction and authoritative replication work together',async()=>{

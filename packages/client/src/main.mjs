@@ -66,10 +66,10 @@ async function start(character){
       if(data.type==='save'){if(!inspecting)localStorage.setItem(SAVE_KEY,JSON.stringify(data.character));return;}
       if(data.snapshot){snapshot=data.snapshot;view.acceptSnapshot(snapshot);$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast(`Restored at ${e.name}`);if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
       if(data.type==='level-result'){journalPending=false;toast(data.ok?'Your strength takes root.':'Find a safe hearth and enough embers to grow.');if(menu)refreshJournal();return;}
-      if(data.type==='equipment-result'){toast(data.ok?'Your equipment is ready.':'This change needs a safe hearth and the required embers or seals.');if(equipmentOpen)equipment();return;}
+      if(data.type==='equipment-result'){toast(data.ok?'Your equipment is ready.':'Return to a safe hearth and check that you own the item and can afford the change.');if(equipmentOpen)equipment();return;}
       if(data.snapshot)for(const e of data.snapshot.events??[])if(e.id===playerId){
         if(e.type==='armor-found')toast(`Recovered ${ARMOR[e.armor].name}. Change armor at a hearth.`);
-        if(e.type==='relic-found')toast(`${e.name} recovered. +${e.reward} embers · Flask capacity ${flaskCapacity(snapshot.actors.find(a=>a.id===playerId))}`);
+        if(e.type==='relic-found'){const relic=RELICS.find(r=>r.id===e.relic);toast(`${e.name} recovered. +${e.reward} embers${relic?.flasks?' · Flask capacity '+flaskCapacity(snapshot.actors.find(a=>a.id===playerId)):relic?.charm?' · Choose your charm at a hearth':''}`);}
         if(e.type==='circle-completed'){completionPending=true;send({type:'save'});}
       }
       if(data.type==='ready'){$('#loading').hidden=true;$('#hud').hidden=false;started=true;$('#capture-mouse').hidden=inspecting;requestAnimationFrame(frame);view.engine.viewStack.el.focus();}
@@ -100,10 +100,13 @@ function refreshJournal(){
 }
 function equipment(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
+  const scroll=equipmentOpen?$('#modal-root .panel')?.scrollTop??0:0;
   modal(equipmentMarkup(p,restStatus(p,snapshot.actors)));equipmentOpen=true;
-  const request=(type,item)=>{document.querySelectorAll('[data-armor],[data-reinforce]').forEach(b=>b.disabled=true);send({type,item});};
+  $('#modal-root .panel').scrollTop=scroll;
+  const request=(type,item)=>{document.querySelectorAll('[data-armor],[data-reinforce],[data-charm]').forEach(b=>b.disabled=true);send({type,item});};
   document.querySelectorAll('[data-armor]').forEach(b=>b.onclick=()=>request('armor',b.dataset.armor));
   document.querySelectorAll('[data-reinforce]').forEach(b=>b.onclick=()=>request('reinforce',b.dataset.reinforce));
+  document.querySelectorAll('[data-charm]').forEach(b=>b.onclick=()=>request('charm',b.dataset.charm));
   document.querySelectorAll('[data-equip]').forEach(b=>b.onclick=()=>{send({type:'equip',weapon:b.dataset.equip});closeModal();});
   $('#back-journal').onclick=journal;
 }
