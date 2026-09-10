@@ -22,7 +22,7 @@ import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
 import {DUNGEONS,dungeonPoint} from '../world/dungeons.mjs';
 import {loadNavigation} from '../world/navigation-data.mjs';
-import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
+import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost, enemyDamage } from '../content/catalog.mjs';
 import {ARMOR,armorFor,migrateInventory,weaponDamage,reinforcementLimit,reinforcementCost,hasAllSeals} from '../content/equipment.mjs';
 import {updateStamina} from './stamina.mjs';
 import {BOSS_MOVES} from '../content/boss-moves.mjs';
@@ -263,7 +263,7 @@ export class GameWorld {
       this.ray.set([...from,...d.map(v=>v/length),length]);
       if(sphereSweep(this.physics,this.ray,.11,this.hit,e=>e!==this.actors.get(a.id))){
         const v=this.ecd.getComponent(this.hit.entity,Actor);
-        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.boss?BOSSES[a.archetype].damage:a.kind==='enemy'?(ENEMIES[a.archetype]?.damage??w.damage):weaponDamage(a),w.impulse);}
+        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.kind==='player'?weaponDamage(a):enemyDamage(a),w.impulse);}
       }
     }
   }
@@ -313,7 +313,7 @@ export class GameWorld {
   }
   spawnProjectile(a,w){
     const t=new Transform64(),p=new Projectile(),e=this.ecd.createEntity();
-    p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?weaponDamage(a):a.boss?BOSSES[a.archetype].damage:ENEMIES[a.archetype]?.damage??18;
+    p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?weaponDamage(a):enemyDamage(a);
     p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
     t.setTranslation(...weaponPose(a).origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);

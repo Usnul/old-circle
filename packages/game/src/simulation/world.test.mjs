@@ -7,7 +7,7 @@ import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {SpatialAtlas} from '../world/spatial-atlas.mjs';
 import {ARMOR,weaponDamage,reinforcementLimit} from '../content/equipment.mjs';
-import {BOSSES} from '../content/catalog.mjs';
+import {BOSSES,ENEMIES,WEAPONS,enemyDamage} from '../content/catalog.mjs';
 const worlds=[];
 async function setup(){const w=await new GameWorld().start({populate:false});worlds.push(w);return w;}
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
@@ -172,6 +172,26 @@ test('a visible melee swing connects once with each victim',async()=>{
   const b=w.spawnActor('victim',{hp:200,healthMax:200},[100,a.y,28.5]);a.yaw=0;w.attack(a);
   for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
   expect(b.hp).toBeCloseTo(167);expect(a.hitIds).toContain(b.id);
+});
+
+test('native enemy blade hits use encounter level once, with armor applied after scaling',async()=>{
+  const w=await setup(),p=w.addPlayer('target'),a=w.spawnActor('roadbound',{archetype:'hollow',level:1,weapon:'sword'},[100,15,30]);
+  w.teleport(p,[100,15,28.5]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='sentinel';
+  for(const level of [1,28]){
+    a.level=level;a.stamina=a.staminaMax;p.hp=p.healthMax;const hp=p.hp;w.attack(a);
+    for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
+    expect(hp-p.hp).toBeCloseTo(enemyDamage(a)*(1-ARMOR.sentinel.physical));
+    expect(a.hitIds).toEqual([p.id]);
+  }
+});
+
+test.each(['archer','mage'])('%s projectiles preserve level damage through snapshot restore and native impact',async archetype=>{
+  const w=await setup(),p=w.addPlayer('target'),weapon=ENEMIES[archetype].weapon,a=w.spawnActor('ranged',{archetype,level:32,weapon},[100,15,30]);
+  w.teleport(p,[100,15,25]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='keeper';const hp=p.hp;
+  w.attack(a);w.advanceAttack(a,WEAPONS[weapon].release);const saved=w.snapshot();expect(saved.projectiles[0].damage).toBe(enemyDamage(a));
+  w.replaceSnapshot(saved);for(let i=0;i<25;i++)w.stepProjectiles(1/60);
+  expect(w.projectiles.size).toBe(0);
+  expect(hp-w.actor(p.id).hp).toBeCloseTo(enemyDamage(a)*(1-ARMOR.keeper[weapon==='staff'?'magic':'physical']));
 });
 test('sword damage cannot reach beyond the visible blade tip',async()=>{
   const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,15,30]);
