@@ -139,10 +139,14 @@ def human_mesh():
         if hi!=lo:groups[hi].add([index],u-lo,'REPLACE')
 
 def human_pose(kind,time,duration,weapon):
+    direction=(0,-1)
+    for suffix,angle in [('forward_right',45),('back_right',135),('back_left',225),('forward_left',315),('right',90),('back',180),('left',270)]:
+        if kind.endswith('_'+suffix):
+            kind=kind[:-(len(suffix)+1)];radians=math.radians(angle);direction=(-math.sin(radians),-math.cos(radians));break
     phase=time/duration;cycle=phase*TAU;walk=kind in ['walk','run','crouch_walk'];run=kind=='run';crouch=kind in ['crouch','crouch_walk']
     bob=(.004 if not walk else -.025 if not run else -.05)*math.cos(cycle*2 if walk else cycle)
     root=v((.018*math.sin(cycle) if walk else .006*math.sin(cycle),0,(.84 if run else .91 if walk else .94)+bob-(.31 if crouch else 0)))
-    lean=.12 if run else .2 if crouch else 0
+    lean=.12*-direction[1] if run else .2 if crouch else 0
     chest_yaw=.06*math.sin(cycle) if walk else .015*math.sin(cycle)
     if kind=='hurt':root.y+=.10*math.sin(math.pi*phase);lean=-.22*math.sin(math.pi*phase)
     if kind=='land':root.z-=.22*math.sin(math.pi*phase)
@@ -159,7 +163,9 @@ def human_pose(kind,time,duration,weapon):
         # linearly during stance, then clears the ground during its return.
         f=ph/TAU;fy=(-stride*(1-4*f) if f<.5 else stride-4*stride*(f-.5)) if walk else -.025
         lift=(.13 if not run else .23)*math.sin((f-.5)*TAU) if walk and f>=.5 else 0
-        hip=body((side*.14,0,0));foot=v((side*.14,fy,.1+max(0,lift)))
+        hip=body((side*.14,0,0));foot=v((side*.14-direction[0]*fy,-direction[1]*fy,.1+max(0,lift)))
+        # Side steps use separate fore/aft lanes to clear the passing foot.
+        if walk:foot.y+=side*.075*abs(direction[0])
         if crouch:foot.y-=.08
         if kind in ['jump','hang','mantle']:
             foot=body((side*.18,-.1 if suffix=='L' else .05,-.63 if kind=='hang' else -.69))
@@ -198,7 +204,7 @@ def human_pose(kind,time,duration,weapon):
     poses['weapon']=(right,right+direction*.2)
     previous=body((0,.19,.49))
     for j in range(3):
-        end=previous+v((math.sin(cycle-j*.6)*.018,.06+(.12 if run else .025)*math.sin(cycle-j*.8),-.39))
+        end=previous+v((math.sin(cycle-j*.6)*.018,(.16 if crouch else .06)+(.12 if run else .025)*math.sin(cycle-j*.8),-.29 if crouch else -.39))
         poses['cloak'+str(j+1)]=(previous,end);previous=end
     return poses
 
@@ -298,6 +304,9 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
 clips=[]
 for weapon in ['sword','spear','bow','staff']:
     for kind,duration in [('idle',3.2),('walk',.88),('run',.64),('crouch',3.2),('crouch_walk',1.1)]:clips.append((weapon+'_'+kind,kind,duration,weapon))
+    for kind,duration in [('walk',.88),('run',.64),('crouch_walk',1.1)]:
+        for direction in ['forward_right','right','back_right','back','back_left','left','forward_left']:
+            name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
 export('briarHound',HOUND,hound_mesh,hound_pose,[(kind,kind,duration,'sword') for kind,duration in [('idle',3.4),('walk',.9),('run',.55),('sword',.72),('hurt',.3),('jump',.6)]])

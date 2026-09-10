@@ -37,12 +37,21 @@ export function createSkeleton(name){
 
 const clamp=v=>Math.max(0,Math.min(1,v));
 const smooth=v=>{v=clamp(v);return v*v*(3-2*v);};
+const directions=['','_forward_right','_right','_back_right','_back','_back_left','_left','_forward_left'];
 /** Identical clip times and weights drive GPU skinning and CPU damage sockets. */
 export function animationPlan(a){
   const hound=a.archetype==='hound',data=rigs[actorRig(a)],clock=a.animationTime??0,gait=a.gaitPhase??0,speed=Math.hypot(a.vx,a.vz);
   const prefix=hound?'':a.weapon+'_',move=smooth(speed/.6),run=smooth((speed-3.5)/2.4),plan=[];
   const add=(name,weight,time)=>{if(weight>0&&data.clips[name])plan.push({name,weight,time:Math.max(0,Math.min(data.clips[name].duration,time))});};
   const loop=(name,weight,phase)=>add(name,weight,(phase%1)*data.clips[name].duration);
+  const travel=(kind,weight,stride)=>{
+    stride*=actorScale(a);
+    if(hound){loop(kind,weight,gait/stride);return;}
+    const forward=-Math.sin(a.yaw)*a.vx-Math.cos(a.yaw)*a.vz,right=Math.cos(a.yaw)*a.vx-Math.sin(a.yaw)*a.vz;
+    const sector=((Math.atan2(right,forward)/(Math.PI/4))%8+8)%8,first=Math.floor(sector),blend=sector-first;
+    loop(prefix+kind+directions[first],weight*(1-blend),gait/stride);
+    loop(prefix+kind+directions[(first+1)%8],weight*blend,gait/stride);
+  };
   let action=null,actionTime=0,actionWeight=0;
   if(a.mantle){action=a.mantle.phase==='hang'?'hang':'mantle';actionTime=a.mantle.phase==='hang'?clock%1.6:a.mantle.t;actionWeight=1;}
   else if(a.attackAge>=0){action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;const length=data.clips[action]?.duration??.7;actionWeight=smooth(actionTime/.09)*(1-smooth((actionTime-length+.12)/.12));}
@@ -50,8 +59,8 @@ export function animationPlan(a){
   else if(a.hurtTime>0){action='hurt';actionTime=.3-a.hurtTime;actionWeight=.8;}
   else if(!a.grounded){action='jump';actionTime=a.vy>0?.15:.46;actionWeight=.85;}
   const base=1-actionWeight;
-  if(!hound&&a.crouch){loop(prefix+'crouch',base*(1-move),clock/3.2);loop(prefix+'crouch_walk',base*move,gait/1.12);}
-  else{loop(prefix+'idle',base*(1-move),clock/(hound?3.4:3.2));loop(prefix+'walk',base*move*(1-run),gait/1.12);loop(prefix+'run',base*move*run,gait/1.84);}
+  if(!hound&&a.crouch){loop(prefix+'crouch',base*(1-move),clock/3.2);travel('crouch_walk',base*move,1.12);}
+  else{loop(prefix+'idle',base*(1-move),clock/(hound?3.4:3.2));travel('walk',base*move*(1-run),1.12);travel('run',base*move*run,1.84);}
   if(action)add(action,actionWeight,actionTime);
   if(!plan.length)loop(prefix+'idle',1,clock/3.2);
   const total=plan.reduce((n,p)=>n+p.weight,0);for(const p of plan)p.weight/=total;
