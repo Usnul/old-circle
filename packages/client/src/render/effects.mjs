@@ -14,6 +14,7 @@ export function effect(kind='embers',rate=35){
 }
 function compile(kind){
   const ambient=kind==='motes',frost=kind==='frost',shock=kind==='shockwave';
+  const lifetime=ambient?6:shock||frost?1:1.9,color=frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7];
   const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4}]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
@@ -25,10 +26,15 @@ function compile(kind){
   let velocity=op(init,'mul',{a:signed,b:ambient?[.15,.10,.15]:frost||shock?[7,.2,7]:[.5,1,.5]});
   velocity=op(init,'add',{a:velocity,b:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
   set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',[ambient?.035:shock||frost?.09:.11]);
-  set(init,'color',frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
+  set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});
   const age=op(update,'add',{a:op(update,'attribute',{}, {name:'age'}),b:dt});set(update,'age',age);
-  op(update,'kill',{condition:op(update,'compare',{a:age,b:[ambient?6:shock||frost?1:1.9]},{op:'ge'})});
+  const fadeIn=op(update,'smoothstep',{e0:[0],e1:[ambient?.65:.08],x:age});
+  const fadeOut=op(update,'sub',{a:[1],b:op(update,'smoothstep',{e0:[lifetime*.45],e1:[lifetime],x:age})});
+  const envelope=op(update,'mul',{a:fadeIn,b:fadeOut});
+  // Fade RGB as well as alpha: additive light must approach zero before recycle.
+  set(update,'color',op(update,'scale',{v:color,s:envelope}));
+  op(update,'kill',{condition:op(update,'compare',{a:age,b:[lifetime]},{op:'ge'})});
   const pos=op(update,'attribute',{}, {name:'position'}),vel=op(update,'attribute',{}, {name:'velocity'});
   set(update,'position',op(update,'add',{a:pos,b:op(update,'scale',{v:vel,s:dt})}));
   return create_particle_effect({layout,init,update});

@@ -18,6 +18,7 @@ import { ParticipatingMedia } from '@woosh/meep-engine/src/engine/graphics3/Part
 import { MeshletGeometry } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import { MeshletGeometrySerializationAdapter } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import { StandardShadeMaterial } from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
+import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 import { BinaryBuffer } from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import { ShadeImage } from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
@@ -96,9 +97,9 @@ export class WorldView {
     const lt=new Transform64();lt.setTranslation(0,1,-48);lt.setScale(130,4,100);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
     progress('The circle opens.',1);return this;
   }
-  model(name,position=[0,0,0],scale=[1,1,1],yaw=0){
+  model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null){
     const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
-    const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,c.material)).build(this.ecd);result.push({id,t});}return result;
+    const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,material??c.material)).build(this.ecd);result.push({id,t});}return result;
   }
   pose(parts,p,scale=1,yaw=0,pitch=0,roll=0){
     quat.fromEulerAnglesYXZ(pitch,yaw,roll);
@@ -120,8 +121,10 @@ export class WorldView {
   }
   emitter(kind,p,rate,life=0){const t=new Transform64();t.setTranslation(...p);const c=effect(kind,rate),id=new Entity().add(c).add(t).build(this.ecd);if(life)this.transients.push({id,c,life,age:0});return {id,t,c};}
   blastBoundary(ev){
-    const [x,y,z]=ev.position,radius=ev.radius,parts=this.model(ev.effect==='frost'?'frostRing':'dangerRing',[x,heightAt(x,z)+.12,z],[radius,radius,radius]);
-    this.transients.push({parts,life:.6,age:0});
+    const [x,y,z]=ev.position,radius=ev.radius,material=this.materials[ev.effect==='frost'?'magic':'ember'].clone();
+    material.transparency_mode=TransparencyMode.Transparent;material.diffuse_color.setA(0);
+    const parts=this.model(ev.effect==='frost'?'frostRing':'dangerRing',[x,heightAt(x,z)+.12,z],[radius,radius,radius],0,material);
+    this.transients.push({parts,material,life:.8,age:0});
     for(let i=0;i<16;i++){
       const angle=i/16*Math.PI*2,px=x+Math.sin(angle)*radius,pz=z+Math.cos(angle)*radius;
       const emitter=this.emitter(ev.effect,[px,Math.max(y-.7,heightAt(px,pz)+.15),pz],0,1.1);this.particles.burst(emitter.id,10);
@@ -163,7 +166,7 @@ export class WorldView {
     const liveProjectiles=new Set();for(const p of snapshot.projectiles){liveProjectiles.add(p.id);let m=this.missiles.get(p.id);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell');this.missiles.set(p.id,m);}const v=p.velocity;this.pose(m,p.position,1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
-    for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
+    for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
       const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
