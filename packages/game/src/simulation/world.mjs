@@ -27,7 +27,7 @@ import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, ma
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
-const rotation={x:0,y:0,z:0,w:1};
+const rotation=[0,0,0,1];
 const q=[0,0,0,1];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
@@ -171,12 +171,12 @@ export class GameWorld {
         if(mantle.phase==='hang'){
           if(buttons&BUTTON.CROUCH){a.mantle=null;b.linearVelocity[1]=-1;}
           else{
-            this.physics.setPose(b,{x:mantle.from[0],y:mantle.from[1],z:mantle.from[2]},rotation);b.linearVelocity.fill(0);
+            this.physics.setPose(b,mantle.from,rotation);b.linearVelocity.fill(0);
             if((pressed&BUTTON.JUMP)||((buttons&BUTTON.JUMP)&&mantle.t>.22)){mantle.phase='climb';mantle.t=0;this.event('mantle',a);}
           }
         }else{
           const k=Math.min(1,mantle.t/.4),s=k*k*(3-2*k),p=mantle.from.map((v,i)=>v+(mantle.to[i]-v)*s);
-          this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);if(k===1)a.mantle=null;
+          this.physics.setPose(b,p,rotation);b.linearVelocity.fill(0);if(k===1)a.mantle=null;
         }
       }
       if((buttons&BUTTON.ATTACK)&&a.cooldown===0)this.attack(a);
@@ -216,7 +216,7 @@ export class GameWorld {
     if(!crouch&&this.physics.overlap(CapsuleShape3D.from(.32,1.05),[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
     this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=0;
     this.ecd.addComponentToEntity(e,c);const b=this.ecd.getComponent(e,RigidBody);
-    this.physics.setPose(b,{x:a.x,y,z:a.z},rotation);a.y=y;a.crouch=crouch;
+    this.physics.setPose(b,[a.x,y,a.z],rotation);a.y=y;a.crouch=crouch;
   }
   syncActorCollider(a,rebuild=false){
     const e=this.actors.get(a.id);let collider=this.ecd.getComponent(e,Collider);
@@ -325,7 +325,7 @@ export class GameWorld {
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);this.rest(a);return true;
   }
   respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;Object.assign(a,optionalMotion);a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
-  teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
+  teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,p,rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
   checkEncounters(){
     for(const id of this.actors.keys()){
       const a=this.actor(id);if(!a.boss||!a.active||a.hp<=0)continue;
@@ -365,7 +365,7 @@ export class GameWorld {
       for(const key of motionFields)a[key]=s.motion[key];
       for(const [key,fallback] of Object.entries(optionalMotion))a[key]=s.motion[key]??fallback;
       Object.assign(a,{crouch:!!s.motion.crouch,grounded:!!s.motion.grounded,attackKind:s.motion.attackKind==='nova'?'nova':'weapon',hitIds:[...s.motion.hitIds],projectileReleased:!!s.motion.projectileReleased,mantle:structuredClone(s.motion.mantle??null),deathVelocity:[...s.motion.deathVelocity]});
-      this.syncActorCollider(a,true);const b=this.ecd.getComponent(this.actors.get(id),RigidBody);b.linearVelocity.set(a.vx,a.vy,a.vz);
+      this.syncActorCollider(a,true);const b=this.ecd.getComponent(this.actors.get(id),RigidBody);b.linearVelocity.set([a.vx,a.vy,a.vz]);
     }
   }
   snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}

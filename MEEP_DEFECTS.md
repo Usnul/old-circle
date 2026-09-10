@@ -1,6 +1,6 @@
 # Meep defects encountered by Old Circle
 
-Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.20.0`. Findings below were reproduced against that package on Node 24 / Windows, 2026-09-10. Local source at `H:\git\CompanyNamed\meep` may contain unpublished changes despite sharing the version number.
+Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.22.0`. Original findings below concern 3.20.0 on Node 24 / Windows, 2026-09-10; entries explicitly identify subsequent verification against 3.22.0. Tests use the published dependency, not a linked engine checkout.
 
 ## MEEP-001 — shapeCast quaternion contract disagrees with implementation
 
@@ -8,7 +8,7 @@ Engine source remains read-only. Runtime is pinned to the published `@woosh/meep
 
 Reproduction: create a capsule at `(100,4.294,28.5)`, sweep a radius `.11` sphere from `(100,4.444,29.7)` along `(0,0,-1)` for `2.35` metres. Pass `{x:0,y:0,z:0,w:1}`. A raycast finds the capsule; the sphere cast misses. Repeat with an indexed quaternion.
 
-Game workaround: indexed quaternion in `sphere-sweep.mjs`; `setPose` still needs the documented object form. Suggested engine change: make the public types, assertions and implementation agree.
+**Contract corrected in 3.22.0 (source verified).** `shapeCast` now documents an indexed quaternion. `setPose` also takes indexed positions and quaternions; Old Circle's teleport, mantle, crouch and ragdoll calls use that contract. Rigid-body vectors and joint anchors/bases are now typed arrays, so writes use `set(array)` rather than scalar setters or `copy`. The simulation, ragdoll and network regressions pass against 3.22.0.
 
 ## MEEP-002 — shapeCast throws when a heightfield enters its broadphase
 
@@ -34,13 +34,17 @@ Game workaround: a subclass of Meep's adapter copies the requested byte range be
 
 ## MEEP-005 — unregistering skins retains their matrix allocations
 
-**Source verified in the published package.** `src/shade/renderer/animation/GPUAnimationManager.js:unregister_skin` removes the skin and joint-block records, but retains its reserved matrix range. The method's documentation explicitly states that repeated registration/unregistration accumulates wasted slots. A persistent game's repeated deaths and respawns would keep advancing this allocation even with a fixed number of visible characters.
+**Resolved in the published 3.22.0 package.** In 3.20.0, `src/shade/renderer/animation/GPUAnimationManager.js:unregister_skin` removed the skin and joint-block records but retained its reserved matrix range, advancing allocation with every respawn. In 3.22.0, freed ranges are reused by exact joint count. The package also releases clone meshlet allocations and previous-position slices, and checks table occupancy before repeated skin/clip unregister calls.
 
-Game workaround: retain registered character instances in a pool, parked outside the world when unused, and restore their materials, animation component and joint authority when reused. Allocation follows peak simultaneous instances of each appearance rather than total respawns. Pooled skins still retain their GPU resources. Suggested engine change: reclaim ranges with a free-list allocator, or provide a supported suspension/reuse lifecycle that also skips inactive skinning work.
+Verification: `packages/client/src/render/characters.test.mjs` drives the real Meep mesh/animation systems and software GPU device through eight spawn/death/teardown cycles using the pilgrim and hound rigs and one shipped geometry chunk per rig. Matrix and previous-position high-water marks stay at one simultaneous pair; occupied meshlet bytes return to the source-only baseline after each teardown. A second case verifies pooled respawns restore materials, joint authority and animation while keeping the BLAS buffer capacity flat.
+
+The [upstream response](https://claude.ai/code/artifact/792fafe9-6a00-466c-9e24-cc9d8d766052) recommends retiring the pool. Old Circle retains it because the published package still accumulates per-instance BLAS node data on full teardown; see MEEP-009. The original matrix defect is closed, but the entire respawn allocation lifecycle is not yet bounded without pooling.
 
 ## MEEP-006 — simplex-noise module emits invalid pure-annotation warnings
 
 **Confirmed during the Vite 6.4.3 production build. Low severity.** `src/core/math/noise/create_simplex_noise_2d.js` has `#__PURE__` annotations on numeric/arithmetic expressions and in an explanatory comment (lines 5, 7, 8, 11 and 12). Rollup warns that each annotation is in an unsupported position and removes it. Importing the noise function in both the client and Worker repeats the warnings; the build still succeeds. Suggested engine change: remove annotations from constants and avoid spelling the annotation marker in an ordinary prose comment. No game workaround or engine-file modification is necessary.
+
+**Resolved in 3.22.0 (source and production build verified).** The numeric constants and prose no longer carry the annotation marker; valid annotations remain on constructor calls. The Old Circle build emits no simplex-noise annotation warnings.
 
 ## MEEP-007 — default fragment receiver silently rejects messages the sender accepts
 
@@ -55,3 +59,11 @@ Game workaround: Meep LZ4 blocks in the gameplay binary adapters, preserving exa
 **Source verified in the published package.** `orchestrator/ServerAuthoritativeServer.js:538–539` calls `peer.flush_outbound(sim_frame)` before `onTickComplete.send1(sim_frame)`. `NetworkSession.js:1538` sends queued INITIAL_SYNC messages from that completion handler, despite its comment promising initial sync before the action stream. A newly joined peer can therefore receive and apply retained history before its initial world and frame baseline exist.
 
 Game workaround: the host excludes the new recipient from action scope until the client acknowledges the initial frame it installed through a Meep reliable command. That acknowledgement also sets the recipient's replication baseline. The loopback regression warms the host for 90 ticks before connecting and verifies that no frame is applied before initial sync. Suggested engine change: order initial snapshot delivery before history flushing and gate dependent action application until that snapshot is installed, including when a transport reorders messages.
+
+## MEEP-009 — despawned geometry clones retain BLAS node data
+
+**Confirmed against the published 3.22.0 package.** `GPUGeometryManager.remove_clone` releases meshlet allocations and calls `geometry/bvh/GPUGeometryBVHManager.js:remove`. The latter removes the owner record and lookup target but leaves its node bytes in an append-only GPU arena. `#upload_pending_nodes` appends each replacement clone's tree at `#buffer_data_end`; growing the buffer preserves the abandoned bytes. This residual scales with geometry size, beyond the small unrecycled geometry-id metadata rows acknowledged in the MEEP-005 response.
+
+Reproduction: run the teardown case in `packages/client/src/render/characters.test.mjs`. With `pilgrim-0.meep` and `briarHound-0.meep`, the reported BLAS arena end advances by 79,808 bytes per subsequent cycle, from 159,648 after the first pair to 718,304 after the eighth. After each teardown there are no character entities or scene instances and occupied meshlet bytes are back at the source baseline. The paired pool case keeps BLAS buffer capacity flat.
+
+Game workaround: retain the existing registered character pool, parked offstage, restoring materials, animation and joint authority on reuse. Suggested engine change: recycle per-clone BLAS node ranges, or compact and republish their addresses; ordinary buffer growth alone does not reclaim them.

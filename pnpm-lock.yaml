@@ -18,8 +18,8 @@ importers:
         specifier: workspace:*
         version: link:../game
       '@woosh/meep-engine':
-        specifier: 3.20.0
-        version: 3.20.0(dat.gui@0.7.9)
+        specifier: 3.22.0
+        version: 3.22.0(dat.gui@0.7.9)
       dat.gui:
         specifier: 0.7.9
         version: 0.7.9
@@ -40,8 +40,8 @@ importers:
   packages/game:
     dependencies:
       '@woosh/meep-engine':
-        specifier: 3.20.0
-        version: 3.20.0(dat.gui@0.7.9)
+        specifier: 3.22.0
+        version: 3.22.0(dat.gui@0.7.9)
 
   packages/server:
     dependencies:
@@ -49,8 +49,8 @@ importers:
         specifier: workspace:*
         version: link:../game
       '@woosh/meep-engine':
-        specifier: 3.20.0
-        version: 3.20.0(dat.gui@0.7.9)
+        specifier: 3.22.0
+        version: 3.22.0(dat.gui@0.7.9)
       ws:
         specifier: 8.21.3
         version: 8.21.3
@@ -499,8 +499,8 @@ packages:
   '@vitest/utils@3.2.7':
     resolution: {integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==}
 
-  '@woosh/meep-engine@3.20.0':
-    resolution: {integrity: sha512-FAvuMfTooMgr+DWqizByOdHQxAsP7by85LIDMKI5vhUkn86z4Ky8wALSFrSWw8c64feybWIELhVycUHhh8oE6w==}
+  '@woosh/meep-engine@3.22.0':
+    resolution: {integrity: sha512-Lqq6w3AbdDC/Dnh2RAsvgAMlD30dQKbklCp2FjmqZl5X7m+mmclGqNNPSW6Z+wNC5/wi4hUA6aQ9GRgQAvIiww==}
     engines: {node: '>=24'}
     peerDependencies:
       dat.gui: '>=0.7.0'
@@ -608,11 +608,6 @@ packages:
   node-addon-api@7.1.1:
     resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
 
-  opentype.js@1.3.3:
-    resolution: {integrity: sha512-/qIY/+WnKGlPIIPhbeNjynfD2PO15G9lA/xqlX2bDH+4lc3Xz5GCQ68mqxj3DdUv6AJqCeaPvuAoH8mVL0zcuA==}
-    engines: {node: '>= 8.0.0'}
-    hasBin: true
-
   opentype.js@1.3.4:
     resolution: {integrity: sha512-d2JE9RP/6uagpQAVtJoF0pJJA/fgai89Cc50Yp0EJHk+eLp6QQ7gBoblsnubRULNY132I0J1QKMJ+JTbMqz4sw==}
     engines: {node: '>= 8.0.0'}
@@ -640,8 +635,8 @@ packages:
     resolution: {integrity: sha512-Kko+Y5XQ6fM+Ce3dq3m9YGxnacYZYl9cA1wZjaF3Vbry2L3i1qVg8+CAgNPsXRArPMUMCaOR7oa9Nqntc43JKA==}
     engines: {node: '>= 20.19.0'}
 
-  robust-predicates@3.0.2:
-    resolution: {integrity: sha512-IXgzBWvWQwE6PrDI05OvmXUIruQTcoMDzRsOd5CDvHCVLcLHMTSYvOK5Cm46kWqlV3yAbuSpBZdJ5oP5OUoStg==}
+  robust-predicates@3.0.3:
+    resolution: {integrity: sha512-NS3levdsRIUOmiJ8FZWCP7LG3QpJyrs/TE0Zpf1yvZu8cAJJ6QMW92H1c7kWpdIHo8RvmLxN/o2JXTKHp74lUA==}
 
   rollup@4.63.1:
     resolution: {integrity: sha512-3Df9jsstwhccuEfmAMi9l8XUh/GOkVObmFTU7CCVBysEbcOZLl84jCtaAZMcPiMz2EGKsATzQcU+Xr3n/wU6cg==}
@@ -1071,11 +1066,11 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
-  '@woosh/meep-engine@3.20.0(dat.gui@0.7.9)':
+  '@woosh/meep-engine@3.22.0(dat.gui@0.7.9)':
     dependencies:
       dat.gui: 0.7.9
-      opentype.js: 1.3.3
-      robust-predicates: 3.0.2
+      opentype.js: 1.3.4
+      robust-predicates: 3.0.3
 
   assertion-error@2.0.1: {}
 
@@ -1177,11 +1172,6 @@ snapshots:
   node-addon-api@7.1.1:
     optional: true
 
-  opentype.js@1.3.3:
-    dependencies:
-      string.prototype.codepointat: 0.2.1
-      tiny-inflate: 1.0.3
-
   opentype.js@1.3.4:
     dependencies:
       string.prototype.codepointat: 0.2.1
@@ -1203,7 +1193,7 @@ snapshots:
 
   readdirp@5.1.1: {}
 
-  robust-predicates@3.0.2: {}
+  robust-predicates@3.0.3: {}
 
   rollup@4.63.1:
     dependencies:

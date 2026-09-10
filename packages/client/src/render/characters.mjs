@@ -127,7 +127,7 @@ export class Characters {
     const {view}=this;if(view.ecd.getComponent(rig.id,Animation))view.ecd.removeComponentFromEntity(rig.id,Animation);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
     if(rig.lantern){view.remove(rig.lantern.parts);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
-    // Meep 3.20 retains a skin's matrix range after unregistration (MEEP-005).
+    // Meep 3.22 fixes MEEP-005, but despawning still retains BLAS data (MEEP-009).
     // Retain the registered instance offstage and reuse it on the next spawn.
     rig.t.makeIdentity();rig.t.setTranslation(0,-10000,0);rig.t.updateMatrix();t64_announce_change(view.ecd,rig.id);
     let available=this.pool.get(rig.url);if(!available){available=[];this.pool.set(rig.url,available);}available.push(rig);
