@@ -353,14 +353,25 @@ export class GameWorld {
   }
   snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
   restoreWorld(snapshot){
+    const authoredHomes=new Map([...this.actors.keys()].map(id=>{const a=this.actor(id);return [id,a.kind==='enemy'?[...a.home]:null];}));
     this.replaceSnapshot(snapshot);
-    if(snapshot.contentVersion===WORLD_VERSION)return;
     // Content updates may raise terrain beneath a saved position. Preserve
     // progression while placing bodies and checkpoints back above that surface.
     for(const id of this.actors.keys()){
-      const a=this.actor(id);this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
-      a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
-      a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);
+      const a=this.actor(id),home=authoredHomes.get(id);
+      if(home){
+        const moved=home[0]!==a.home[0]||home[2]!==a.home[2],outsideLeash=Math.hypot(a.x-a.home[0],a.z-a.home[2])>(a.boss?29:38);
+        a.home=home;
+        // Old motor/content versions could leave enemies permanently outside
+        // their return tile. Restore only displaced living NPCs; encounter
+        // health and dead timers still obey the ordinary persistent rules.
+        if(a.hp>0&&(moved||outsideLeash)){this.teleport(a,home);a.path=null;a.patrolGoal=null;a.patrolWaitUntil=this.tick+120;a.intent={x:0,z:0,yaw:a.yaw,buttons:0};}
+      }
+      if(snapshot.contentVersion!==WORLD_VERSION){
+        this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
+        a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
+        a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);
+      }
     }
   }
   replaceSnapshot(snapshot,{preservePlayer}={}){

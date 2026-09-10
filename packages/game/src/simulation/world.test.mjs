@@ -47,6 +47,15 @@ test('older world saves retain progression above a raised terrain surface',async
   w.restoreWorld(saved);expect(p.embers).toBe(345);expect(p.seals).toEqual(['Dawn']);
   expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));expect(p.checkpoint[1]).toBeGreaterThan(heightAt(0,24));
 });
+
+test('saved NPCs regain authored homes without resurrecting enemies or changing health',async()=>{
+  const w=await setup(),p=w.addPlayer('returning'),a=w.spawnActor('displaced',{},[160,heightAt(160,120)+1,120]),dead=w.spawnActor('fallen',{hp:0,deadTime:70},[180,heightAt(180,120)+1,120]);
+  const home=[...a.home],saved=w.snapshot(),old=saved.actors.find(v=>v.id===a.id),fallen=saved.actors.find(v=>v.id===dead.id);
+  old.x+=100;old.hp=31;old.path=[[0,0,0]];fallen.home[0]+=3;
+  w.restoreWorld(saved);
+  expect([a.x,a.y,a.z]).toEqual(home);expect(a.hp).toBe(31);expect(a.path).toBeNull();
+  expect(dead.hp).toBe(0);expect(dead.deadTime).toBe(70);expect(dead.home[0]).toBe(180);expect(p.embers).toBe(0);
+});
 test('PvP requires both participants to opt in; collisions apply knockback',async()=>{
   const w=await setup(),a=w.addPlayer('attacker'),b=w.addPlayer('victim');w.teleport(b,[2,a.y,a.z]);const hp=b.hp;
   expect(w.damage(a,b,20,300)).toBe(false);a.pvp=true;expect(w.damage(a,b,20,300)).toBe(false);b.pvp=true;

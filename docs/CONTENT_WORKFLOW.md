@@ -6,6 +6,8 @@
 
 Increment `WORLD_VERSION` when an elevation edit requires saved positions to be rebased. Character import and server world restoration preserve progression while lifting older saved positions and checkpoints above raised terrain. This migration assumes interiors remain above the heightfield; a future underground terrain revision needs its own placement policy.
 
+Server restoration also reconciles saved enemy homes against the current authored population. A moved encounter or a living NPC stranded beyond its combat leash returns to the authored home; health and death timers remain intact. Ordinary in-range patrol positions persist. Keep actor IDs stable when moving an encounter so this migration can identify it.
+
 `HEARTHS` defines one return point per region, beside a graded approach road. Keep its stable ID, clear the campsite of collision, and keep enemy patrol homes at least 22 metres away. The arrival point stays on the road. Resting, respawning and improving attributes share the same safety rules offline and through Meep network actions: no living enemy within 14 metres, no attack or mantle in progress, and the character must stand beside the fire. Kindled hearth IDs and the selected return point travel with the character save.
 
 `tools/export-world-layout.mjs` samples that definition into ignored `.local/blender/world.json`. Blender reads those samples for terrain elevation and road materials. Never copy the height function or road coordinates into Python. Physics uses the shared height function and exported Blender convex hulls. Visual props and physical props use the same instance transforms.
