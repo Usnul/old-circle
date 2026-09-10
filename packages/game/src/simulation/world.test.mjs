@@ -98,3 +98,17 @@ test('equipment and arrows belong to the character and survive save import',asyn
   p.attackAge=-1;w.equip(p.id,'staff');expect(p.weapon).toBe('bow');const saved=w.exportCharacter(p.id);
   w.importCharacter(p.id,saved);expect(p.inventory.arrows).toBe(29);expect(p.inventory.weapons).toContain('bow');
 });
+
+test('idle enemies patrol, pause, and keep individual facing and animation phases',async()=>{
+  const w=await setup(),a=w.spawnActor('patrol-one',{},[160,heightAt(160,120)+1,120]),b=w.spawnActor('patrol-two',{},[180,heightAt(180,120)+1,120]);
+  expect(a.yaw).not.toBe(b.yaw);expect(a.animationTime).not.toBe(b.animationTime);
+  const start=[a.x,a.z],phases=new Set();for(let i=0;i<720;i++){w.step();phases.add(a.phase);}
+  expect(phases.has('patrol')).toBe(true);expect(phases.has('watch')).toBe(true);
+  expect(Math.hypot(a.x-start[0],a.z-start[1])).toBeGreaterThan(1);expect(Math.hypot(a.x-a.home[0],a.z-a.home[2])).toBeLessThan(10);
+});
+
+test('crouched players behind an enemy are unseen, while a nearby attack draws attention',async()=>{
+  const w=await setup(),p=w.addPlayer('stealth');w.teleport(p,[160,10,125]);p.crouch=true;
+  const guard=w.spawnActor('guard',{},[160,10,120]);guard.yaw=0;w.think(guard,1/60);
+  expect(guard.targetId).toBeUndefined();w.damage(p,guard,1,0);w.think(guard,1/60);expect(guard.targetId).toBe(p.id);expect(guard.active).toBe(true);
+});

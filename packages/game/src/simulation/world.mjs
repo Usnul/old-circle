@@ -18,7 +18,7 @@ import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
 import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
 import collisionAssets from '../content/colliders.json' with {type:'json'};
-import { SpatialAtlas } from '../world/spatial-atlas.mjs';
+import {EnemyMind,enemySeed} from './enemy-mind.mjs';
 import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN } from '../world/regions.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
@@ -36,7 +36,7 @@ export class GameWorld {
     for(const c of [Transform64,RigidBody,Collider,Actor,Projectile])this.ecd.registerComponentType(c);
     this.actors=new Map();this.projectiles=new Set();this.events=[];this.tick=0;this.time=15.2;this.layout=buildLayout();
     this.ray=new Ray3();this.hit=new PhysicsSurfacePoint();this.overlaps=new Uint32Array(512);
-    this.navigation=new Map();
+    this.navigation=new Map();this.mind=new EnemyMind(this);
   }
   async start({populate=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
@@ -83,7 +83,7 @@ export class GameWorld {
     const a=Object.assign(new Actor(),values,{id});
     const p=position??[SPAWN[0],heightAt(SPAWN[0],SPAWN[2])+1,SPAWN[2]];
     a.x=p[0];a.y=p[1];a.z=p[2];a.home=[...p];
-    if(a.kind==='enemy'){const seed=Array.from(id).reduce((n,c)=>(Math.imul(n,31)+c.charCodeAt(0))>>>0,4171);a.animationTime=(seed%1000)/73;a.gaitPhase=(seed%100)/31;}
+    if(a.kind==='enemy'){const seed=enemySeed(id);a.animationTime=(seed%1000)/73;a.gaitPhase=(seed%100)/31;a.yaw=(seed*2.399963)%6.283185;a.intent.yaw=a.yaw;}
     const scale=a.boss?1.5:1;
     const e=this.body(p,CapsuleShape3D.from(.32*scale,1.05*scale));
     this.ecd.addComponentToEntity(e,a);this.actors.set(id,e);return a;
@@ -167,34 +167,7 @@ export class GameWorld {
     }
     this.stepProjectiles(dt);this.checkEncounters();
   }
-  think(a,dt){
-    let target=null,distance=Infinity;
-    for(const id of this.actors.keys()){
-      const p=this.actor(id);if(p.kind!=='player'||p.hp<=0)continue;
-      const d=Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z);
-      const detect=a.boss?23:p.crouch?7:19;
-      if(d<detect&&d<distance&&this.lineOfSight([a.x,a.y+.4,a.z],[p.x,p.y+.3,p.z],this.actors.get(a.id),this.actors.get(p.id))){target=p;distance=d;}
-    }
-    if(target){a.targetId=target.id;a.memory=6;}else if(a.memory>0){a.memory-=dt;const p=this.actor(a.targetId);if(p?.hp>0&&Math.hypot(p.x-a.x,p.z-a.z)<35){target=p;distance=Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z);}}
-    if(!target){a.intent={x:0,z:0,yaw:a.yaw,buttons:0};a.phase='idle';return;}
-    a.active=true;
-    const dx=target.x-a.x,dz=target.z-a.z,d=Math.max(.01,Math.hypot(dx,dz));
-    const ranged=WEAPONS[a.weapon].style!=='melee',range=ranged?12:a.boss?3.7:2;
-    a.phase=distance>range?'pursue':'windup';
-    if(a.windup>0){a.windup-=dt;a.intent={x:0,z:0,yaw:Math.atan2(-dx,-dz),buttons:0};if(a.windup<=0){if(a.attackKind==='nova')this.nova(a,8, BOSSES[a.archetype].damage,'shockwave');else this.attack(a);a.cooldown=a.boss?2.6:1.7;}return;}
-    a.intent={x:distance>range?dx/d:0,z:distance>range?dz/d:0,yaw:Math.atan2(-dx,-dz),buttons:0};
-    if(distance>range){
-      this.ray.set([a.x,a.y,a.z,dx/d,0,dz/d,Math.min(d,2)]);
-      if(this.physics.raycast(this.ray,this.hit,e=>e!==this.actors.get(a.id)&&e!==this.actors.get(target.id))){
-        const key=`${Math.floor(a.home[0]/40)},${Math.floor(a.home[2]/40)}`;
-        let atlas=this.navigation.get(key);if(!atlas){const [x,z]=key.split(',').map(v=>Number(v)*40);atlas=new SpatialAtlas(this,{bounds:[x-32,z-32,x+72,z+72],spacing:2}).build();this.navigation.set(key,atlas);}
-        if(!a.path||this.tick-(a.pathTick??0)>45){a.path=atlas.path([a.x,a.y-.845,a.z],[target.x,target.y-.845,target.z]).points;a.pathTick=this.tick;}
-        while(a.path?.length>1&&Math.hypot(a.path[0][0]-a.x,a.path[0][2]-a.z)<1)a.path.shift();
-        const next=a.path?.[0];if(next){const px=next[0]-a.x,pz=next[2]-a.z,pl=Math.max(.1,Math.hypot(px,pz));a.intent.x=px/pl;a.intent.z=pz/pl;}
-      }
-    }
-    if(distance<=range&&a.cooldown===0){a.windup=a.boss?1.15:.8;a.attackKind=a.boss&&a.attackId%3===2?'nova':'weapon';this.event('telegraph',a,{effect:a.attackKind,radius:a.attackKind==='nova'?8:range});}
-  }
+  think(a,dt){this.mind.tick(a,dt);}
   attack(a){
     const w=WEAPONS[a.weapon];if(a.stamina<w.stamina||a.mana<(w.mana??0))return;
     if(a.kind==='player'&&a.weapon==='bow'){if(a.inventory.arrows<=0)return;a.inventory.arrows--;}
@@ -236,6 +209,7 @@ export class GameWorld {
   damage(a,v,amount,impulse){
     if(!canDamage(a,v))return false;
     v.hp=Math.max(0,v.hp-amount);v.hurtTime=.35;
+    if(v.kind==='enemy'){v.targetId=a.id;v.memory=8;}
     const dx=v.x-a.x,dz=v.z-a.z,d=Math.max(.01,Math.hypot(dx,dz)),b=this.ecd.getComponent(this.actors.get(v.id),RigidBody);
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
     this.event('hit',v,{damage:Math.round(amount),source:a.id});
