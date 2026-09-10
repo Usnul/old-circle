@@ -54,7 +54,7 @@ export class WorldView {
     const renderer=this.engine.graphics.renderer;
     if(!renderer)throw new Error('Meep could not initialize WebGPU on this browser.');
     renderer.feature_particles_enabled=true;renderer.feature_bloom_enabled=true;renderer.feature_ssao_enabled=true;renderer.feature_taa_enabled=true;renderer.feature_shadows_enabled=true;
-    renderer.feature_automatic_exposure_enabled=false;renderer.exposure_compensation=0;
+    renderer.feature_automatic_exposure_enabled=true;renderer.exposure_compensation=0;
     // Bound presentation resolution; asset inference never shares the GPU with this view.
     renderer.pixel_ratio=Math.min(devicePixelRatio,1.4);
     const camera=new Camera();camera.fov.set(57);camera.clip_near=.12;camera.clip_far=1100;
