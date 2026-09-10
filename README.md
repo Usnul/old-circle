@@ -1,6 +1,6 @@
 # Old Circle
 
-An original dark fantasy action RPG built on **Meep 3.20.0**. This repository contains an early playable vertical slice and a reproducible content pipeline. It is not yet the finished open-world game or the final visual-quality benchmark.
+An original dark fantasy action RPG built on **Meep 3.20.0**, with a shared persistent world and a reproducible Blender content pipeline. The game is under active development; the current playable world still needs substantial content and art work before release.
 
 ![Old Circle concept and title-screen artwork](packages/client/public/assets/art/old-circle-concept.png)
 
@@ -27,7 +27,7 @@ The production host defaults to loopback. `HOST`, `PORT` and `OLD_CIRCLE_DATA_DI
 
 ## Play
 
-WASD walks, Shift sprints, C crouches, Space jumps and grabs nearby ledges. Keep Space held to climb; release it to hang, then press Space to climb or C to drop. Mouse looks; left click attacks; Q casts frost nova; R drinks a flask; E rests at the opening hearth. Keys 1–4 select owned weapons. Tab opens attributes, equipment information, saving and the PvP toggle; M opens the map. Escape releases the mouse and opens the journal. The journal pauses solo simulation; the shared world keeps running.
+WASD walks, Shift sprints, C crouches, Space jumps and grabs nearby ledges. Keep Space held to climb; release it to hang, then press Space to climb or C to drop. Mouse looks; left click attacks; Q casts frost nova; R drinks a flask; E rests at a nearby hearth. Keys 1–4 select owned weapons. Tab opens attributes, equipment information, saving and the PvP toggle; M opens the map. Escape releases the mouse and opens the journal. The journal pauses solo simulation; the shared world keeps running. In embedded browsers that reject pointer lock, free mouse look, edge turning and arrow keys remain available.
 
 Choose a starting inventory and stat distribution, find weapons on enemies, earn embers and improve attributes at the hearth. The Bellkeeper's Hollow offers an early magic weapon. Six regional bosses grant seals. Players can enter ongoing encounters. Damage between players requires both to enable PvP. A defeated player returns to their checkpoint after four seconds and loses 25% of carried embers.
 
@@ -38,9 +38,9 @@ Choose a starting inventory and stat distribution, find weapons on enemies, earn
 - `packages/server`: persistent Node simulation, Meep transport integration, atomic world saves and static hosting.
 - `assets/blender` and `tools`: Blender source, native geometry/collider export, local FLUX icons, local Stable Audio sounds and world inspection tools.
 
-The current world is about 480 × 640 metres, with six connected biome zones, an abbey, a traversable rock hollow, five normal enemy archetypes and six boss variants. The bosses currently share a small move vocabulary. Armor is inventory metadata; there is no armor-item customization yet. Locomotion uses a capsule and procedural body-part animation with a Meep FABRIK weapon arm. Production skeletal animations remain to be built.
+The current world is about 480 × 640 metres, with six connected biome zones and regional hearths, an abbey, a traversable rock hollow, five normal enemy archetypes and six boss variants. The bosses currently share a small move vocabulary. Armor is inventory metadata; there is no armor-item customization yet. Characters use Blender armatures and weighted skins, directional locomotion, jump/landing and weapon actions, played by Meep's animation system. Deaths transfer the skeleton to Meep ragdoll physics.
 
-The connected baseline replicates full world snapshots through Meep's binary adapters. Prediction and replay work, including character-only reconnect, but this is **not a scalable MMO replication layout**. Per-actor interest management, packed component schemas and a datagram transport are required before large-player-count deployment. See [architecture](docs/ARCHITECTURE.md) for the precise authority model and limits.
+The connected baseline sends an initial world followed by changed-field patches through Meep's binary adapters and LZ4 compression. Prediction and replay run in a warm simulation Worker; Meep's adaptive render playout smooths presentation. Disconnects continue locally, and reconnect carries the character into the authoritative world. Replication still covers the whole world: per-actor interest management, packed component schemas and a production transport are required before large-player-count deployment. See [architecture](docs/ARCHITECTURE.md) for the precise authority model and limits.
 
 ## Develop
 

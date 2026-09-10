@@ -29,9 +29,9 @@ Give every added road a destination, reward, encounter or shortcut. Major landma
 
 ## Next production milestones
 
-1. Finish the opening route, cave and Aldren encounter to the concept's visual quality, including a rigged character, distinct boss animation and polished ledge hanging/mantling.
+1. Bring the opening route, cave and Aldren encounter to the concept's visual quality, with distinct boss animation and polished ledge hanging/mantling. Rigged characters and directional locomotion are implemented; those alone do not establish the final art quality.
 2. Author an actual connected dungeon with rooms, vertical routes, acoustic probes, authored navmesh layers and deliberate combat compositions.
-3. Replace full-world wire snapshots with scoped component replication, test unstable connections and sustained multi-player encounters, then select the production datagram transport.
+3. Replace whole-world changed-field replication with scoped components, expand unstable-connection and sustained multi-player checks, then select the production transport.
 4. Expand the modular kit and enemy moves region by region, add armor and more weapon families, and introduce streaming before expanding the map footprint.
 
 Keep the game playable at each milestone. Do not count a named region, effect toggle or boss stat variant as finished content.
