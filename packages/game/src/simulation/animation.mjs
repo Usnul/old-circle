@@ -8,6 +8,7 @@ import {animation_curve_optimize} from '@woosh/meep-engine/src/engine/animation/
 import {pose_evaluate_world} from '@woosh/meep-engine/src/shade/renderer/animation/pose/pose_evaluate_world.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import rigs from '../content/rigs.json' with {type:'json'};
+import {BOSS_MOVES} from '../content/boss-moves.mjs';
 
 export {rigs};
 export const actorRig=a=>a.archetype==='hound'?'briarHound':'pilgrim';
@@ -54,6 +55,10 @@ export function animationPlan(a){
   };
   let action=null,actionTime=0,actionWeight=0;
   if(a.mantle){action=a.mantle.phase==='hang'?'hang':'mantle';actionTime=a.mantle.phase==='hang'?clock%1.6:a.mantle.t;actionWeight=1;}
+  else if(a.boss&&BOSS_MOVES[a.bossMove]?.clip&&a.attackKind==='ritual'&&(a.windup>0||a.attackAge>=0)){
+    const move=BOSS_MOVES[a.bossMove];action=move.clip;actionTime=move.windup+(a.windup>0?-a.windup:a.attackAge);
+    actionWeight=smooth(actionTime/.12)*(1-smooth((actionTime-move.windup-move.recovery+.15)/.15));
+  }
   else if(a.attackAge>=0){action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;const length=data.clips[action]?.duration??.7;actionWeight=smooth(actionTime/.09)*(1-smooth((actionTime-length+.12)/.12));}
   else if(a.windup>0&&a.attackKind==='nova'){action='nova';actionTime=Math.min(.5,1-a.windup);actionWeight=.85;}
   else if(a.hurtTime>0){action='hurt';actionTime=.3-a.hurtTime;actionWeight=.8;}

@@ -26,6 +26,8 @@ import {loadNavigation} from '../world/navigation-data.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 import {ARMOR,armorFor,migrateInventory,weaponDamage,reinforcementLimit,reinforcementCost,hasAllSeals} from '../content/equipment.mjs';
 import {updateStamina} from './stamina.mjs';
+import {BOSS_MOVES} from '../content/boss-moves.mjs';
+import {stepHazard,clearBossHazards} from './boss-attacks.mjs';
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
@@ -143,7 +145,7 @@ export class GameWorld {
         a.deadTime+=dt;b.linearVelocity.fill(0);
         if(a.kind==='player'&&a.deadTime>4)this.respawn(a);
         if(a.kind==='enemy'&&a.deadTime>(a.boss?1200:180)&&![...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<30;})){
-          a.hp=a.healthMax;a.deadTime=0;a.active=false;a.attackAge=-1;this.teleport(a,a.home);
+          a.hp=a.healthMax;a.deadTime=0;a.active=false;a.attackAge=-1;a.windup=0;a.bossMove='';a.attackId=0;a.cooldown=1;a.memory=0;a.targetId=null;this.teleport(a,a.home);
         }
         continue;
       }
@@ -226,11 +228,11 @@ export class GameWorld {
   }
   advanceAttack(a,dt){
     a.attackAge+=dt;const w=WEAPONS[a.weapon];
-    if(a.attackKind!=='nova'){
+    if(a.attackKind!=='nova'&&a.attackKind!=='ritual'){
       this.melee(a);
       if(w.release!==undefined&&!a.projectileReleased&&a.attackAge>=w.release){this.spawnProjectile(a,w);a.projectileReleased=true;this.event('release',a,{weapon:a.weapon});}
     }
-    if(a.attackAge>(a.attackKind==='nova'?1:w.cooldown))a.attackAge=-1;
+    if(a.attackAge>(a.attackKind==='ritual'?(BOSS_MOVES[a.bossMove]?.recovery??1):a.attackKind==='nova'?1:w.cooldown))a.attackAge=-1;
   }
   setCrouch(a,crouch){
     if(a.kind!=='player'||a.hp<=0)return;
@@ -247,7 +249,7 @@ export class GameWorld {
     if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=0;this.ecd.addComponentToEntity(e,c);}
   }
   melee(a){
-    const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova')return;
+    const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova'||a.attackKind==='ritual')return;
     const age=a.attackAge;if(age<w.active[0]||age>w.active[1])return;
     const current=weaponPose(a),previous=weaponPose(a,Math.max(w.active[0],age-DT));
     const segments=[[current.start,current.end]];
@@ -272,6 +274,7 @@ export class GameWorld {
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
     this.event('hit',v,{damage:Math.round(amount),source:a.id});
     if(v.hp===0){
+      if(v.boss)clearBossHazards(this,v.id);
       v.deathTick=this.tick;v.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(v);
       this.event('death',v);v.deadTime=0;
       if(a.kind==='player'&&v.kind==='enemy'){
@@ -311,10 +314,13 @@ export class GameWorld {
     p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
     t.setTranslation(...weaponPose(a).origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);
+    return {p,t,e};
   }
   stepProjectiles(dt){
     for(const e of this.projectiles){
       const t=this.ecd.getComponent(e,Transform64),p=this.ecd.getComponent(e,Projectile);p.age+=dt;
+      const owner=this.actor(p.owner);if(owner?.boss&&owner.hp<=0){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
+      if(p.kind==='wave'||p.kind==='sigil'){stepHazard(this,e,p,t,dt);continue;}
       if(p.weapon==='bow')p.velocity[1]-=9.81*dt;
       const v=p.velocity,speed=Math.hypot(...v);this.ray.set([t.translation_x,t.translation_y,t.translation_z,v[0]/speed,v[1]/speed,v[2]/speed,speed*dt]);
       const hit=sphereSweep(this.physics,this.ray,p.radius,this.hit,id=>id!==this.actors.get(p.owner));
@@ -334,10 +340,10 @@ export class GameWorld {
     if(this.physics.overlap(CapsuleShape3D.from(.32,1.05),[x,y+.08,z],q,this.overlaps,0,id=>id!==e)>0)return;
     a.mantle={phase:'hang',from:[a.x,y-1.65,a.z],to:[x,y,z],t:0};a.stamina-=14;this.event('ledge-grab',a);
   }
-  lineOfSight(from,to,ignore=-1,target=-1){
+  lineOfSight(from,to,ignore=-1,target=-1,filter){
     const d=to.map((v,i)=>v-from[i]),length=Math.hypot(...d);if(length<.001)return true;
     this.ray.set([...from,d[0]/length,d[1]/length,d[2]/length,length]);
-    return !this.physics.raycast(this.ray,this.hit,e=>e!==ignore&&e!==target);
+    return !this.physics.raycast(this.ray,this.hit,e=>e!==ignore&&e!==target&&(!filter||filter(e)));
   }
   rest(a){
     const {hearth,reason}=restStatus(a,[...this.actors.keys()].map(id=>this.actor(id)));if(reason)return false;
@@ -357,8 +363,8 @@ export class GameWorld {
   checkEncounters(){
     for(const id of this.actors.keys()){
       const a=this.actor(id);if(!a.boss||!a.active||a.hp<=0)continue;
-      const alive=[...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<26;});
-      if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;this.teleport(a,a.home);}
+      const alive=[...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<29;});
+      if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;a.bossMove='';a.attackId=0;a.memory=0;a.targetId=null;a.path=null;clearBossHazards(this,a.id);this.teleport(a,a.home);}
     }
   }
   exportCharacter(id){

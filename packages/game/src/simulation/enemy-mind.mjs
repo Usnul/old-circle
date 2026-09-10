@@ -5,6 +5,8 @@ import {BehaviorStatus} from '@woosh/meep-engine/src/engine/intelligence/behavio
 import {heightAt} from '../world/regions.mjs';
 import {WEAPONS,BOSSES} from '../content/catalog.mjs';
 import {armorFor} from '../content/equipment.mjs';
+import {BOSS_MOVES,nextBossMove} from '../content/boss-moves.mjs';
+import {castBossMove} from './boss-attacks.mjs';
 
 export const enemySeed=id=>Array.from(id).reduce((n,c)=>(Math.imul(n,31)+c.charCodeAt(0))>>>0,4171);
 const turn=(a,b,dt)=>a+Math.max(-dt*2.6,Math.min(dt*2.6,Math.atan2(Math.sin(b-a),Math.cos(b-a))));
@@ -71,16 +73,20 @@ export class EnemyMind {
   combat(dt){
     const w=this.world,a=this.actor,target=this.target,distance=this.distance;
     a.active=true;a.patrolGoal=null;
-    const dx=target.x-a.x,dz=target.z-a.z,ranged=WEAPONS[a.weapon].style!=='melee',range=ranged?12:a.boss?3.3:a.weapon==='spear'?2:1.65;
+    const dx=target.x-a.x,dz=target.z-a.z,ranged=WEAPONS[a.weapon].style!=='melee',moveId=a.boss?nextBossMove(a):null;
+    const range=a.boss&&moveId!=='weapon'?BOSS_MOVES[moveId].range:ranged?12:a.boss?3.3:a.weapon==='spear'?2:1.65;
     a.phase=distance>range?'pursue':'windup';
     if(a.windup>0){
       a.windup-=dt;a.intent={x:0,z:0,yaw:turn(a.yaw,Math.atan2(-dx,-dz),dt),buttons:0};
-      if(a.windup<=0){if(a.attackKind==='nova')w.nova(a,8,BOSSES[a.archetype].damage,'shockwave');else w.attack(a);a.cooldown=a.boss?2.6:1.7;}return;
+      if(a.windup<=0){
+        if(a.boss&&BOSS_MOVES[a.bossMove]?.clip){castBossMove(w,a,a.bossMove);a.cooldown=BOSS_MOVES[a.bossMove].recovery+.85;}
+        else{if(a.attackKind==='nova')w.nova(a,8,BOSSES[a.archetype].damage,'shockwave');else w.attack(a);a.cooldown=a.boss?2.6:1.7;}
+      }return;
     }
     if(a.attackAge>=0){a.phase='attack';a.intent={x:0,z:0,yaw:a.yaw,buttons:0};return;}
     if(distance>range)this.steer([target.x,target.y,target.z],1,dt);
     else if(ranged&&distance<5){a.phase='retreat';this.steer([a.x-dx,a.y,a.z-dz],.65,dt);a.intent.yaw=turn(a.yaw,Math.atan2(-dx,-dz),dt);}
     else a.intent={x:0,z:0,yaw:turn(a.yaw,Math.atan2(-dx,-dz),dt),buttons:0};
-    if(distance<=range&&a.cooldown===0){a.windup=a.boss?1.15:.65;a.attackKind=a.boss&&a.attackId%3===2?'nova':'weapon';w.event('telegraph',a,{effect:a.attackKind,radius:a.attackKind==='nova'?8:range});}
+    if(distance<=range&&a.cooldown===0){a.bossMove=moveId??'';a.windup=a.boss?BOSS_MOVES[moveId].windup:.65;a.attackKind=a.boss&&moveId!=='weapon'?'ritual':'weapon';w.event('telegraph',a,{effect:a.attackKind,move:a.bossMove,radius:range});}
   }
 }

@@ -10,6 +10,7 @@ for(const [command,args] of [
   [blender,['--background','--factory-startup','--python-exit-code','1','--python','tools/blender/build_world.py']],
   [blender,['--background','--factory-startup','--python-exit-code','1','--python','tools/blender/build_characters.py']],
   [blender,['--background','--factory-startup','--python-exit-code','1','--python','tools/blender/build_footprints.py']],
+  [blender,['--background','--factory-startup','--python-exit-code','1','--python','tools/blender/build_warnings.py']],
   [process.execPath,['tools/compile-assets.mjs']],
   [process.execPath,['tools/world-check.mjs','bake']],
   [process.execPath,['tools/generate-world-map.mjs']],

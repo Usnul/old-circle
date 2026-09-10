@@ -9,6 +9,14 @@ test('a respawn snaps without interpolating through the world',()=>{
   const poses=new PresentationPoses(),a={id:'player',x:0,y:1,z:0,yaw:0};poses.accept({actors:[a]},0);
   const b={...a,x:100};poses.accept({actors:[b]},1/30);expect(poses.sample(b,.04).x).toBe(100);
 });
+
+test('keeper windups and cast transitions follow the same delayed pose timeline',()=>{
+  const poses=new PresentationPoses(),a={id:'boss',x:0,y:2,z:0,yaw:0,bossMove:'bell',attackKind:'ritual',attackId:1,attackAge:-1,windup:.08};
+  poses.accept({actors:[a]},0);const b={...a,windup:.046};poses.accept({actors:[b]},1/30);
+  expect(poses.sample(b,.05).windup).toBeCloseTo(.063);
+  const cast={...b,windup:0,attackId:2,attackAge:.015};poses.accept({actors:[cast]},2/30);
+  const delayed=poses.sample(cast,1/12);expect(delayed.attackAge).toBe(-1);expect(delayed.windup).toBe(.046);expect(delayed.attackId).toBe(1);
+});
 test('landing state changes on the body timeline instead of the newest Worker message',()=>{
   const poses=new PresentationPoses(),air={id:'player',x:0,y:2,z:0,yaw:0,grounded:false,airTime:.5,landingAge:-1};
   poses.accept({actors:[air]},0);const landed={...air,y:1,grounded:true,airTime:0,landingAge:0,landingStrength:1};poses.accept({actors:[landed]},1/30);

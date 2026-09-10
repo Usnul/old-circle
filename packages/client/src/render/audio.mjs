@@ -37,7 +37,7 @@ export class WorldAudio {
   }
   update(snapshot,player,dt){
     if(!player)return;this.sopra.listenerPosition=new Vector3(player.x,player.y,player.z);
-    if(this.lastSnapshot!==snapshot){for(const e of snapshot.events){if((e.type==='attack'&&['sword','spear'].includes(e.weapon))||(e.type==='release'&&e.weapon==='bow'))this.play('sword',e.position);if(e.type==='nova'||(e.type==='release'&&e.weapon==='staff'))this.play('frost',e.position);if(e.type==='boss-defeated')this.play('bell',e.position);}this.lastSnapshot=snapshot;}
+    if(this.lastSnapshot!==snapshot){for(const e of snapshot.events){if((e.type==='attack'&&['sword','spear'].includes(e.weapon))||(e.type==='release'&&e.weapon==='bow'))this.play('sword',e.position);if(e.type==='nova'||(e.type==='release'&&e.weapon==='staff'))this.play('frost',e.position);if(e.type==='boss-defeated')this.play('bell',e.position);if(e.type==='boss-cast')this.play(['bell','judgment'].includes(e.move)?'bell':'frost',e.position);}this.lastSnapshot=snapshot;}
     this.bellTime+=dt;
     if(this.bellTime>42){this.play('bell',[0,8,-48]);this.bellTime=0;}
     this.sopra.update();

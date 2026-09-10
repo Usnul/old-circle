@@ -8,6 +8,7 @@ import {worldMapMarkup,installMapControls} from './ui/world-map.mjs';
 import {worldToMap} from '@old-circle/game/world/map.mjs';
 import {equipmentMarkup} from './ui/equipment.mjs';
 import {ARMOR,armorFor,reinforcement,hasAllSeals} from '@old-circle/game/content/equipment.mjs';
+import {BOSS_MOVES,bossEnraged} from '@old-circle/game/content/boss-moves.mjs';
 
 const app=document.querySelector('#app');
 const SAVE_KEY='old-circle-character-v1';
@@ -30,7 +31,7 @@ app.innerHTML=`
  <div class="area-title" id="area-title"><div class="eyebrow" id="area-level"></div><h2 id="area-name"></h2></div>
  <div class="weapon-name" id="weapon-name"></div><div class="quickbar">${Object.entries(WEAPONS).map(([id,w],i)=>`<button class="slot" data-weapon="${id}" title="${w.name}"><kbd>${i+1}</kbd><img src="/assets/icons/${w.icon}.png" alt="${w.name}"></button>`).join('')}<button class="slot" id="flask" title="Drink healing flask"><kbd>R</kbd><img src="/assets/icons/flask.png" alt="Healing flask"><span class="count" id="flask-count">3</span></button></div>
  <div class="embers" id="embers">0</div><div class="hint" id="interact" hidden><kbd>E</kbd>Rest at the Pilgrim’s Hearth</div><div class="controls">WASD move · Shift sprint · C crouch · Space jump / mantle · Click attack · Q frost nova · R heal · Tab journal</div>
- <div class="boss" id="boss" hidden><div class="boss-name" id="boss-name"></div><div class="bar"><span id="boss-health"></span></div></div><div class="toast" id="toast"></div><div class="death" id="death" hidden>LIGHT FADES</div>
+ <div class="boss" id="boss" hidden><div class="boss-name" id="boss-name"></div><div class="bar"><span id="boss-health"></span></div><div id="boss-move" class="boss-move" role="status"></div></div><div class="toast" id="toast"></div><div class="death" id="death" hidden>LIGHT FADES</div>
 </section><button id="capture-mouse" hidden>Resume mouse look <span>Click to capture · Escape releases</span></button><div id="modal-root"></div>`;
 
 const $=s=>document.querySelector(s),send=data=>worker?.postMessage(data);
@@ -138,5 +139,5 @@ function updateHud(){
   const rest=restStatus(p,snapshot.actors);$('#interact').hidden=!rest.hearth;
   if(rest.hearth)$('#interact').innerHTML=rest.reason??`<kbd>E</kbd>Rest at ${rest.hearth.name}`;
   $('#death').hidden=p.hp>0;
-  const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;$('#boss-health').style.width=`${boss.hp/boss.healthMax*100}%`;}
+  const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;$('#boss-health').style.width=`${boss.hp/boss.healthMax*100}%`;$('#boss-move').textContent=boss.windup>0?BOSS_MOVES[boss.bossMove]?.name??'':bossEnraged(boss)?'The keeper’s vow breaks':'';}
 }

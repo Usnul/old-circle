@@ -67,7 +67,9 @@ export class PresentationPoses {
       for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=a[key]+(b[key]-a[key])*alpha;
       if(!a.grounded&&!b.grounded&&Number.isFinite(a.airTime)&&Number.isFinite(b.airTime))result.airTime=a.airTime+(b.airTime-a.airTime)*alpha;
       if(a.landingAge>=0&&b.landingAge>=a.landingAge)result.landingAge=a.landingAge+(b.landingAge-a.landingAge)*alpha;
+      for(const key of ['attackKind','bossMove','attackId','attackAge','windup'])result[key]=state[key];
       if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=a.attackAge+(b.attackAge-a.attackAge)*alpha;
+      if(a.bossMove===b.bossMove&&a.windup>0&&b.windup>0)result.windup=a.windup+(b.windup-a.windup)*alpha;
     }
     return result;
   }

@@ -7,6 +7,12 @@ import { ParticleEffect } from '@woosh/meep-engine/src/engine/graphics/ecs/parti
 import { EMITTER_BLEND } from '@woosh/meep-engine/src/shade/renderer/particles/data/PARTICLE_EMITTER_STRUCT.js';
 
 const programs=new Map();
+export const HAZARD_EFFECTS={
+  'hazard-roots':{color:[.65,.76,.24,.7],velocity:[1.6,1.4,1.6],lift:2.3,size:.07},
+  'hazard-stars':{color:[.57,.71,1.3,.7],velocity:[1.7,1.2,1.7],lift:1.9,size:.06},
+  'hazard-frost':{color:[.35,.85,1.5,.7],velocity:[1.8,1.5,1.8],lift:1.8,size:.07},
+  'hazard-bell':{color:[1.3,.7,.24,.7],velocity:[3,.3,3],lift:.5,size:.08},
+};
 export const FOOTSTEP_EFFECTS={
   'step-grass':{color:[.24,.30,.10,.5],size:.025},'step-gravel':{color:[.38,.33,.24,.4],size:.028},
   'step-sand':{color:[.53,.38,.20,.4],size:.038},'step-snow':{color:[.83,.88,.92,.65],size:.035},
@@ -27,8 +33,8 @@ export function effect(kind='embers',rate=35){
   return ParticleEffect.from({...programs.get(kind),texture:'/assets/vfx/mote.png',spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color'},prewarm:kind==='motes'?2:0});
 }
 function compile(kind){
-  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave';
-  const lifetime=step?.6:profile?.life??(ambient?6:shock||frost?1:1.9),color=step?.color??profile?.color??(frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
+  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],hazard=HAZARD_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave';
+  const lifetime=step?.6:hazard?1:profile?.life??(ambient?6:shock||frost?1:1.9),color=hazard?.color??step?.color??profile?.color??(frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
   const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4}]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
@@ -37,9 +43,9 @@ function compile(kind){
   const signed=op(init,'mad',{a:random,b:[2,2,2],c:[-1,-1,-1]});
   const jitter=op(init,'mul',{a:signed,b:step?[.07,.012,.07]:kind==='snow'?[12,4,12]:ambient?[16,2,16]:[.2,.1,.2]});
   set(init,'position',op(init,'add',{a:op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_POSITION}),b:jitter}));
-  let velocity=op(init,'mul',{a:signed,b:step?[.22,.12,.22]:ambient?[.15,.10,.15]:frost||shock?[7,.2,7]:[.5,1,.5]});
-  velocity=op(init,'add',{a:velocity,b:step?[0,.45,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
-  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',[step?.size??profile?.size??(ambient?.035:shock||frost?.09:.11)]);
+  let velocity=op(init,'mul',{a:signed,b:hazard?.velocity??(step?[.22,.12,.22]:ambient?[.15,.10,.15]:frost||shock?[7,.2,7]:[.5,1,.5])});
+  velocity=op(init,'add',{a:velocity,b:hazard?[0,hazard.lift,0]:step?[0,.45,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
+  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',[hazard?.size??step?.size??profile?.size??(ambient?.035:shock||frost?.09:.11)]);
   set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});
   const age=op(update,'add',{a:op(update,'attribute',{}, {name:'age'}),b:dt});set(update,'age',age);

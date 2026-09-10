@@ -35,6 +35,7 @@ import {WorldWind} from './wind.mjs';
 import {WorldAmbient} from './ambient.mjs';
 import {WorldBanners} from './banners.mjs';
 import {WorldFootsteps} from './footsteps.mjs';
+import {BossHazards,isBossHazard} from './boss-hazards.mjs';
 import {DecalSystem} from '@woosh/meep-engine/src/engine/graphics3/DecalSystem.js';
 import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundListenerSystem.js';
 import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
@@ -119,6 +120,7 @@ export class WorldView {
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
+    this.bossHazards=new BossHazards(this);
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     for(let i=0;i<layout.lights.length;i++){
@@ -188,7 +190,7 @@ export class WorldView {
     }
     for(const [key,rig] of this.corpses)if(!dead.has(key)){this.characterRenderer.remove(rig);this.corpses.delete(key);}
     for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
-    const liveProjectiles=new Set();for(const p of snapshot.projectiles){liveProjectiles.add(p.id);let m=this.missiles.get(p.id);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell');this.missiles.set(p.id,m);}const v=p.velocity;this.pose(m,p.position,1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
+    const liveProjectiles=new Set();for(const p of snapshot.projectiles){if(isBossHazard(p))continue;const key=p.key??p.id;liveProjectiles.add(key);let m=this.missiles.get(key);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell',[0,0,0],[1,1,1],0,p.effect==='cinder'?this.materials.ember:null);this.missiles.set(key,m);}const v=p.velocity;this.pose(m,p.position,p.effect==='cinder'?1.7:1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
@@ -210,5 +212,6 @@ export class WorldView {
     t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
     this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
+    this.bossHazards.update(snapshot.projectiles,player,this.poses.epoch,dt);
   }
 }

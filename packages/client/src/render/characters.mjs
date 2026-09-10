@@ -17,14 +17,24 @@ import {m4_multiply} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_multiply.
 import {actorRig,actorScale,actorFeet,actorSocket,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 import {armorFor} from '@old-circle/game/content/equipment.mjs';
+import {BOSSES} from '@old-circle/game/content/catalog.mjs';
+
+const keeperColors={
+  warden:{cloth:[.09,.12,.11],cloak:[.53,.66,.53],brass:[.34,.28,.15]},
+  rootbound:{bark:[.12,.16,.10],bone:[.65,.65,.48]},
+  cantor:{cloth:[.28,.045,.025],cloak:[1.2,.31,.14],brass:[.56,.23,.08]},
+  mirror:{cloth:[.16,.22,.28],cloak:[.64,.89,1.2],bone:[.5,.72,.82],iron:[.47,.61,.64]},
+  frostbound:{cloth:[.23,.30,.32],cloak:[1.2,1.4,1.5],bone:[.39,.65,.73]},
+  'last-king':{cloth:[.08,.045,.045],cloak:[.59,.25,.25],brass:[.66,.41,.14]},
+};
 
 export class Characters {
   constructor(view){this.view=view;this.bundles=new Map();this.pool=new Map();}
-  appearance(a){return actorRig(a)+':'+(a.kind==='player'?'player':a.archetype)+':'+(a.kind==='player'?armorFor(a).appearance:a.archetype==='mage'?'keeper':a.archetype==='archer'?'wayfarer':a.archetype==='sentinel'?'sentinel':'pilgrim');}
+  appearance(a){return actorRig(a)+':'+(a.kind==='player'?'player':a.archetype)+':'+(a.kind==='player'?armorFor(a).appearance:BOSSES[a.archetype]?'boss_'+a.archetype:a.archetype==='mage'?'keeper':a.archetype==='archer'?'wayfarer':a.archetype==='sentinel'?'sentinel':'pilgrim');}
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);
-    const [name,appearance,outfit]=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
-    const model=name==='pilgrim'&&outfit!=='pilgrim'?'armor_'+outfit:name;
+    const [name,appearance,outfit='pilgrim']=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
+    const model=outfit.startsWith('boss_')?outfit:name==='pilgrim'&&outfit!=='pilgrim'?'armor_'+outfit:name;
     const meshes=this.view.models.get(model).map(c=>{
       const mesh=new SkinnedMesh();mesh.geometry=c.geometry;mesh.material=c.material;
       if(appearance!=='player'){
@@ -33,7 +43,10 @@ export class Characters {
         if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...(appearance==='mage'?[.7,.9,1.3]:appearance==='archer'?[1.1,.97,.72]:[1.2,.75,.52]));
         if(appearance==='sentinel'&&c.material===this.view.materials.iron)mesh.material.diffuse_color.set(.38,.30,.17);
       }
-      if(outfit!=='pilgrim'&&name==='pilgrim'){
+      if(outfit.startsWith('boss_')){
+        for(const [material,color] of Object.entries(keeperColors[appearance]))if(c.material===this.view.materials[material])mesh.material.diffuse_color.set(...color);
+        if(appearance==='frostbound'&&c.material===this.view.materials.ember){mesh.material.diffuse_color.set(.2,.6,.8);mesh.material.emissive_factor.set(.08,.5,.8);}
+      }else if(outfit!=='pilgrim'&&name==='pilgrim'){
         mesh.material=mesh.material.clone();
         const colors={wayfarer:{cloth:[.12,.17,.09],cloak:[.48,.64,.37]},keeper:{cloth:[.24,.27,.24],cloak:[1.05,1.16,1.10]},sentinel:{cloth:[.12,.08,.055],cloak:[.66,.37,.23]},winter:{cloth:[.32,.35,.34],cloak:[1.3,1.4,1.4]}}[outfit];
         if(c.material===this.view.materials.cloth)mesh.material.diffuse_color.set(...colors.cloth);

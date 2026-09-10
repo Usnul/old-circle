@@ -180,6 +180,11 @@ def human_pose(kind,time,duration,weapon):
     if kind=='jump':lean=.12*math.sin(math.pi*phase);root.z-=.05*math.sin(math.pi*phase)
     if kind=='mantle':root.y-=.14*math.sin(math.pi*phase);root.z-=.25*(1-smooth(phase))
     if kind=='sword':chest_yaw=keypose([(0,(0,0,.0)),(.18,(0,0,-.50)),(.43,(0,0,.60)),(.72,(0,0,0))],time).z
+    ritual={'bell_slam':1.2,'root_call':1.05,'cinder_volley':.95,'mirror_prayer':1.1,'winter_sweep':1.15,'king_judgment':1.45}.get(kind)
+    if ritual:
+        impact=max(0,1-abs(time-ritual-.12)/.4)
+        if kind in ['bell_slam','root_call','king_judgment']:root.z-=.15*impact;lean+=.17*impact
+        if kind=='winter_sweep':chest_yaw=.5*math.sin(math.pi*time/duration)
     rot=Matrix.Rotation(chest_yaw,4,'Z')@Matrix.Rotation(lean,4,'X')
     def body(p):return root+rot.to_3x3()@v(p)
     spine=body((0,0,.18));chest=body((0,0,.4));neck=body((0,0,.57));head=body((.012*math.sin(cycle),-.015,.85))
@@ -219,6 +224,22 @@ def human_pose(kind,time,duration,weapon):
         right=body((.13,-.50,.43));left=body(keypose([(0,(-.17,-.32,.38)),(.36,(-.21,-.01,.45)),(.50,(-.22,.08,.45)),(.8,(-.25,-.22,.26))],time));direction=v((0,0,1))
     elif kind in ['staff','nova']:
         lift=math.sin(math.pi*phase);right=body((.32,-.27,.15+.42*lift));left=body((-.30,-.25,.15+.36*lift));direction=v((.06,-.35,1)).normalized()
+    elif ritual:
+        raise_amount=smooth(time/ritual);settle=1-smooth((time-ritual)/max(.01,duration-ritual))
+        if kind=='bell_slam':
+            hands=keypose([(0,(.25,-.16,.20)),(ritual*.8,(.12,.04,1.00)),(ritual,(.10,-.43,-.18)),(duration,(.34,-.18,.14))],time)
+            right=body(hands);left=body((-hands.x,hands.y,hands.z));direction=v((0,-.25,-1)).normalized()
+        elif kind=='root_call':
+            spread=math.sin(math.pi*time/duration);right=body((.36+.25*spread,-.12,.18+.40*raise_amount*settle));left=body((-.36-.25*spread,-.12,.18+.40*raise_amount*settle));direction=v((0,-.6,-.8))
+        elif kind=='cinder_volley':
+            right=body((.20,-.53,.34+.22*raise_amount*settle));left=body((-.30,-.31,.25));direction=v((0,-1,.10)).normalized()
+        elif kind=='mirror_prayer':
+            spread=smooth((time-ritual*.7)/.3)*settle;right=body((.08+.43*spread,-.32,.50));left=body((-.08-.43*spread,-.32,.50));direction=v((0,0,1))
+        elif kind=='winter_sweep':
+            sweep=keypose([(0,(.38,-.1,.2)),(ritual*.8,(-.20,-.35,.50)),(ritual+.2,(.52,-.35,.19)),(duration,(.34,-.18,.14))],time)
+            right=body(sweep);left=body((-.24,-.34,.22));direction=v((.5*math.sin(time*3),-1,.1)).normalized()
+        else:
+            right=body((.34,-.12,.20+.62*raise_amount*settle));left=body((-.40,-.30,.25+.25*raise_amount*settle));direction=v((0,0,1))
     elif kind in ['hang','mantle']:
         amount=1 if kind=='hang' else 1-smooth(phase)
         right=body((.31,-.23,.14+.66*amount));left=body((-.31,-.23,.14+.66*amount));direction=v((0,0,-1))
@@ -348,12 +369,17 @@ for weapon in ['sword','spear','bow','staff']:
         for direction in ['forward_right','right','back_right','back','back_left','left','forward_left']:
             name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
+for name,windup,recovery in [('bell_slam',1.2,1.45),('root_call',1.05,1.4),('cinder_volley',.95,1.1),('mirror_prayer',1.1,1.3),('winter_sweep',1.15,1.5),('king_judgment',1.45,1.7)]:clips.append((name,name,windup+recovery,'spear'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
 for variant in ['wayfarer','keeper','sentinel','winter']:
     export('armor_'+variant,HUMAN,lambda variant=variant:human_mesh(variant),human_pose,[])
     # These skins share the pilgrim's joint order, bind pose and complete Actions.
     # Retain their editable armatures in the blend, without duplicate runtime rigs.
     del RIGS['armor_'+variant]
+from bosses import build_boss
+for keeper in ['warden','rootbound','cantor','mirror','frostbound','last-king']:
+    export('boss_'+keeper,HUMAN,lambda keeper=keeper:build_boss(keeper,human_mesh,ellipsoid,plate,limb,bind),human_pose,[])
+    del RIGS['boss_'+keeper]
 export('briarHound',HOUND,hound_mesh,hound_pose,[(kind,kind,duration,'sword') for kind,duration in [('idle',3.4),('walk',.9),('run',.55),('sword',.72),('hurt',.3),('jump',.6)]])
 from banner import build_banner
 build_banner(export,MATERIALS,lambda:objects)

@@ -4,6 +4,23 @@ import {SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {armorIds} from '../content/equipment.mjs';
+import {castBossMove} from '../simulation/boss-attacks.mjs';
+
+test('a late joining peer sees a pending root trap and receives its damage only once',async()=>{
+  const sim=await new GameWorld().start({populate:false,navigation:false});sim.think=()=>{};
+  const present=sim.addPlayer('present');sim.teleport(present,[185,heightAt(185,100)+1,100]);
+  const boss=sim.spawnActor('widow',{boss:true,archetype:'rootbound',hp:630,healthMax:630,weapon:'sword'},[180,heightAt(180,100)+1.3,100]);
+  for(let i=0;i<60;i++)sim.step();castBossMove(sim,boss,'roots');const key=sim.snapshot().projectiles[0].key;
+  const host=await new SharedSession('host',0,{simulation:sim}).start(),client=await new SharedSession('client',1).start();
+  try{
+    const saved=sim.exportCharacter(present.id);saved.x+=.9;client.localNetworkId=host.addPlayer(1,'late-pilgrim','pilgrim',saved);
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
+    const warning=client.presentation().projectiles.find(p=>p.key===key);expect(warning.age).toBeLessThan(warning.delay);expect(warning.position[0]).toBeCloseTo(present.x,1);
+    const hp=host.sim.actor('late-pilgrim').hp;frames(55);const expected=hp-29*.85*.88;
+    expect(host.sim.actor('late-pilgrim').hp).toBeCloseTo(expected);expect(client.localCharacter().actor.hp).toBeCloseTo(expected);expect(client.presentation().projectiles).toHaveLength(0);
+  }finally{await client.stop();await host.stop();await sim.stop();}
+},30000);
 
 test('hearth equipment commands replay once and replicate owned armor and reinforcement',async()=>{
   const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();

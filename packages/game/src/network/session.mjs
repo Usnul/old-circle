@@ -12,7 +12,7 @@ import { GameWorld,DT } from '../simulation/world.mjs';
 import { WEAPONS } from '../content/catalog.mjs';
 import {armorIds} from '../content/equipment.mjs';
 
-export const PROTOCOL_VERSION=3,NET_DT=1/30;
+export const PROTOCOL_VERSION=4,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
