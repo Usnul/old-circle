@@ -10,6 +10,8 @@ The simulation projects into `WorldFrame` and owned `CharacterFrame` components 
 
 ## Connection lifecycle
 
+The Worker stamps presentation snapshots with their simulation frame and an authority epoch. Meep's `RenderPlayout` and `AdaptiveRenderDelay` advance a continuous playhead with a bounded two-to-four-frame buffer, so uneven message arrival does not directly change walking speed. Bodies, weapons, ragdolls and the camera sample that same timeline. Authority changes reset the timeline instead of blending unrelated world clocks.
+
 1. The Worker starts the local Meep world immediately, using its saved character if available.
 2. A small JSON handshake identifies the protocol, player and returning character. The server validates shape and finite values and trusts the character's progression, as specified by the game design. It never imports the client's world snapshot.
 3. The server allocates a peer and a fresh network ID. After the client's session is ready, a second character snapshot covers movement during initialization. Meep's `WebSocketTransport` takes over binary traffic.
