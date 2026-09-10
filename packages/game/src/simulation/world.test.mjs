@@ -19,6 +19,17 @@ test('walk, sprint and jump are simulated by Meep physics',async()=>{
   const next=p.z;w.input(p.id,{x:0,z:-1,yaw:0,buttons:BUTTON.SPRINT});run(w,60);expect(next-p.z).toBeGreaterThan(walking*1.4);expect(p.stamina).toBeLessThan(p.staminaMax);
   const y=p.y;w.input(p.id,{x:0,z:0,yaw:0,buttons:BUTTON.JUMP});run(w,12);expect(p.y).toBeGreaterThan(y+.4);
 });
+test('a supported character holds a gentle slope without drifting downhill',async()=>{
+  const w=await setup(),p=w.addPlayer('slope');w.teleport(p,[100,heightAt(100,35)+1,35]);run(w,120);
+  const start=[p.x,p.y,p.z];run(w,600);
+  expect(Math.hypot(p.x-start[0],p.z-start[2])).toBeLessThan(.015);
+  expect(Math.abs(p.y-start[1])).toBeLessThan(.025);expect(p.grounded).toBe(true);
+});
+test('restoring an unchanged snapshot does not teleport or wake every actor',async()=>{
+  const w=await setup();w.addPlayer('still');run(w,60);let calls=0;
+  const original=w.physics.setPose.bind(w.physics);w.physics.setPose=(...args)=>{calls++;return original(...args);};
+  w.replaceSnapshot(w.snapshot());expect(calls).toBe(0);
+});
 test('PvP requires both participants to opt in; collisions apply knockback',async()=>{
   const w=await setup(),a=w.addPlayer('attacker'),b=w.addPlayer('victim');w.teleport(b,[2,a.y,a.z]);const hp=b.hp;
   expect(w.damage(a,b,20,300)).toBe(false);a.pvp=true;expect(w.damage(a,b,20,300)).toBe(false);b.pvp=true;

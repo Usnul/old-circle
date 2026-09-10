@@ -28,11 +28,13 @@ import { WorldSky } from './sky.mjs';
 import { buildLayout } from '@old-circle/game/world/layout.mjs';
 import { heightAt } from '@old-circle/game/world/regions.mjs';
 import { effect } from './effects.mjs';
+import { PresentationPoses } from './presentation-poses.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
 export class WorldView {
-  constructor(){this.models=new Map();this.characters=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.lastEventTick=-1;this.cameraPosition=null;this.fps=60;}
+  constructor(){this.models=new Map();this.characters=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
+  acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
   async start(progress=()=>{}){
     progress('Kindling the light…',.1);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
@@ -132,7 +134,9 @@ export class WorldView {
   update(snapshot,playerId,dt){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
     const present=new Set();
-    for(const a of snapshot.actors){
+    const renderTime=performance.now()/1000;
+    for(const state of snapshot.actors){
+      const a=this.poses.sample(state,renderTime);
       if(a.hp<=0){continue;}present.add(a.id);
       let rig=this.characters.get(a.id);if(!rig){rig=this.character(a);this.characters.set(a.id,rig);}
       if(a.windup>0&&a.attackKind==='nova'){
@@ -140,8 +144,7 @@ export class WorldView {
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
       if(rig.weaponName!==a.weapon&&rig.weapon){this.remove(rig.weapon);rig.weapon=this.model(a.weapon);rig.weaponName=a.weapon;}
       const moving=Math.hypot(a.vx,a.vz),stride=Math.sin(this.elapsed*(moving>4?12:8))*Math.min(moving/4,.65),scale=a.boss?1.85:1,yaw=a.yaw+Math.PI;
-      const target=[a.x,a.y-(a.boss?1.25:a.crouch?.49:.84),a.z];rig.position??=[...target];
-      const k=1-Math.exp(-dt*20);for(let i=0;i<3;i++)rig.position[i]+=(target[i]-rig.position[i])*k;
+      const target=[a.x,a.y-(a.boss?1.25:a.crouch?.49:.84),a.z];rig.position=target;
       const p=rig.position;
       if(rig.hound){this.pose(rig.hound,p,1.1,yaw);continue;}
       const local=(x,y,z)=>[p[0]+(Math.cos(yaw)*x+Math.sin(yaw)*z)*scale,p[1]+y*scale,p[2]+(-Math.sin(yaw)*x+Math.cos(yaw)*z)*scale];
@@ -161,13 +164,14 @@ export class WorldView {
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
-    const player=snapshot.actors.find(a=>a.id===playerId);if(player){
+    const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
       const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);
-      this.wantedCamera=[...wanted];
-      if(this.cameraLimit){const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit);for(let i=0;i<3;i++)wanted[i]=target[i]+d[i]*allowed/length;}
-      this.cameraPosition??=[...wanted];const k=1-Math.exp(-dt*12);for(let i=0;i<3;i++)this.cameraPosition[i]+=(wanted[i]-this.cameraPosition[i])*k;
+      this.wantedCamera=[...wanted];this.cameraTarget=target;
+      const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
+      this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
+      this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
       this.motes.t.setTranslation(player.x,player.y+2,player.z);this.motes.t.updateMatrix();t64_announce_change(this.ecd,this.motes.id);
     }

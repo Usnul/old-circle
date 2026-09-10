@@ -87,7 +87,7 @@ self.onmessage=async({data})=>{
     }
     if(inspect&&data.type==='atlas'){const atlas=new SpatialAtlas(world).build();postMessage({type:'atlas',faces:atlas.faceCount,samples:atlas.samples});}
     if(data.type==='camera'){
-      const p=world.actor(playerId),from=[p.x,p.y+.7,p.z],to=data.position,d=to.map((v,i)=>v-from[i]),length=Math.hypot(...d);
+      const p=world.actor(playerId),from=data.from??[p.x,p.y+.7,p.z],to=data.position,d=to.map((v,i)=>v-from[i]),length=Math.hypot(...d);
       if(length<.001)return;
       world.ray.set([...from,...d.map(v=>v/length),length]);
       const hit=world.physics.raycast(world.ray,world.hit,e=>e!==world.actors.get(playerId));

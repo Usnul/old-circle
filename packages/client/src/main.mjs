@@ -48,7 +48,7 @@ async function start(character){
       if(data.type==='error'){showError(data.message);return;}
       if(data.type==='save'){if(!inspecting)localStorage.setItem(SAVE_KEY,JSON.stringify(data.character));return;}
       if(data.type==='level-result'){toast(data.ok?'Your strength takes root.':'Rest at the hearth with enough embers to grow.');if(menu)journal();return;}
-      if(data.snapshot){snapshot=data.snapshot;$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast('Restored at the Pilgrim’s Hearth');if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
+      if(data.snapshot){snapshot=data.snapshot;view.acceptSnapshot(snapshot);$('#network-state').textContent=data.mode==='online'?'Shared world':'Solo journey';for(const e of snapshot.events??[])if(e.id===playerId){if(e.type==='boss-defeated')toast(`${e.name} is at rest. +${e.reward} embers`);if(e.type==='rest')toast('Restored at the Pilgrim’s Hearth');if(e.type==='equipment-found')toast('Found '+WEAPONS[e.weapon].name);}}
       if(data.type==='ready'){$('#loading').hidden=true;$('#hud').hidden=false;started=true;requestAnimationFrame(frame);view.engine.viewStack.el.focus();}
     };
     if(inspecting){const {installInspector}=await import('./inspector.mjs');inspector=installInspector({send,getView:()=>view,getSnapshot:()=>snapshot,playerId});}
@@ -90,7 +90,7 @@ function frame(now){
     const buttons=(keys.has('ShiftLeft')?1:0)|(keys.has('KeyC')?2:0)|(down('Space')?4:0)|(mouseDown?8:0)|(down('KeyQ')?16:0)|(down('KeyR')?32:0)|(down('KeyE')?64:0);
     send({type:'input',intent:{x,z,yaw,buttons}});
   }
-  view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',position:view.wantedCamera});lastHud=now;}requestAnimationFrame(frame);
+  view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}requestAnimationFrame(frame);
 }
 function updateHud(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;

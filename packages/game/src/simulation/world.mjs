@@ -61,7 +61,7 @@ export class GameWorld {
   }
   body(position,shape,kind=BodyKind.Dynamic){
     const e=this.ecd.createEntity(),t=new Transform64(),b=new RigidBody(),c=new Collider();
-    t.setTranslation(...position);b.kind=kind;b.mass=75;b.linearDamping=.45;c.shape=shape;c.friction=.05;
+    t.setTranslation(...position);b.kind=kind;b.mass=75;b.linearDamping=.05;c.shape=shape;c.friction=.8;
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,b);this.ecd.addComponentToEntity(e,c);return e;
   }
   populate(){
@@ -116,8 +116,10 @@ export class GameWorld {
       if(a.kind==='enemy')this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
       if(!!(buttons&BUTTON.CROUCH)!==a.crouch)this.setCrouch(a,!!(buttons&BUTTON.CROUCH));a.yaw=input.yaw;
-      this.ray.set([a.x,a.y-.35,a.z,0,-1,0,.8]);
-      a.grounded=this.physics.raycast(this.ray,this.hit,(other)=>other!==e)&&this.hit.normal[1]>.45;
+      const halfHeight=a.boss?1.2675:a.crouch?.495:.845;
+      this.ray.set([a.x,a.y,a.z,0,-1,0,halfHeight+.14]);
+      a.grounded=b.linearVelocity[1]<.8&&this.physics.raycast(this.ray,this.hit,other=>other!==e)&&this.hit.normal[1]>.64;
+      const normal=a.grounded?Array.from(this.hit.normal):[0,1,0];
       const len=Math.hypot(input.x,input.z),sprinting=(buttons&BUTTON.SPRINT)&&a.stamina>5&&len>0&&!a.crouch;
       const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):a.crouch?1.65:sprinting?6.7:3.5;
       if(sprinting)a.stamina=Math.max(0,a.stamina-dt*31);
@@ -125,7 +127,14 @@ export class GameWorld {
       if(len>0||(pressed&BUTTON.JUMP))this.physics.wake(b);
       b.linearVelocity[0]+=(input.x/Math.max(1,len)*speed-b.linearVelocity[0])*blend*control;
       b.linearVelocity[2]+=(input.z/Math.max(1,len)*speed-b.linearVelocity[2])*blend*control;
-      if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;a.stamina-=12;this.event('jump',a);}
+      // A supported motor cancels gravity, not collisions. Tangent velocity follows
+      // the surface; airborne and hurt bodies retain ordinary dynamic gravity.
+      b.gravityScale=a.grounded&&a.hurtTime===0?0:1;
+      if(a.grounded&&a.hurtTime===0){
+        if(len===0&&Math.hypot(b.linearVelocity[0],b.linearVelocity[2])<.03){b.linearVelocity[0]=0;b.linearVelocity[2]=0;}
+        b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1]-(len>0?.12:0);
+      }
+      if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;b.gravityScale=1;a.grounded=false;a.stamina-=12;this.event('jump',a);}
       if((buttons&BUTTON.JUMP)&&!a.grounded&&!a.mantle)this.tryMantle(a,e);
       if(a.mantle){
         const mantle=a.mantle;mantle.t+=dt;
@@ -195,7 +204,7 @@ export class GameWorld {
     if(a.kind!=='player')return;
     const e=this.actors.get(a.id),y=a.y+(crouch?-.35:.35);
     if(!crouch&&this.physics.overlap(CapsuleShape3D.from(.32,1.05),[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
-    this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=.05;
+    this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=.8;
     this.ecd.addComponentToEntity(e,c);const b=this.ecd.getComponent(e,RigidBody);
     this.physics.setPose(b,{x:a.x,y,z:a.z},rotation);a.y=y;a.crouch=crouch;
   }
@@ -326,7 +335,8 @@ export class GameWorld {
     for(const value of snapshot.actors){
       let a=this.actor(value.id);if(!a)a=this.spawnActor(value.id,value,[value.x,value.y,value.z]);
       if(a.crouch!==value.crouch)this.setCrouch(a,value.crouch);
-      Object.assign(a,structuredClone(value));this.teleport(a,[value.x,value.y,value.z]);
+      const moved=a.x!==value.x||a.y!==value.y||a.z!==value.z;
+      Object.assign(a,structuredClone(value));if(moved)this.teleport(a,[value.x,value.y,value.z]);
       const velocity=this.ecd.getComponent(this.actors.get(a.id),RigidBody).linearVelocity;velocity[0]=value.vx;velocity[1]=value.vy;velocity[2]=value.vz;
     }
     for(const e of this.projectiles)this.ecd.removeEntity(e);this.projectiles.clear();
