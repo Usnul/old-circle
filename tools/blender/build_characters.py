@@ -10,14 +10,17 @@ from mathutils import Vector, Matrix, Quaternion
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from equipment_materials import build_equipment_materials,apply_equipment_materials
+from garments import build_garments
 build_equipment_materials(ROOT)
 OUT=ROOT/'.local/blender';OUT.mkdir(parents=True,exist_ok=True)
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 C=Matrix(((1,0,0,0),(0,0,1,0),(0,-1,0,0),(0,0,0,1)))
 TAU=math.tau
 MATERIALS={}
-for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'cloak':(1,1,1),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06)}.items():
+for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'cloak':(1,1,1),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06),'skin':(.34,.22,.15),'lining':(.018,.022,.02)}.items():
     mat=bpy.data.materials.new(name);mat.diffuse_color=(*color,1);MATERIALS[name]=mat
+    if name in ['skin','lining']:
+        mat.use_nodes=True;shader=mat.node_tree.nodes.get('Principled BSDF');shader.inputs['Base Color'].default_value=(*color,1);shader.inputs['Roughness'].default_value=.92
 apply_equipment_materials(MATERIALS,ROOT)
 GEOMETRY={};RIGS={};objects=[]
 
@@ -93,38 +96,11 @@ def make_rig(name,definitions):
     return rig
 
 def human_mesh(variant='pilgrim'):
-    light=variant in ['wayfarer','keeper'];heavy=variant=='sentinel'
-    metal='leather' if light else 'iron'
-    ellipsoid((0,0,1.16),(.245,.155,.29),'spine','cloth')
-    ellipsoid((0,-.01,1.33),(.255 if heavy else .245,.175,.205),'chest',metal)
-    # Overlapping faulds, a narrow waist, articulated pauldrons and greaves.
-    for i in range(4):
-        ellipsoid((0,0,1.06-i*.055),(.235+i*.008,.155,.053),'hips','cloth' if light else 'iron')
-    plate((0,-.174,1.33),(.035,.022,.27),'chest','brass',.008)
-    plate((0,0,1.03),(.50,.35,.055),'hips','leather')
-    plate((.08,-.181,1.03),(.065,.018,.065),'hips','brass',.006)
-    for side,suffix in [(-1,'L'),(1,'R')]:
-        ellipsoid((side*.30,0,1.44),(.19 if heavy else .105 if light else .145,.19 if heavy else .17,.12 if heavy else .105),'upperArm'+suffix,metal)
-        for row in range(4 if heavy else 1 if light else 3):
-            plate((side*.315,0,1.425-row*.047),(.23 if heavy else .16,.32,.04),'upperArm'+suffix,metal,.018)
-        limb((side*.33,0,1.38),(side*.445,0,1.17),.079,.062,'upperArm'+suffix,'cloth')
-        ellipsoid((side*.46,0,1.15),(.085,.077,.08),'forearm'+suffix,metal)
-        limb((side*.46,0,1.12),(side*.50,-.03,.925),.072,.05,'forearm'+suffix,metal)
-        ellipsoid((side*.5,-.06,.885),(.058,.066,.067),'hand'+suffix,'leather')
-        for finger in range(3):plate((side*.5+(finger-1)*.025,-.105,.859),(.018,.06,.035),'hand'+suffix,'iron',.007)
-        limb((side*.14,0,.91),(side*.14,-.02,.56),.112,.08,'thigh'+suffix,'cloth')
-        ellipsoid((side*.14,-.068,.73),(.10,.075,.19),'thigh'+suffix,metal)
-        ellipsoid((side*.14,-.07,.52),(.088,.083,.092),'calf'+suffix,metal)
-        limb((side*.14,-.02,.48),(side*.14,0,.13),.077,.052,'calf'+suffix,metal)
-        plate((side*.14,-.09,.072),(.15,.29,.13),'foot'+suffix,'leather',.035)
-        plate((side*.14,-.17,.102),(.155,.16,.065),'foot'+suffix,'iron',.02)
-    ellipsoid((0,0,1.62),(.116,.114,.12),'head','cloth')
-    ellipsoid((0,0,1.685),(.155 if light else .137,.147 if light else .133,.18 if light else .162),'head','cloth' if light else 'iron')
-    plate((0,-.125,1.69),(.23,.034,.036),'head','cloth',.008)
-    plate((0,-.15,1.646),(.025,.025,.085),'head','brass',.006)
+    heavy=variant=='sentinel'
+    build_garments(variant,bind,ellipsoid,plate,limb)
+    plate((0,-.20,1.33),(.026,.022,.24),'chest','brass',.008)
     for side in [-1,1]:
-        plate((side*.098,-.099,1.625),(.055,.064,.091),'head','cloth' if light else 'iron',.017)
-        for j in range(3):ellipsoid((side*(.07+j*.045),-.165,1.40),(.011,.01,.011),'chest','brass',1)
+        for j in range(3):ellipsoid((side*(.07+j*.045),-.179,1.40),(.011,.01,.011),'chest','brass',1)
     if heavy:
         # Lamellar collar, a split crown crest and a heavy lower breastplate.
         for side in [-1,1]:
@@ -136,11 +112,7 @@ def human_mesh(variant='pilgrim'):
             angle=j/12*math.pi
             ellipsoid((math.cos(angle)*.29,.015+math.sin(angle)*.13,1.49),(.10,.09,.10),'chest','bone',2)
     if variant=='keeper':
-        # Separate hanging tabards follow each thigh and leave the stride clear.
-        for side,suffix in [(-1,'L'),(1,'R')]:
-            plate((side*.13,-.105,.69),(.22,.08,.48),'thigh'+suffix,'cloth',.04)
-            plate((side*.13,-.151,.70),(.018,.015,.40),'thigh'+suffix,'brass',.004)
-        for j in range(7):ellipsoid(((j-3)*.047,-.182,1.23-abs(j-3)*.017),(.018,.014,.022),'chest','brass',1)
+        for j in range(7):ellipsoid(((j-3)*.047,-.208,1.23-abs(j-3)*.017),(.018,.014,.022),'chest','brass',1)
     if variant=='wayfarer':
         plate((.23,-.09,1.02),(.13,.13,.20),'hips','leather',.035)
         plate((-.22,.10,1.04),(.15,.13,.14),'hips','leather',.03)

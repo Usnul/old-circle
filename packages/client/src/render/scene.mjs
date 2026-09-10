@@ -43,7 +43,7 @@ import {GeometryCache} from './geometry-cache.mjs';
 import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
 import {CombatTrails} from './combat-trails.mjs';
 
-const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
+const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59],skin:[.34,.22,.15],lining:[.018,.022,.02]};
 const quat=new Quaternion();
 export class WorldView {
   constructor(){this.models=new Map();this.characters=new Map();this.corpses=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
