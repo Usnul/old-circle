@@ -27,6 +27,32 @@ test('a supported character holds a gentle slope without drifting downhill',asyn
   expect(Math.hypot(p.x-start[0],p.z-start[2])).toBeLessThan(.015);
   expect(Math.abs(p.y-start[1])).toBeLessThan(.025);expect(p.grounded).toBe(true);
 });
+test('ground support settles the feet onto the surface instead of hovering inside the probe margin',async()=>{
+  const w=await setup(),p=w.addPlayer('grounded');
+  for(const [x,z] of [[0,23],[20,0],[100,35]]){
+    w.teleport(p,[x,heightAt(x,z)+1,z]);run(w,180);
+    const gap=()=>{
+      w.ray.set([p.x,p.y,p.z,0,-1,0,1.2]);expect(w.physics.raycast(w.ray,w.hit,e=>e!==w.actors.get(p.id))).toBe(true);
+      const n=w.hit.normal,support=[0,0,0];w.ecd.getComponent(w.actors.get(p.id),Collider).shape.support(support,0,-n[0],-n[1],-n[2]);
+      return n[0]*support[0]+n[1]*(support[1]+w.hit.t)+n[2]*support[2];
+    };
+    expect(gap()).toBeLessThan(.035);
+    w.setCrouch(p,true);run(w,30);expect(gap()).toBeLessThan(.035);w.setCrouch(p,false);
+  }
+});
+test('Meep terrain collision matches the triangle surface exported to Blender across the world',async()=>{
+  const w=await setup();let worst=0;
+  for(let z=-447.3;z<140;z+=29.3)for(let x=-225.7;x<230;x+=31.7){
+    w.ray.set([x,180,z,0,-1,0,220]);expect(w.physics.raycast(w.ray,w.hit,e=>e===w.terrainEntity)).toBe(true);
+    worst=Math.max(worst,Math.abs(w.hit.position[1]-heightAt(x,z)));
+  }
+  expect(worst).toBeLessThan(.0001);
+});
+test('ground adhesion does not let contact friction drag down the walking speed',async()=>{
+  const w=await setup(),p=w.addPlayer('walking');w.teleport(p,[160,heightAt(160,120)+1,120]);run(w,90);
+  w.input(p.id,{x:0,z:-1,yaw:0,buttons:0});run(w,120);expect(-p.vz).toBeGreaterThan(3.4);expect(p.grounded).toBe(true);
+  w.input(p.id,{x:0,z:0,yaw:0,buttons:0});run(w,90);expect(Math.hypot(p.vx,p.vz)).toBeLessThan(.02);
+});
 test('restoring an unchanged snapshot does not teleport or wake every actor',async()=>{
   const w=await setup();w.addPlayer('still');run(w,60);let calls=0;
   const original=w.physics.setPose.bind(w.physics);w.physics.setPose=(...args)=>{calls++;return original(...args);};

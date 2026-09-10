@@ -30,6 +30,8 @@ The server supports one active socket per character. Browser tabs in the same pr
 
 ## Combat and progression
 
+Supported characters cancel gravity and follow the contact plane through their Meep rigid-body velocity. Ground adhesion accounts for capsule curvature on slopes, settling to contact without pushing downhill. Character colliders have zero friction: motor braking holds a resting character, while surface friction would otherwise oppose the commanded walking speed. Knockback and airborne motion retain dynamic physics.
+
 Melee's shared `weaponPose` matches the Blender blade pivots. Meep sphere sweeps test the blade and sampled travel between ticks, with a per-swing victim set. A hound uses a short muzzle segment. Projectiles sweep their travelled distance; arrows have gravity. Nova uses a Meep sphere overlap followed by line-of-sight tests and shows its radius with particles and a ring. Knockback is a Meep impulse, with temporarily reduced movement control.
 
 The engine's current public shape-cast implementation cannot sweep against concave heightfields. The game adapter uses seven parallel Meep rays for those targets. This is an approximation, recorded in MEEP_DEFECTS.md. Neither capsule actors nor sampled blade sweeps are per-triangle anatomical collision.

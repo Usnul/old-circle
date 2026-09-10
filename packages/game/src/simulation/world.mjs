@@ -9,7 +9,6 @@ import { Collider } from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js'
 import { CapsuleShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
 import { HeightMapShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
 import { SphereShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/SphereShape3D.js';
-import { Sampler2D } from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import { Ray3 } from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import { PhysicsSurfacePoint } from '@woosh/meep-engine/src/engine/physics/queries/PhysicsSurfacePoint.js';
@@ -19,7 +18,7 @@ import { weaponPose } from './weapon-pose.mjs';
 import { ConvexHullShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/ConvexHullShape3D.js';
 import collisionAssets from '../content/colliders.json' with {type:'json'};
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
+import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import {loadNavigation} from '../world/navigation-data.mjs';
@@ -43,11 +42,8 @@ export class GameWorld {
   }
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
-    // Meep heightfield with a safe below-surface base. Same height function and metre coordinates as Blender.
-    const samples=new Float32Array(241*321);
-    for(let z=0;z<321;z++)for(let x=0;x<241;x++)samples[z*241+x]=heightAt(x*2-240,z*2-480)+15;
-    const sampler=new Sampler2D(samples,1,241,321);
-    this.body([0,-15,-160],HeightMapShape3D.from(sampler,480,samples.reduce((h,v)=>Math.max(h,v),0)+1,640),BodyKind.Static);
+    const {sampler}=terrainSurface();
+    this.terrainEntity=this.body([0,-15,-160],HeightMapShape3D.from(sampler,480,sampler.data.reduce((h,v)=>Math.max(h,v),0)+1,640),BodyKind.Static);
     this.layout.solids=[];
     for(const prop of this.layout.props)for(const part of collisionAssets[prop.model]??[]){
       const vertices=new Float32Array(part.vertices.length),min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
@@ -63,9 +59,9 @@ export class GameWorld {
     if(populate)this.populate();
     this.physics.optimizeBroadphase?.();return this;
   }
-  body(position,shape,kind=BodyKind.Dynamic){
+  body(position,shape,kind=BodyKind.Dynamic,friction=.8){
     const e=this.ecd.createEntity(),t=new Transform64(),b=new RigidBody(),c=new Collider();
-    t.setTranslation(...position);b.kind=kind;b.mass=75;b.linearDamping=.05;c.shape=shape;c.friction=.8;
+    t.setTranslation(...position);b.kind=kind;b.mass=75;b.linearDamping=.05;c.shape=shape;c.friction=friction;
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,b);this.ecd.addComponentToEntity(e,c);return e;
   }
   populate(){
@@ -90,7 +86,7 @@ export class GameWorld {
     if(a.kind==='enemy')this.navigation?.tile(a.home);
     if(a.kind==='enemy'){const seed=enemySeed(id);a.animationTime=(seed%1000)/73;a.gaitPhase=(seed%100)/31;a.yaw=(seed*2.399963)%6.283185;a.intent.yaw=a.yaw;}
     const scale=a.boss?1.5:1;
-    const e=this.body(p,CapsuleShape3D.from(.32*scale,1.05*scale));
+    const e=this.body(p,CapsuleShape3D.from(.32*scale,1.05*scale),BodyKind.Dynamic,0);
     this.ecd.addComponentToEntity(e,a);this.actors.set(id,e);return a;
   }
   addPlayer(id,origin='pilgrim',saved){
@@ -136,12 +132,13 @@ export class GameWorld {
       const halfHeight=a.boss?1.2675:a.crouch?.495:.845;
       this.ray.set([a.x,a.y,a.z,0,-1,0,halfHeight+.14]);
       a.grounded=b.linearVelocity[1]<.8&&this.physics.raycast(this.ray,this.hit,other=>other!==e)&&this.hit.normal[1]>.64;
-      const normal=a.grounded?Array.from(this.hit.normal):[0,1,0];
+      const normal=a.grounded?Array.from(this.hit.normal):[0,1,0],radius=.32*(a.boss?1.5:1);
+      const supportGap=a.grounded?this.hit.t-halfHeight-radius*(1/normal[1]-1):0;
       const len=Math.hypot(input.x,input.z),sprinting=(buttons&BUTTON.SPRINT)&&a.stamina>5&&len>0&&!a.crouch;
       const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):a.crouch?1.65:sprinting?6.7:3.5;
       if(sprinting)a.stamina=Math.max(0,a.stamina-dt*31);
       const blend=Math.min(1,dt*(a.grounded?15:4)),control=a.hurtTime>0?.18:1;
-      if(len>0||(pressed&BUTTON.JUMP))this.physics.wake(b);
+      if(len>0||supportGap>.025||(pressed&BUTTON.JUMP))this.physics.wake(b);
       b.linearVelocity[0]+=(input.x/Math.max(1,len)*speed-b.linearVelocity[0])*blend*control;
       b.linearVelocity[2]+=(input.z/Math.max(1,len)*speed-b.linearVelocity[2])*blend*control;
       // A supported motor cancels gravity, not collisions. Tangent velocity follows
@@ -149,7 +146,11 @@ export class GameWorld {
       b.gravityScale=a.grounded&&a.hurtTime===0?0:1;
       if(a.grounded&&a.hurtTime===0){
         if(len===0&&Math.hypot(b.linearVelocity[0],b.linearVelocity[2])<.03){b.linearVelocity[0]=0;b.linearVelocity[2]=0;}
-        b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1]-(len>0?.12:0);
+        // The support probe extends below the capsule. Approach actual contact
+        // through velocity; cancelling gravity at the probe margin leaves feet
+        // suspended above the surface and prevents a sleeping body settling.
+        const adhesion=Math.max(0,supportGap-.005)*18;
+        b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1]-adhesion-(len>0?.12:0);
       }
       if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;b.gravityScale=1;a.grounded=false;a.stamina-=12;this.event('jump',a);}
       if((buttons&BUTTON.JUMP)&&!a.grounded&&!a.mantle)this.tryMantle(a,e);
@@ -201,7 +202,7 @@ export class GameWorld {
     if(a.kind!=='player'||a.hp<=0)return;
     const e=this.actors.get(a.id),y=a.y+(crouch?-.35:.35);
     if(!crouch&&this.physics.overlap(CapsuleShape3D.from(.32,1.05),[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
-    this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=.8;
+    this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=0;
     this.ecd.addComponentToEntity(e,c);const b=this.ecd.getComponent(e,RigidBody);
     this.physics.setPose(b,{x:a.x,y,z:a.z},rotation);a.y=y;a.crouch=crouch;
   }
@@ -209,7 +210,7 @@ export class GameWorld {
     const e=this.actors.get(a.id);let collider=this.ecd.getComponent(e,Collider);
     if(rebuild&&collider){this.ecd.removeComponentFromEntity(e,Collider);collider=null;}
     if(a.hp<=0){if(collider)this.ecd.removeComponentFromEntity(e,Collider);return;}
-    if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=.8;this.ecd.addComponentToEntity(e,c);}
+    if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=0;this.ecd.addComponentToEntity(e,c);}
   }
   melee(a){
     const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova')return;

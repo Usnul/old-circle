@@ -1,7 +1,8 @@
 import {computeCatmullRomSpline} from '@woosh/meep-engine/src/core/math/spline/computeCatmullRomSpline.js';
 import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/create_simplex_noise_2d.js';
+import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
-export const WORLD_VERSION = 2;
+export const WORLD_VERSION = 3;
 export const SPAWN = [0, 0, 23];
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },
@@ -62,7 +63,7 @@ const hills=[
 const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
 let terrainSeed=81731;
 const noise=create_simplex_noise_2d(()=>{terrainSeed=(Math.imul(terrainSeed,1664525)+1013904223)>>>0;return terrainSeed/4294967296;});
-export function heightAt(x, z) {
+function sculptedHeightAt(x, z) {
   let y=Math.max(0,-z-100)*.17+Math.sin(x*.026)*1.4+Math.sin(z*.036)*1.1+Math.sin(x*.061+z*.027)*.5;
   for(const [cx,cz,h,rx,rz] of hills)y+=h*Math.exp(-(((x-cx)/rx)**2+((z-cz)/rz)**2));
   const roughness=1.2+smooth((-z-60)/240)*5;
@@ -71,6 +72,23 @@ export function heightAt(x, z) {
   // The abbey was cut into a level basin. The shoulder eases into the hillside.
   const abbey=smooth((Math.hypot(x/1.05,z+48)-19)/17);y=.65+(y-.65)*abbey;
   return y;
+}
+let surface;
+/** One native sampler supplies physics and the vertex heights exported to Blender.
+ * Meep UVs address texel centres (u * width - .5), not vertex-grid indices. */
+export function terrainSurface(){
+  if(surface)return surface;
+  const width=241,height=321,sampler=new Sampler2D(new Float32Array(width*height),1,width,height),vertices=new Float32Array(width*height);
+  for(let z=0;z<height;z++)for(let x=0;x<width;x++)sampler.data[z*width+x]=sculptedHeightAt((x+.5)/width*480-240,(z+.5)/height*640-480)+15;
+  for(let z=0;z<height;z++)for(let x=0;x<width;x++)vertices[z*width+x]=sampler.sampleChannelCatmullRomUV(x/(width-1),z/(height-1),0)-15;
+  surface={sampler,vertices};return surface;
+}
+export function heightAt(x,z){
+  const {vertices}=terrainSurface(),gx=Math.max(0,Math.min(240,(x+240)/2)),gz=Math.max(0,Math.min(320,(z+480)/2));
+  const ix=Math.min(239,Math.floor(gx)),iz=Math.min(319,Math.floor(gz)),u=gx-ix,v=gz-iz,k=iz*241+ix;
+  const a=vertices[k],b=vertices[k+1],c=vertices[k+241],d=vertices[k+242];
+  // Match Blender's and Meep's shared A-C-B / B-C-D triangle split.
+  return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
 }
 export function regionAt(x, z) {
   return REGIONS.reduce((a, b) => Math.hypot(x - a.center[0], z - a.center[1]) < Math.hypot(x - b.center[0], z - b.center[1]) ? a : b);

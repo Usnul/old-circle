@@ -12,6 +12,8 @@ Server restoration also reconciles saved enemy homes against the current authore
 
 `tools/export-world-layout.mjs` samples that definition into ignored `.local/blender/world.json`. Blender reads those samples for terrain elevation and road materials. Never copy the height function or road coordinates into Python. Physics uses the shared height function and exported Blender convex hulls. Visual props and physical props use the same instance transforms.
 
+The terrain's native `Sampler2D` stores values at texel centres, matching Meep's `u * width - .5` convention. `terrainSurface()` evaluates its cubic filter at the 2 m mesh vertices; Blender export, placement, navigation and physics use the same triangle split. Do not feed vertex-grid samples directly to the UV sampler: that shifts collision relative to the visible hills. World version 3 migrates older elevations after correcting this alignment. The terrain collision regression casts rays across every region and compares the actual surface with exported heights.
+
 ## Build 3D assets
 
 ```powershell
