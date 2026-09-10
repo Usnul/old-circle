@@ -10,17 +10,18 @@ import {FrameAdapter} from './frame-adapter.mjs';
 import {worldPatch,applyWorldPatch} from './world-patch.mjs';
 import { GameWorld,DT } from '../simulation/world.mjs';
 import { WEAPONS } from '../content/catalog.mjs';
+import {armorIds} from '../content/equipment.mjs';
 
-export const PROTOCOL_VERSION=2,NET_DT=1/30;
+export const PROTOCOL_VERSION=3,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
-export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;appliedSequence=0;}
+export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const InputAction=SimAction.extend({
-  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32'},
+  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32',armor:'uint8',upgradeWeapon:'uint8'},
   affects(executor){const e=executor.slot_table.entity_for(this.network_id);return e<0?[]:[[e,CharacterFrame]];},
   apply(world,executor){
     const e=executor.slot_table.entity_for(this.network_id);if(e<0)return;const c=world.getComponent(e,CharacterFrame);if(!c)return;
-    c.intent={x:this.x,z:this.z,yaw:this.yaw,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;
+    c.intent={x:this.x,z:this.z,yaw:this.yaw,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;c.armor=this.armor;c.upgradeWeapon=this.upgradeWeapon;
     if(world.oldCircle.role==='client')world.oldCircle.predict(c);
   },
 });
@@ -74,7 +75,7 @@ export class SharedSession {
     this.net.replicate(WorldFrame);this.net.replicate(CharacterFrame);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);this.net.defineAction(WorldPatchAction);
     if(this.role==='client')this.net.defineInputSampler(()=>{
       if(!this.localNetworkId||!this.localCharacter()?.actor)return [];
-      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence)];
+      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence,i.armor??0,i.upgradeWeapon??0)];
     });
     await this.net.start();
     if(this.role==='client')this.net.peer.onMalformedPacket.add((_peer,error)=>{this.failure=error;});
@@ -138,7 +139,11 @@ export class SharedSession {
   }
   applyIntent(c,id){
     this.sim.input(id,c.intent);this.sim.equip(id,weaponIds[c.weapon]??'sword');this.sim.actor(id).pvp=!!c.pvp;
-    if(c.levelStat>0&&c.sequence!==c.appliedSequence)this.sim.levelUp(id,stats[c.levelStat-1]);
+    if(c.sequence!==c.appliedSequence){
+      if(c.levelStat>0)this.sim.levelUp(id,stats[c.levelStat-1]);
+      else if(c.armor>0)this.sim.equipArmor(id,armorIds[c.armor-1]);
+      else if(c.upgradeWeapon>0)this.sim.reinforce(id,weaponIds[c.upgradeWeapon-1]);
+    }
   }
   worldFrame(){let f;this.ecd.traverseEntities([WorldFrame],value=>f=value);return f;}
   localCharacter(){let c;this.ecd.traverseEntities([CharacterFrame,NetworkIdentity],(value,n)=>{if(n.owner_peer_id===this.peerId)c=value;});return c;}

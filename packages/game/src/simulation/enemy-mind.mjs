@@ -4,6 +4,7 @@ import {ActionBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavio
 import {BehaviorStatus} from '@woosh/meep-engine/src/engine/intelligence/behavior/BehaviorStatus.js';
 import {heightAt} from '../world/regions.mjs';
 import {WEAPONS,BOSSES} from '../content/catalog.mjs';
+import {armorFor} from '../content/equipment.mjs';
 
 export const enemySeed=id=>Array.from(id).reduce((n,c)=>(Math.imul(n,31)+c.charCodeAt(0))>>>0,4171);
 const turn=(a,b,dt)=>a+Math.max(-dt*2.6,Math.min(dt*2.6,Math.atan2(Math.sin(b-a),Math.cos(b-a))));
@@ -24,7 +25,7 @@ export class EnemyMind {
       const p=w.actor(id);if(p.kind!=='player'||p.hp<=0)continue;
       if(Math.hypot(p.x-a.home[0],p.z-a.home[2])>(a.boss?29:38))continue;
       const dx=p.x-a.x,dz=p.z-a.z,d=Math.hypot(dx,p.y-a.y,dz),horizontal=Math.max(.01,Math.hypot(dx,dz));
-      const hearing=p.crouch?1.6:a.archetype==='hound'?10:Math.hypot(p.vx,p.vz)>4?9:4;
+      const hearing=(p.crouch?1.6:a.archetype==='hound'?10:Math.hypot(p.vx,p.vz)>4?9:4)*armorFor(p).noise;
       const facing=(-Math.sin(a.yaw)*dx-Math.cos(a.yaw)*dz)/horizontal;
       const detect=a.boss?23:p.crouch?7:19;
       if(d<distance&&(a.boss||d<hearing||facing>.09)&&d<detect&&w.lineOfSight([a.x,a.y+.4,a.z],[p.x,p.y+.3,p.z],w.actors.get(a.id),w.actors.get(p.id))){target=p;distance=d;}

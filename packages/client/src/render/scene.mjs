@@ -159,7 +159,9 @@ export class WorldView {
     for(const state of snapshot.actors){
       const a=this.poses.sample(state,renderTime);
       if(a.hp<=0){continue;}present.add(a.id);
-      let rig=this.characters.get(a.id);if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
+      let rig=this.characters.get(a.id);
+      if(rig&&rig.url!==this.characterRenderer.appearance(a)){this.characterRenderer.remove(rig);rig=null;}
+      if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
       if(a.windup>0&&a.attackKind==='nova'){
         rig.telegraph??=this.model('dangerRing');this.pose(rig.telegraph,[a.x,heightAt(a.x,a.z)+.13,a.z],8);
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
@@ -170,7 +172,7 @@ export class WorldView {
       dead.add(state.key);let rig=this.corpses.get(state.key);
       if(!rig){
         rig=!present.has(state.actorId)&&this.characters.get(state.actorId);if(rig)this.characters.delete(state.actorId);
-        else rig=this.characterRenderer.create({archetype:state.name==='briarHound'?'hound':state.appearance,kind:state.appearance==='player'?'player':'enemy',weapon:state.weapon??'sword'});
+        else rig=this.characterRenderer.create({archetype:state.name==='briarHound'?'hound':state.appearance,kind:state.appearance==='player'?'player':'enemy',weapon:state.weapon??'sword',inventory:{armor:state.armor}});
         this.corpses.set(state.key,rig);
       }
       this.characterRenderer.corpse(rig,this.poses.corpse(state,renderTime));

@@ -63,7 +63,7 @@ export class Ragdolls {
       else joint.asConeTwist(-.45,.45,bone.name.startsWith('upperArm')?1.25:.7);
       const id=this.world.ecd.createEntity();this.world.ecd.addComponentToEntity(id,joint);constraints.push(id);
     }
-    this.records.set(key,{key,actorId:a.id,appearance:a.kind==='player'?'player':a.archetype,name,scale,age:Math.min(35,a.deadTime??0),active:true,bodies,constraints,pose,locals,data,weapon:a.archetype==='hound'?null:a.weapon});
+    this.records.set(key,{key,actorId:a.id,appearance:a.kind==='player'?'player':a.archetype,armor:a.inventory?.armor,name,scale,age:Math.min(35,a.deadTime??0),active:true,bodies,constraints,pose,locals,data,weapon:a.archetype==='hound'?null:a.weapon});
   }
   sync(actors){
     const live=new Set();
@@ -98,6 +98,6 @@ export class Ragdolls {
   }
   remove(key){const record=this.records.get(key);if(!record)return;this.freeze(record);this.records.delete(key);}
   clear(){for(const key of this.records.keys())this.remove(key);this.seenDeaths.clear();}
-  snapshot(){return [...this.records.values()].map(r=>({key:r.key,actorId:r.actorId,name:r.name,appearance:r.appearance,scale:r.scale,age:r.age,joints:r.pose,weapon:r.weapon}));}
+  snapshot(){return [...this.records.values()].map(r=>({key:r.key,actorId:r.actorId,name:r.name,appearance:r.appearance,armor:r.armor,scale:r.scale,age:r.age,joints:r.pose,weapon:r.weapon}));}
   async stop(){this.clear();await this.world.stop();}
 }

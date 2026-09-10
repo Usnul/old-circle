@@ -92,43 +92,64 @@ def make_rig(name,definitions):
     for b in rig.pose.bones:b.rotation_mode='QUATERNION'
     return rig
 
-def human_mesh():
+def human_mesh(variant='pilgrim'):
+    light=variant in ['wayfarer','keeper'];heavy=variant=='sentinel'
+    metal='leather' if light else 'iron'
     ellipsoid((0,0,1.16),(.245,.155,.29),'spine','cloth')
-    ellipsoid((0,-.01,1.33),(.245,.175,.205),'chest')
+    ellipsoid((0,-.01,1.33),(.255 if heavy else .245,.175,.205),'chest',metal)
     # Overlapping faulds, a narrow waist, articulated pauldrons and greaves.
     for i in range(4):
-        ellipsoid((0,0,1.06-i*.055),(.235+i*.008,.155,.053),'hips','iron')
+        ellipsoid((0,0,1.06-i*.055),(.235+i*.008,.155,.053),'hips','cloth' if light else 'iron')
     plate((0,-.174,1.33),(.035,.022,.27),'chest','brass',.008)
     plate((0,0,1.03),(.50,.35,.055),'hips','leather')
     plate((.08,-.181,1.03),(.065,.018,.065),'hips','brass',.006)
     for side,suffix in [(-1,'L'),(1,'R')]:
-        ellipsoid((side*.30,0,1.44),(.145,.17,.105),'upperArm'+suffix)
-        for row in range(3):
-            plate((side*.315,0,1.425-row*.047),(.16,.32,.04),'upperArm'+suffix,'iron',.018)
+        ellipsoid((side*.30,0,1.44),(.19 if heavy else .105 if light else .145,.19 if heavy else .17,.12 if heavy else .105),'upperArm'+suffix,metal)
+        for row in range(4 if heavy else 1 if light else 3):
+            plate((side*.315,0,1.425-row*.047),(.23 if heavy else .16,.32,.04),'upperArm'+suffix,metal,.018)
         limb((side*.33,0,1.38),(side*.445,0,1.17),.079,.062,'upperArm'+suffix,'cloth')
-        ellipsoid((side*.46,0,1.15),(.085,.077,.08),'forearm'+suffix,'iron')
-        limb((side*.46,0,1.12),(side*.50,-.03,.925),.072,.05,'forearm'+suffix)
+        ellipsoid((side*.46,0,1.15),(.085,.077,.08),'forearm'+suffix,metal)
+        limb((side*.46,0,1.12),(side*.50,-.03,.925),.072,.05,'forearm'+suffix,metal)
         ellipsoid((side*.5,-.06,.885),(.058,.066,.067),'hand'+suffix,'leather')
         for finger in range(3):plate((side*.5+(finger-1)*.025,-.105,.859),(.018,.06,.035),'hand'+suffix,'iron',.007)
         limb((side*.14,0,.91),(side*.14,-.02,.56),.112,.08,'thigh'+suffix,'cloth')
-        ellipsoid((side*.14,-.068,.73),(.10,.075,.19),'thigh'+suffix)
-        ellipsoid((side*.14,-.07,.52),(.088,.083,.092),'calf'+suffix)
-        limb((side*.14,-.02,.48),(side*.14,0,.13),.077,.052,'calf'+suffix)
+        ellipsoid((side*.14,-.068,.73),(.10,.075,.19),'thigh'+suffix,metal)
+        ellipsoid((side*.14,-.07,.52),(.088,.083,.092),'calf'+suffix,metal)
+        limb((side*.14,-.02,.48),(side*.14,0,.13),.077,.052,'calf'+suffix,metal)
         plate((side*.14,-.09,.072),(.15,.29,.13),'foot'+suffix,'leather',.035)
         plate((side*.14,-.17,.102),(.155,.16,.065),'foot'+suffix,'iron',.02)
     ellipsoid((0,0,1.62),(.116,.114,.12),'head','cloth')
-    ellipsoid((0,0,1.685),(.137,.133,.162),'head')
+    ellipsoid((0,0,1.685),(.155 if light else .137,.147 if light else .133,.18 if light else .162),'head','cloth' if light else 'iron')
     plate((0,-.125,1.69),(.23,.034,.036),'head','cloth',.008)
     plate((0,-.15,1.646),(.025,.025,.085),'head','brass',.006)
     for side in [-1,1]:
-        plate((side*.098,-.099,1.625),(.055,.064,.091),'head','iron',.017)
+        plate((side*.098,-.099,1.625),(.055,.064,.091),'head','cloth' if light else 'iron',.017)
         for j in range(3):ellipsoid((side*(.07+j*.045),-.165,1.40),(.011,.01,.011),'chest','brass',1)
+    if heavy:
+        # Lamellar collar, a split crown crest and a heavy lower breastplate.
+        for side in [-1,1]:
+            plate((side*.15,.01,1.5),(.09,.26,.17),'chest','brass',.015)
+            for j in range(3):plate((side*(.04+j*.04),.015,1.82+j*.025),(.025,.14,.13),'head','brass',.006)
+        plate((0,-.18,1.22),(.35,.035,.12),'spine','brass',.02)
+    if variant=='winter':
+        for j in range(13):
+            angle=j/12*math.pi
+            ellipsoid((math.cos(angle)*.29,.015+math.sin(angle)*.13,1.49),(.10,.09,.10),'chest','bone',2)
+    if variant=='keeper':
+        # Separate hanging tabards follow each thigh and leave the stride clear.
+        for side,suffix in [(-1,'L'),(1,'R')]:
+            plate((side*.13,-.105,.69),(.22,.08,.48),'thigh'+suffix,'cloth',.04)
+            plate((side*.13,-.151,.70),(.018,.015,.40),'thigh'+suffix,'brass',.004)
+        for j in range(7):ellipsoid(((j-3)*.047,-.182,1.23-abs(j-3)*.017),(.018,.014,.022),'chest','brass',1)
+    if variant=='wayfarer':
+        plate((.23,-.09,1.02),(.13,.13,.20),'hips','leather',.035)
+        plate((-.22,.10,1.04),(.15,.13,.14),'hips','leather',.03)
     # Cloth spans several joints, with a frayed silhouette and a centre split.
     verts=[];faces=[]
     for row in range(17):
         t=row/16
         for col in range(13):
-            s=col/12;z=1.43-t*1.17
+            s=col/12;z=1.43-t*(.78 if variant=='wayfarer' else 1.17)
             if row==16:z+=.04*math.sin(col*2.7)+(.12 if col==6 else 0)
             verts.append(((s-.5)*(.48+t*.28),.19+t*.19+math.sin(s*TAU*3)*.025,z))
     for row in range(16):
@@ -328,6 +349,11 @@ for weapon in ['sword','spear','bow','staff']:
             name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
+for variant in ['wayfarer','keeper','sentinel','winter']:
+    export('armor_'+variant,HUMAN,lambda variant=variant:human_mesh(variant),human_pose,[])
+    # These skins share the pilgrim's joint order, bind pose and complete Actions.
+    # Retain their editable armatures in the blend, without duplicate runtime rigs.
+    del RIGS['armor_'+variant]
 export('briarHound',HOUND,hound_mesh,hound_pose,[(kind,kind,duration,'sword') for kind,duration in [('idle',3.4),('walk',.9),('run',.55),('sword',.72),('hurt',.3),('jump',.6)]])
 from banner import build_banner
 build_banner(export,MATERIALS,lambda:objects)

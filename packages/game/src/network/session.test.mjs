@@ -3,6 +3,22 @@ import {LoopbackTransport} from '@woosh/meep-engine/src/engine/network/transport
 import {SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
+import {armorIds} from '../content/equipment.mjs';
+
+test('hearth equipment commands replay once and replicate owned armor and reinforcement',async()=>{
+  const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
+  try{
+    const p=host.sim.addPlayer('smith','wayfarer');p.embers=2000;p.seals=['Dawn'];
+    client.localNetworkId=host.addPlayer(1,p.id,'wayfarer',host.sim.exportCharacter(p.id));
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
+    client.localInput={...client.localInput,sequence:1,upgradeWeapon:1};frames(20);
+    expect(host.sim.actor(p.id).inventory.reinforcements.sword).toBe(1);expect(host.sim.actor(p.id).embers).toBe(1840);
+    client.localInput={...client.localInput,sequence:2,upgradeWeapon:0,armor:armorIds.indexOf('keeper')+1};frames(20);
+    expect(host.sim.actor(p.id).inventory.armor).toBe('keeper');expect(client.localCharacter().actor.inventory.armor).toBe('keeper');
+    expect(client.localCharacter().actor.inventory.reinforcements.sword).toBe(1);expect(host.sim.actor(p.id).embers).toBe(1840);
+  }finally{await client.stop();await host.stop();}
+});
 test('Meep initial sync, owned input prediction and authoritative replication work together',async()=>{
   const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
   try{

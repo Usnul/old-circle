@@ -83,7 +83,7 @@ Deaths hand the Blender skeleton to Meep capsule bodies and constrained joints i
 
 A new damaging move needs a shared simulation pose/shape, a readable visual, a resource/cooldown rule and a focused collision test. Damage and knockback must go through `GameWorld.damage`, which enforces PvP consent. Area effects require a boundary and particles for the same radius. Boss resets must consider all living participants; rewards must include late joiners.
 
-Weapon ownership and arrows live in the character inventory. Origins should only supply different initial stats and equipment. Add new persistent fields to the explicit character export/import and update the save migration/version policy. Do not import server-owned world state from a returning client.
+Weapon ownership, arrows, owned armor and per-weapon reinforcement ranks live in the character inventory. `content/equipment.mjs` defines protection, poise, pace, hearing, regeneration, seal unlocks and reinforcement prices. Add inventory fields to `migrateInventory` with explicit old-save defaults. New command fields require a network protocol bump. Armor variants in `build_characters.py` share the pilgrim joint order, bind matrices and animation clips; export their meshes with no duplicated runtime clip set. Keep the source armatures in the Blender file. The renderer selects their geometry from the equipped item and preserves that appearance on ragdolls. Origins should only supply different initial stats and equipment. Add new persistent fields to the explicit character export/import and update the save migration/version policy. Do not import server-owned world state from a returning client.
 
 ## Generate icons and sound
 

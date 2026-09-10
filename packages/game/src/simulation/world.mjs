@@ -24,6 +24,7 @@ import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
 import {loadNavigation} from '../world/navigation-data.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
+import {ARMOR,armorFor,migrateInventory,weaponDamage,reinforcementLimit,reinforcementCost,hasAllSeals} from '../content/equipment.mjs';
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
@@ -96,7 +97,7 @@ export class GameWorld {
     const o=ORIGINS.find(x=>x.id===origin)??ORIGINS[0];
     const a=this.spawnActor(id,{kind:'player',name:o.name,origin:o.id,stats:{...o.stats},weapon:o.weapon});
     a.checkpoint=[a.x,a.y,a.z];
-    a.inventory={weapons:[...new Set(['sword',o.weapon])],arrows:30,armor:'road-worn mail'};
+    a.inventory=migrateInventory({armor:origin==='wayfarer'?'wayfarer':origin==='ember'?'keeper':'mail'},o.weapon);
     a.healthMax=maxHealth(a.stats);a.hp=a.healthMax;a.staminaMax=maxStamina(a.stats);a.stamina=a.staminaMax;a.manaMax=maxMana(a.stats);a.mana=a.manaMax;
     if(saved)this.importCharacter(id,saved);
     return a;
@@ -104,6 +105,19 @@ export class GameWorld {
   actor(id){const e=this.actors.get(id);return e===undefined?undefined:this.ecd.getComponent(e,Actor);}
   input(id,intent){const a=this.actor(id);if(a)a.intent={x:clamp(Number(intent.x)||0,-1,1),z:clamp(Number(intent.z)||0,-1,1),yaw:Number(intent.yaw)||0,buttons:(intent.buttons|0)&127};}
   equip(id,weapon){const a=this.actor(id);if(a&&WEAPONS[weapon]&&a.attackAge<0&&(a.kind!=='player'||a.inventory.weapons.includes(weapon)))a.weapon=weapon;}
+  equipArmor(id,armor){
+    const a=this.actor(id);
+    if(!a||!Object.hasOwn(ARMOR,armor)||!a.inventory.armors.includes(armor)||restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
+    a.inventory.armor=armor;this.event('armor-equipped',a,{armor});return true;
+  }
+  reinforce(id,weapon){
+    const a=this.actor(id);
+    if(!a||!a.inventory.weapons.includes(weapon)||restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
+    const rank=a.inventory.reinforcements[weapon]??0,cost=reinforcementCost(a,weapon);
+    if(rank>=reinforcementLimit(a)||a.embers<cost)return false;
+    a.embers-=cost;a.inventory.reinforcements[weapon]=rank+1;
+    this.event('weapon-reinforced',a,{weapon,rank:rank+1});return true;
+  }
   event(type,actor,data={}){this.events.push({key:`${this.tick}:${actor.id}:${type}:${this.events.length}`,type,id:actor.id,position:[actor.x,actor.y,actor.z],tick:this.tick,...data});}
   step(dt=DT,{predictPlayer}={}){
     this.tick++;this.time=(this.time+dt/90)%24;this.events=[];
@@ -129,7 +143,8 @@ export class GameWorld {
       this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       if(a.landingAge>=0){a.landingAge+=dt;if(a.landingAge>.22)a.landingAge=-1;}
-      a.stamina=Math.min(a.staminaMax,a.stamina+dt*22);a.mana=Math.min(a.manaMax,a.mana+dt*3);
+      const armor=a.kind==='player'?armorFor(a):null;
+      a.stamina=Math.min(a.staminaMax,a.stamina+dt*(armor?.stamina??22));a.mana=Math.min(a.manaMax,a.mana+dt*(armor?.focus??3));
       if(a.kind==='enemy'&&!predicted)this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
       if(!!(buttons&BUTTON.CROUCH)!==a.crouch)this.setCrouch(a,!!(buttons&BUTTON.CROUCH));a.yaw=input.yaw;
@@ -144,7 +159,7 @@ export class GameWorld {
       const normal=a.grounded?Array.from(this.hit.normal):[0,1,0],radius=.32*(a.boss?1.5:1);
       const supportGap=a.grounded?this.hit.t-halfHeight-radius*(1/normal[1]-1):0;
       const len=Math.hypot(input.x,input.z),sprinting=(buttons&BUTTON.SPRINT)&&a.stamina>5&&len>0&&!a.crouch;
-      const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):a.crouch?1.65:sprinting?6.7:3.5;
+      const speed=a.kind==='enemy'?(a.boss?2.3:ENEMIES[a.archetype]?.speed??2.2):(a.crouch?1.65:sprinting?6.7:3.5)*armor.speed;
       if(sprinting)a.stamina=Math.max(0,a.stamina-dt*31);
       const blend=Math.min(1,dt*(a.grounded?15:4)),control=a.hurtTime>0?.18:1;
       if(len>0||supportGap>.025||(pressed&BUTTON.JUMP))this.physics.wake(b);
@@ -180,7 +195,7 @@ export class GameWorld {
         }
       }
       if((buttons&BUTTON.ATTACK)&&a.cooldown===0)this.attack(a);
-      if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=28){a.mana-=28;a.cooldown=1.2;this.nova(a,6.5,36,'frost');}
+      if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=28){a.mana-=28;a.cooldown=1.2;this.nova(a,6.5,30+a.stats.insight*.85,'frost');}
       if((pressed&BUTTON.HEAL)&&a.flasks>0&&a.hp<a.healthMax){a.flasks--;a.hp=Math.min(a.healthMax,a.hp+70);this.event('heal',a);}
       if((pressed&BUTTON.INTERACT)&&a.kind==='player')this.rest(a);
       if(a.attackAge>=0)this.advanceAttack(a,dt);
@@ -236,13 +251,15 @@ export class GameWorld {
       this.ray.set([...from,...d.map(v=>v/length),length]);
       if(sphereSweep(this.physics,this.ray,.11,this.hit,e=>e!==this.actors.get(a.id))){
         const v=this.ecd.getComponent(this.hit.entity,Actor);
-        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.boss?BOSSES[a.archetype].damage:a.kind==='enemy'?(ENEMIES[a.archetype]?.damage??w.damage):w.damage+a.stats.might*.55,w.impulse);}
+        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.boss?BOSSES[a.archetype].damage:a.kind==='enemy'?(ENEMIES[a.archetype]?.damage??w.damage):weaponDamage(a),w.impulse);}
       }
     }
   }
-  damage(a,v,amount,impulse){
+  damage(a,v,amount,impulse,type='physical'){
     if(!canDamage(a,v))return false;
-    v.hp=Math.max(0,v.hp-amount);v.hurtTime=.35;
+    const armor=v.kind==='player'?armorFor(v):null;
+    amount*=1-(armor?.[type]??0);impulse*=1-(armor?.poise??0);
+    v.hp=Math.max(0,v.hp-amount);v.hurtTime=.35*(1-(armor?.poise??0));
     if(v.kind==='enemy'){v.targetId=a.id;v.memory=8;}
     const dx=v.x-a.x,dz=v.z-a.z,d=Math.max(.01,Math.hypot(dx,dz)),b=this.ecd.getComponent(this.actors.get(v.id),RigidBody);
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
@@ -250,12 +267,15 @@ export class GameWorld {
     if(v.hp===0){
       v.deathTick=this.tick;v.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(v);
       this.event('death',v);v.deadTime=0;
-      if(a.kind==='player'){
+      if(a.kind==='player'&&v.kind==='enemy'){
         const reward=v.boss?BOSSES[v.archetype].reward:(ENEMIES[v.archetype]?.reward??45);
         // Everyone alive in the encounter earns boss progress, including late joiners.
         for(const id of this.actors.keys()){
           const p=this.actor(id);if(p.kind!=='player'||p.hp<=0||(p.id!==a.id&&(!v.boss||Math.hypot(p.x-v.x,p.z-v.z)>30)))continue;
+          const completed=hasAllSeals(p);
           p.embers+=reward;if(v.boss&&!p.seals.includes(BOSSES[v.archetype].seal))p.seals.push(BOSSES[v.archetype].seal);
+          for(const [armor,def] of Object.entries(ARMOR))if(p.seals.includes(def.seal)&&!p.inventory.armors.includes(armor)){p.inventory.armors.push(armor);this.event('armor-found',p,{armor});}
+          if(!completed&&hasAllSeals(p))this.event('circle-completed',p);
           if(!p.inventory.weapons.includes(v.weapon)){p.inventory.weapons.push(v.weapon);this.event('equipment-found',p,{weapon:v.weapon});}
           p.inventory.arrows+=v.weapon==='bow'?12:2;
           this.event(v.boss?'boss-defeated':'reward',p,{name:v.name,reward});
@@ -274,13 +294,13 @@ export class GameWorld {
       for(const [id,e] of this.actors){
         const b=this.ecd.getComponent(e,RigidBody),v=this.actor(id);
         if(b._bodyId!==body||hit.has(id))continue;hit.add(id);
-        if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420);
+        if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420,effect==='shockwave'?'physical':'magic');
       }
     }
   }
   spawnProjectile(a,w){
     const t=new Transform64(),p=new Projectile(),e=this.ecd.createEntity();
-    p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?w.damage+a.stats.insight*.6:a.boss?BOSSES[a.archetype].damage:ENEMIES[a.archetype]?.damage??18;
+    p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?weaponDamage(a):a.boss?BOSSES[a.archetype].damage:ENEMIES[a.archetype]?.damage??18;
     p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
     t.setTranslation(...weaponPose(a).origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);
@@ -291,7 +311,7 @@ export class GameWorld {
       if(p.weapon==='bow')p.velocity[1]-=9.81*dt;
       const v=p.velocity,speed=Math.hypot(...v);this.ray.set([t.translation_x,t.translation_y,t.translation_z,v[0]/speed,v[1]/speed,v[2]/speed,speed*dt]);
       const hit=sphereSweep(this.physics,this.ray,p.radius,this.hit,id=>id!==this.actors.get(p.owner));
-      if(hit){const victim=this.ecd.getComponent(this.hit.entity,Actor),owner=this.actor(p.owner);if(victim&&owner)this.damage(owner,victim,p.damage,WEAPONS[p.weapon].impulse);}
+      if(hit){const victim=this.ecd.getComponent(this.hit.entity,Actor),owner=this.actor(p.owner);if(victim&&owner)this.damage(owner,victim,p.damage,WEAPONS[p.weapon].impulse,p.weapon==='staff'?'magic':'physical');}
       if(hit||p.age>p.life){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
       t.setTranslation(t.translation_x+v[0]*dt,t.translation_y+v[1]*dt,t.translation_z+v[2]*dt);
     }
@@ -315,6 +335,7 @@ export class GameWorld {
   rest(a){
     const {hearth,reason}=restStatus(a,[...this.actors.keys()].map(id=>this.actor(id)));if(reason)return false;
     a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.flasks=3;a.checkpoint=hearthArrival(hearth);a.checkpointId=hearth.id;
+    a.inventory.arrows=Math.max(30,a.inventory.arrows);
     if(!a.hearths.includes(hearth.id))a.hearths.push(hearth.id);
     this.event('rest',a,{hearth:hearth.id,name:hearth.name});return true;
   }
@@ -356,7 +377,7 @@ export class GameWorld {
     Object.assign(a,{origin:s.origin,weapon:s.weapon,stats:{...s.stats},level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
     a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
     a.hearths=[...new Set(['hearth',a.checkpointId,...(Array.isArray(s.hearths)?s.hearths.filter(id=>HEARTHS.some(h=>h.id===id)):[])])];
-    a.inventory=s.inventory?{weapons:[...new Set(s.inventory.weapons.filter(w=>WEAPONS[w]).concat(s.weapon))],arrows:clamp(Math.floor(Number(s.inventory.arrows)||0),0,9999),armor:String(s.inventory.armor??'road-worn mail')}:{weapons:[s.weapon,'sword'],arrows:30,armor:'road-worn mail'};
+    a.inventory=migrateInventory(s.inventory,s.weapon,a.seals);
     a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
@@ -376,6 +397,7 @@ export class GameWorld {
     // progression while placing bodies and checkpoints back above that surface.
     for(const id of this.actors.keys()){
       const a=this.actor(id),home=authoredHomes.get(id);
+      a.inventory=migrateInventory(a.inventory,a.weapon,a.seals);
       if(home){
         const moved=home[0]!==a.home[0]||home[2]!==a.home[2],outsideLeash=Math.hypot(a.x-a.home[0],a.z-a.home[2])>(a.boss?29:38);
         a.home=home;

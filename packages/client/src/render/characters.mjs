@@ -16,13 +16,16 @@ import {m4_invert} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_invert.js';
 import {m4_multiply} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_multiply.js';
 import {actorRig,actorScale,actorFeet,actorSocket,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
+import {armorFor} from '@old-circle/game/content/equipment.mjs';
 
 export class Characters {
   constructor(view){this.view=view;this.bundles=new Map();this.pool=new Map();}
+  appearance(a){return actorRig(a)+':'+(a.kind==='player'?'player':a.archetype)+':'+(a.kind==='player'?armorFor(a).appearance:a.archetype==='mage'?'keeper':a.archetype==='archer'?'wayfarer':a.archetype==='sentinel'?'sentinel':'pilgrim');}
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);
-    const [name,appearance]=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
-    const meshes=this.view.models.get(name).map(c=>{
+    const [name,appearance,outfit]=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
+    const model=name==='pilgrim'&&outfit!=='pilgrim'?'armor_'+outfit:name;
+    const meshes=this.view.models.get(model).map(c=>{
       const mesh=new SkinnedMesh();mesh.geometry=c.geometry;mesh.material=c.material;
       if(appearance!=='player'){
         mesh.material=c.material.clone();
@@ -30,13 +33,19 @@ export class Characters {
         if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...(appearance==='mage'?[.7,.9,1.3]:appearance==='archer'?[1.1,.97,.72]:[1.2,.75,.52]));
         if(appearance==='sentinel'&&c.material===this.view.materials.iron)mesh.material.diffuse_color.set(.38,.30,.17);
       }
+      if(outfit!=='pilgrim'&&name==='pilgrim'){
+        mesh.material=mesh.material.clone();
+        const colors={wayfarer:{cloth:[.12,.17,.09],cloak:[.48,.64,.37]},keeper:{cloth:[.24,.27,.24],cloak:[1.05,1.16,1.10]},sentinel:{cloth:[.12,.08,.055],cloak:[.66,.37,.23]},winter:{cloth:[.32,.35,.34],cloak:[1.3,1.4,1.4]}}[outfit];
+        if(c.material===this.view.materials.cloth)mesh.material.diffuse_color.set(...colors.cloth);
+        if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...colors.cloak);
+      }
       mesh.parent=skeleton.root;skeleton.root.children.push(mesh);return mesh;
     });
     bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes})];
     skeleton.root.updateMatrices();this.bundles.set(url,bundle);return bundle;
   }
   create(a){
-    const url=actorRig(a)+':'+(a.kind==='player'?'player':a.archetype),available=this.pool.get(url),rig=available?.pop();
+    const url=this.appearance(a),available=this.pool.get(url),rig=available?.pop();
     if(rig){
       rig.dead=false;rig.deathMaterials=null;rig.clips.clear();
       const instance=this.view.meshSystem.instance_of(rig.id);
