@@ -114,6 +114,10 @@ self.onmessage=async({data})=>{
       presentationEpoch++;postMessage({type:'snapshot',snapshot:stamp({...world.snapshot(),ragdolls:ragdolls.snapshot()},'offline'),mode:'offline'});
     }
     if(inspect&&data.type==='atlas'){const atlas=new SpatialAtlas(world).build();postMessage({type:'atlas',faces:atlas.faceCount,samples:atlas.samples});}
+    if(data.type==='foot-surfaces'){
+      if(data.epoch!==presentationEpoch)return;
+      postMessage({type:'foot-surfaces',id:data.id,epoch:data.epoch,hits:data.feet.slice(0,64).map(f=>world.footSurface(f.position,f.scale))});
+    }
     if(data.type==='camera'){
       const p=world.actor(playerId),from=data.from??[p.x,p.y+.7,p.z],to=data.position,d=to.map((v,i)=>v-from[i]),length=Math.hypot(...d);
       if(length<.001)return;

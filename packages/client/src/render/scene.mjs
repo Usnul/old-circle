@@ -34,6 +34,10 @@ import {Characters} from './characters.mjs';
 import {WorldWind} from './wind.mjs';
 import {WorldAmbient} from './ambient.mjs';
 import {WorldBanners} from './banners.mjs';
+import {WorldFootsteps} from './footsteps.mjs';
+import {DecalSystem} from '@woosh/meep-engine/src/engine/graphics3/DecalSystem.js';
+import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundListenerSystem.js';
+import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
@@ -51,6 +55,8 @@ export class WorldView {
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
+      config.addSystem(new DecalSystem(engine.graphics,engine.assetManager));
+      config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
     }});
     this.ecd=this.engine.entityManager.dataset;
@@ -64,6 +70,7 @@ export class WorldView {
     renderer.pixel_ratio=Math.min(devicePixelRatio,1.4);
     const camera=new Camera();camera.fov.set(57);camera.clip_near=.12;camera.clip_far=1100;
     this.cameraTransform=new Transform64();this.cameraEntity=new Entity().add(camera).add(this.cameraTransform).build(this.ecd);
+    this.listenerTransform=new Transform64();this.listenerEntity=new Entity().add(new SoundListener()).add(this.listenerTransform).build(this.ecd);
     this.materials={};for(const [key,color] of Object.entries(PALETTE)){
       const m=new StandardShadeMaterial();m.diffuse_color.set(...color);m.roughness_factor=key==='iron'?.43:key==='brass'?.38:.92;m.metallic_factor=key==='iron'?.7:key==='brass'?.78:0;
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
@@ -111,6 +118,7 @@ export class WorldView {
     this.banners=new WorldBanners(this,layout.banners);
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
+    this.footsteps=new WorldFootsteps(this);
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     for(let i=0;i<layout.lights.length;i++){
@@ -154,10 +162,11 @@ export class WorldView {
   }
   update(snapshot,playerId,dt){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
-    const present=new Set();
+    const present=new Set(),presented=[];
     const renderTime=performance.now()/1000;
     for(const state of snapshot.actors){
       const a=this.poses.sample(state,renderTime);
+      presented.push(a);
       if(a.hp<=0){continue;}present.add(a.id);
       let rig=this.characters.get(a.id);
       if(rig&&rig.url!==this.characterRenderer.appearance(a)){this.characterRenderer.remove(rig);rig=null;}
@@ -192,6 +201,7 @@ export class WorldView {
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
+      this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
       this.ambient.update(player,snapshot.time,dt);
       this.banners.update(dt);
     }
@@ -199,5 +209,6 @@ export class WorldView {
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);
     t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
+    this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
   }
 }

@@ -46,5 +46,317 @@
     "seed": 9015,
     "model": "Stable Audio 3 Small SFX",
     "steps": 8
+  },
+  {
+    "file": "step-grass-0.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single leather boot footstep landing on soft damp meadow grass, a padded thud and blades brushing. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9016,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.06197,
+      0.61197
+    ]
+  },
+  {
+    "file": "step-grass-1.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single leather boot footstep landing on soft damp meadow grass, a padded thud and blades brushing. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9017,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.0634,
+      0.6134
+    ]
+  },
+  {
+    "file": "step-gravel-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on loose fine gravel, a short crunch with small shifting stones. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9018,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.04113,
+      0.46113
+    ]
+  },
+  {
+    "file": "step-gravel-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on loose fine gravel, a short crunch with small shifting stones. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9019,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.03739,
+      0.45739
+    ]
+  },
+  {
+    "file": "step-stone-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on hard limestone masonry, a sharp dry sole clack with a short low thump. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9020,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.02959,
+      0.44959
+    ]
+  },
+  {
+    "file": "step-stone-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on hard limestone masonry, a sharp dry sole clack with a short low thump. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9021,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.0,
+      0.42
+    ]
+  },
+  {
+    "file": "step-snow-0.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single leather boot footstep landing on fresh powder snow, a soft deep compacting snow crunch. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9022,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.69045,
+      1.24045
+    ]
+  },
+  {
+    "file": "step-snow-1.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single leather boot footstep landing on fresh powder snow, a soft deep compacting snow crunch. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9023,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.0937,
+      0.6437
+    ]
+  },
+  {
+    "file": "step-wood-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on weathered wooden boards, a hollow wooden knock with a very brief creak. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9024,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.36887,
+      0.78887
+    ]
+  },
+  {
+    "file": "step-wood-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on weathered wooden boards, a hollow wooden knock with a very brief creak. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9025,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.08587,
+      0.50587
+    ]
+  },
+  {
+    "file": "step-sand-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on dry coarse sand, a muted sandy impact and short granular scrape. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9026,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.15932,
+      0.57932
+    ]
+  },
+  {
+    "file": "step-sand-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single leather boot footstep landing on dry coarse sand, a muted sandy impact and short granular scrape. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9027,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.15846,
+      0.57846
+    ]
+  },
+  {
+    "file": "paw-grass-0.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single large dog paw with small claws landing on soft damp meadow grass, a padded thud and blades brushing. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9028,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.05866,
+      0.60866
+    ]
+  },
+  {
+    "file": "paw-grass-1.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single large dog paw with small claws landing on soft damp meadow grass, a padded thud and blades brushing. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9029,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.06048,
+      0.61048
+    ]
+  },
+  {
+    "file": "paw-gravel-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on loose fine gravel, a short crunch with small shifting stones. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9030,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.60794,
+      1.02794
+    ]
+  },
+  {
+    "file": "paw-gravel-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on loose fine gravel, a short crunch with small shifting stones. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9031,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.60791,
+      1.02791
+    ]
+  },
+  {
+    "file": "paw-stone-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on hard limestone masonry, a sharp dry claw tick with a short low thump. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9032,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.01054,
+      0.43054
+    ]
+  },
+  {
+    "file": "paw-stone-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on hard limestone masonry, a sharp dry claw tick with a short low thump. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9033,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.14816,
+      0.56816
+    ]
+  },
+  {
+    "file": "paw-snow-0.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single large dog paw with small claws landing on fresh powder snow, a soft deep compacting snow crunch. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9034,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.14671,
+      0.69671
+    ]
+  },
+  {
+    "file": "paw-snow-1.wav",
+    "duration": 0.55,
+    "prompt": "Exactly one single large dog paw with small claws landing on fresh powder snow, a soft deep compacting snow crunch. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9035,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.14494,
+      0.69494
+    ]
+  },
+  {
+    "file": "paw-wood-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on weathered wooden boards, a hollow wooden knock with a very brief creak. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9036,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.8502,
+      1.2702
+    ]
+  },
+  {
+    "file": "paw-wood-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on weathered wooden boards, a hollow wooden knock with a very brief creak. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9037,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      1.09862,
+      1.51862
+    ]
+  },
+  {
+    "file": "paw-sand-0.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on dry coarse sand, a muted sandy impact and short granular scrape. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9038,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.06637,
+      0.48637
+    ]
+  },
+  {
+    "file": "paw-sand-1.wav",
+    "duration": 0.42,
+    "prompt": "Exactly one single large dog paw with small claws landing on dry coarse sand, a muted sandy impact and short granular scrape. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
+    "seed": 9039,
+    "model": "Stable Audio 3 Small SFX",
+    "steps": 8,
+    "generatedDuration": 2,
+    "trim": [
+      0.31052,
+      0.73052
+    ]
   }
 ]

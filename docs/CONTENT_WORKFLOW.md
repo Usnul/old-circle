@@ -112,7 +112,9 @@ The optional audio runtime is installed into ignored `.local/audio-runtime`. Rec
 
 This assumes the documented local Torch/diffusers/transformers environment already exists. It is not a portable Python lockfile. Model weights stay outside this repository. Record any dependency or model revision change before regenerating approved assets.
 
-Sopra loads the six generated WAVs through Meep's asset manager, with positional one-shots, attenuation, voice limits and ambient loops. Listen to regenerated output in context before approving it. The initial files are generated draft audio, not a mastered sound library; acoustic probe baking, occlusion and transmission remain future integration work. Keep acoustic pathfinding disabled for the open world.
+Sopra loads the generated WAVs through Meep's asset manager, with positional one-shots, attenuation, voice limits and ambient loops. The 24 `step-*` and `paw-*` samples are isolated single impacts for grass, gravel, stone, snow, wood and sand; their provenance includes the original duration and trim. The old two-impact `step.wav` is retained as source output and is not used for walking. Listen to regenerated output in context before approving it. Acoustic probe baking, occlusion and transmission remain future integration work. Keep acoustic pathfinding disabled for the open world.
+
+Foot contacts sample the displayed Blender soles and query static Meep collision in the worker. Terrain materials use the rendered splat weights; structures use their authored surface. Each landing can play one spatial impact, burst a native GPU effect and project a native decal along the hit normal and toe direction. Limits are 16 nearby actors, one query in flight, 32 transient bursts and 128 reusable print projectors; old prints fade sooner under crowd pressure. `tools/blender/build_footprints.py` authors boot treads and paw masks and retains packed images in `assets/blender/footprints.blend`.
 
 ## Tests and changes
 

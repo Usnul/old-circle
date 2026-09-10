@@ -42,7 +42,7 @@ export class GameWorld {
     for(const c of [Transform64,RigidBody,Collider,Actor,Projectile])this.ecd.registerComponentType(c);
     this.actors=new Map();this.projectiles=new Set();this.events=[];this.tick=0;this.time=15.2;this.layout=buildLayout();
     this.ray=new Ray3();this.hit=new PhysicsSurfacePoint();this.overlaps=new Uint32Array(512);
-    this.navigation=null;this.mind=new EnemyMind(this);this.predictionSleeping=new Set();
+    this.navigation=null;this.mind=new EnemyMind(this);this.predictionSleeping=new Set();this.contactSurfaces=new Map();
   }
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
@@ -57,12 +57,18 @@ export class GameWorld {
         vertices[i]=Math.cos(prop.yaw)*x+Math.sin(prop.yaw)*z;vertices[i+1]=y;vertices[i+2]=-Math.sin(prop.yaw)*x+Math.cos(prop.yaw)*z;
         for(let j=0;j<3;j++){min[j]=Math.min(min[j],vertices[i+j]+prop.position[j]);max[j]=Math.max(max[j],vertices[i+j]+prop.position[j]);}
       }
-      this.body(prop.position,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
+      const entity=this.body(prop.position,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
+      this.contactSurfaces.set(entity,/trunk|tree|wood|plank/i.test(prop.model)?'wood':prop.model.startsWith('frostRock')?'snow':'stone');
       this.layout.solids.push({position:min.map((v,j)=>(v+max[j])/2),size:min.map((v,j)=>max[j]-v)});
     }
     if(navigation)this.navigation=await loadNavigation();
     if(populate)this.populate();
     this.physics.optimizeBroadphase?.();return this;
+  }
+  footSurface(position,scale=1){
+    this.ray.set([position[0],position[1]+.18*scale,position[2],0,-1,0,.45*scale]);
+    if(!this.physics.raycast(this.ray,this.hit,e=>this.ecd.getComponent(e,RigidBody)?.kind===BodyKind.Static))return null;
+    return {position:Array.from(this.hit.position),normal:Array.from(this.hit.normal),surface:this.hit.entity===this.terrainEntity?'terrain':this.contactSurfaces.get(this.hit.entity)??'stone'};
   }
   body(position,shape,kind=BodyKind.Dynamic,friction=.8){
     const e=this.ecd.createEntity(),t=new Transform64(),b=new RigidBody(),c=new Collider();

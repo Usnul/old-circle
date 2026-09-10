@@ -12,6 +12,14 @@ const worlds=[];
 async function setup(){const w=await new GameWorld().start({populate:false});worlds.push(w);return w;}
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
 const run=(w,n)=>{for(let i=0;i<n;i++)w.step();};
+
+test('native foot rays ignore characters and identify the contacted floor and its normal',async()=>{
+  const w=await setup(),p=w.addPlayer('feet');run(w,30);
+  const hit=w.footSurface([p.x,p.y-.845,p.z]);expect(hit).not.toBeNull();expect(hit.normal[1]).toBeGreaterThan(.65);
+  const y=heightAt(180,50),floor=w.body([180,y+1,50],BoxShape3D.from(3,.2,3),BodyKind.Static);w.contactSurfaces.set(floor,'wood');
+  const plank=w.footSurface([180,y+1.2,50]);expect(plank.surface).toBe('wood');expect(plank.position[1]).toBeCloseTo(y+1.2,3);
+  expect(w.footSurface([180,y+5,50])).toBeNull();
+});
 test('armor protects differently against physical blows and magic and reduces knockback',async()=>{
   const w=await setup(),p=w.addPlayer('armored'),enemy=w.spawnActor('attacker',{},[p.x+3,p.y,p.z]);
   p.inventory.armor='sentinel';const hp=p.hp;

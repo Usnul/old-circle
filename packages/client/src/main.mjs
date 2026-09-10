@@ -55,6 +55,7 @@ async function start(character){
     worker=new Worker(new URL('./simulation.worker.mjs',import.meta.url),{type:'module'});
     worker.onerror=e=>showError(e.message);
     worker.onmessage=({data})=>{
+      if(data.type==='foot-surfaces'){view.footsteps.accept(data);return;}
       inspector?.onMessage(data);
       if(data.type==='camera'){view.cameraLimit=data.distance;view.shelter=data.shelter;return;}
       if(data.type==='network-status'){$('#network-state').title=data.message;return;}
@@ -121,7 +122,7 @@ function frame(now){
   const player=snapshot?.actors.find(a=>a.id===playerId),next=player&&Object.values(BOSSES).find(b=>!player.seals.includes(b.seal));
   if(player&&completionPending&&player.hp>0&&player.attackAge<0)ending();
   if(player)updateCompass(view.yaw,player,next&&LANDMARKS.find(l=>l.id===next.landmark));
-  view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}requestAnimationFrame(frame);
+  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}requestAnimationFrame(frame);
 }
 function updateHud(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
