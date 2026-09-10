@@ -4,11 +4,14 @@ import { NetworkSession } from '@woosh/meep-engine/src/engine/network/NetworkSes
 import { NetworkIdentity } from '@woosh/meep-engine/src/engine/network/ecs/components/NetworkIdentity.js';
 import { BinarySerializationRegistry } from '@woosh/meep-engine/src/engine/ecs/storage/binary/BinarySerializationRegistry.js';
 import { SimAction } from '@woosh/meep-engine/src/engine/network/sim/SimAction.js';
-import { JsonComponentAdapter } from '../simulation/components.mjs';
+import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
+import {OwnerAwareScope} from '@woosh/meep-engine/src/engine/network/replication/ScopeFilter.js';
+import {FrameAdapter} from './frame-adapter.mjs';
+import {worldPatch,applyWorldPatch} from './world-patch.mjs';
 import { GameWorld,DT } from '../simulation/world.mjs';
 import { WEAPONS } from '../content/catalog.mjs';
 
-export const PROTOCOL_VERSION=1,NET_DT=1/30;
+export const PROTOCOL_VERSION=2,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
@@ -39,32 +42,58 @@ class PresenceAction extends SimAction {
   reset(){this.id='';this.actor=null;}
 }
 
+const patchAdapter=new FrameAdapter(Object);
+class WorldPatchAction extends SimAction {
+  static action_type_name='OldCircleWorldPatch';
+  constructor(patch=null){super();this.patch=patch;}
+  affected_components(callback,executor){const e=executor.slot_table.entity_for(0);if(e>=0)callback(e,WorldFrame);}
+  apply(world,executor){const e=executor.slot_table.entity_for(0);if(e>=0)applyWorldPatch(world.getComponent(e,WorldFrame).snapshot,this.patch);}
+  serialize(buffer){patchAdapter.serialize(buffer,this.patch);}
+  deserialize(buffer){this.patch={};patchAdapter.deserialize(buffer,this.patch);}
+  reset(){this.patch=null;}
+}
+
 /** NetworkSession owns packets, fragmentation, action logs, prediction and replay.
  * The replication dataset is a wire projection; gameplay remains in GameWorld's Meep ECS.
  * WorldFrame is a correctness-first baseline. Split it into scoped per-actor records before scaling.
  */
 export class SharedSession {
-  constructor(role,peerId=0){
+  constructor(role,peerId=0,{simulation}={}){
     this.role=role;this.peerId=peerId;this.em=new EntityManager();this.ecd=new EntityComponentDataset();
     this.ecd.setComponentTypeMap([NetworkIdentity,WorldFrame,CharacterFrame]);this.em.attachDataset(this.ecd);this.ecd.oldCircle=this;
     this.characters=new Map();this.localInput={x:0,z:0,yaw:0,buttons:0,weapon:0,pvp:0,levelStat:0,sequence:0};this.localNetworkId=0;this.playerId='';
-    this.nextNetworkId=1000;this.retired=[];
+    this.nextNetworkId=1000;this.retired=[];this.syncedPeers=new Set();this.connections=new Map();
+    this.sim=simulation;this.ownsSimulation=!simulation;
   }
   async start(savedWorld){
-    this.sim=await new GameWorld().start({populate:this.role==='host'});
+    this.sim??=await new GameWorld().start({populate:this.role==='host'});
     if(savedWorld)this.sim.restoreWorld(savedWorld);
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
-    const registry=new BinarySerializationRegistry();for(const c of [WorldFrame,CharacterFrame])registry.registerAdapter(new JsonComponentAdapter(c),c.typeName);
-    this.net=new NetworkSession({entity_manager:this.em,role:this.role,local_peer_id:this.peerId,binary_registry:registry,tick_rate_hz:30,simulation_delay_ticks:0,frame_capacity:64,scope_filter:this.role==='client'?{is_entity_in_scope:(_peer,id)=>id===this.localNetworkId}:null,reconnect:{enabled:false},connection_timeout_ms:3000});
-    this.net.replicate(WorldFrame);this.net.replicate(CharacterFrame);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);
+    const registry=new BinarySerializationRegistry();for(const c of [WorldFrame,CharacterFrame])registry.registerAdapter(new FrameAdapter(c),c.typeName);
+    this.net=new NetworkSession({entity_manager:this.em,role:this.role,local_peer_id:this.peerId,binary_registry:registry,tick_rate_hz:30,simulation_delay_ticks:3,frame_capacity:64,scope_filter:this.role==='client'?{is_entity_in_scope:(_peer,id)=>id===this.localNetworkId}:null,reconnect:{enabled:false},connection_timeout_ms:3000});
+    this.net.replicate(WorldFrame);this.net.replicate(CharacterFrame);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);this.net.defineAction(WorldPatchAction);
     if(this.role==='client')this.net.defineInputSampler(()=>{
-      if(!this.localNetworkId)return [];
+      if(!this.localNetworkId||!this.localCharacter()?.actor)return [];
       const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence)];
     });
     await this.net.start();
+    if(this.role==='client')this.net.peer.onMalformedPacket.add((_peer,error)=>{this.failure=error;});
+    if(this.role==='client')this.net.peer.onInitialSync.add((peer,_token,frame)=>{
+      const b=new BinaryBuffer();b.writeUint8(1);b.writeUint32(frame);this.net.peer.send_reliable_command(peer,b.raw_bytes,b.position);
+    });
     if(this.role==='host'){
+      const scope=new OwnerAwareScope({world:this.ecd,slot_table:this.net.peer.slot_table,identity_class:NetworkIdentity});
+      this.net.peer.replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.syncedPeers.has(peer)&&scope.is_entity_in_scope(peer,id)};
+      this.net.peer.onReliableCommand.add((peer,buffer,offset,length)=>{
+        if(length!==5)return;buffer.position=offset;if(buffer.readUint8()!==1)return;const frame=buffer.readUint32();
+        if(frame>this.net.current_frame)return;
+        // The recipient confirms the baseline it actually installed. Older
+        // action history must not race ahead of that initial world snapshot.
+        this.net.peer.baseline.set_acked(peer,frame);this.syncedPeers.add(peer);
+      });
       const f=new WorldFrame();f.snapshot=this.sim.snapshot();this.worldEntity=this.spawn(0,0,f);
-      this.net.server.onLocalSim.add(()=>this.hostStep());
+      this.net.server.onRewind.add(()=>{this.worldRewound=true;});
+      this.net.server.onLocalSim.add(frame=>this.hostStep(frame));
     }
     return this;
   }
@@ -78,13 +107,17 @@ export class SharedSession {
     this.net.send(new PresenceAction(playerId,structuredClone(actor)));
     return networkId;
   }
-  hostStep(){
+  hostStep(frame){
     const f=this.ecd.getComponent(this.worldEntity,WorldFrame);
     this.sim.replaceSnapshot(f.snapshot);
     for(const [id,e] of this.characters){const c=this.ecd.getComponent(e,CharacterFrame);if(c&&this.sim.actor(id))this.applyIntent(c,id);}
     const events=[];for(let i=0;i<2;i++){this.sim.step(DT);events.push(...this.sim.events);}
     const snapshot=this.sim.snapshot();snapshot.events=[...f.snapshot.events,...events].filter(e=>e.tick>=snapshot.tick-90).slice(-256);
-    this.ecd.sendEvent(this.worldEntity,'net_mutate_component',{component_type:WorldFrame,new_state:{snapshot}});
+    // Replaying a past frame can change fields a peer already received. The
+    // first fresh frame after that replay carries a complete corrected world;
+    // deltas against rewritten history would otherwise leave stale HP/items.
+    const replace=this.worldRewound&&frame>this.net.current_frame;
+    this.net.send(new WorldPatchAction(worldPatch(f.snapshot,snapshot,{replace})));if(replace)this.worldRewound=false;
     for(const [id,e] of this.characters){const old=this.ecd.getComponent(e,CharacterFrame),actor=this.sim.actor(id);if(!old||!actor)continue;const next={...old,effects:[],actor:structuredClone(actor),appliedSequence:old.sequence};this.ecd.sendEvent(e,'net_mutate_component',{component_type:CharacterFrame,new_state:next});}
   }
   removePlayer(peerId,id){
@@ -113,12 +146,22 @@ export class SharedSession {
     const f=this.worldFrame();if(!c.actor||!f||!f.snapshot.actors.length)return;
     const state=structuredClone(f.snapshot),i=state.actors.findIndex(a=>a.id===c.actor.id);if(i<0)return;
     state.actors[i]=structuredClone(c.actor);this.sim.replaceSnapshot(state);this.applyIntent(c,c.actor.id);
-    const effects=[];for(let i=0;i<2;i++){this.sim.step(DT);effects.push(...this.sim.events.filter(e=>e.id===c.actor.id&&e.type==='nova'));}
+    const effects=[];for(let i=0;i<2;i++){this.sim.step(DT,{predictPlayer:c.actor.id});effects.push(...this.sim.events.filter(e=>e.id===c.actor.id&&e.type==='nova'));}
     c.effects=[...(c.effects??[]),...effects].filter(e=>e.tick>=state.tick-90).slice(-32);
     c.actor=structuredClone(this.sim.actor(c.actor.id));c.appliedSequence=c.sequence;
   }
-  tick(){this.net.normalize_if_dirty();this.net.tick(NET_DT);while(this.retired.length&&this.net.current_frame-this.retired[0].frame>66)this.ecd.removeEntity(this.retired.shift().e);}
+  tick(){if(this.failure)throw this.failure;this.net.normalize_if_dirty();this.net.tick(NET_DT);while(this.retired.length&&this.net.current_frame-this.retired[0].frame>66)this.ecd.removeEntity(this.retired.shift().e);}
   presentation(){const f=this.worldFrame();if(!f)return null;const snapshot=structuredClone(f.snapshot),local=this.localCharacter();if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
-  connect(peer,transport){this.net.connect(peer,transport);}
-  async stop(){await this.net.stop();await this.sim.stop();await new Promise((resolve,reject)=>this.em.shutdown(resolve,reject));}
+  connect(peer,transport){
+    this.syncedPeers.delete(peer);
+    this.net.connect(peer,transport);
+    // A world sync can contain more fragments than the channel's 32-bit ACK
+    // window. Acknowledge each small burst before its first packets age out;
+    // waiting for the next simulation tick can otherwise cause endless resend.
+    let received=0;const empty=new Uint8Array(0);
+    const acknowledge=(_bytes,length)=>{if(length>9&&++received%16===0)this.net.peer.channel_for(peer)?.send(empty,0);};
+    const cleanup=()=>{transport.onReceive.remove(acknowledge);transport.onDisconnect.remove(cleanup);if(this.connections.get(peer)===cleanup)this.connections.delete(peer);};
+    this.connections.get(peer)?.();this.connections.set(peer,cleanup);transport.onReceive.add(acknowledge);transport.onDisconnect.add(cleanup);
+  }
+  async stop(){for(const cleanup of this.connections.values())cleanup();await this.net.stop();if(this.ownsSimulation)await this.sim.stop();await new Promise((resolve,reject)=>this.em.shutdown(resolve,reject));}
 }

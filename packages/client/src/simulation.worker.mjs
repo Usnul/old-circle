@@ -10,7 +10,7 @@ import {Ragdolls} from '@old-circle/game/simulation/ragdolls.mjs';
 // Rendering never owns authority. This Worker keeps the same Meep simulation
 // warm while NetworkSession predicts and reconciles the connected character.
 let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false;
-let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,lastEventTick=-1;
+let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,lastEventTick=-1,connectedAt=0;
 let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,sequence:0},pendingLevel;
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const seenEvents=new Set();
@@ -34,12 +34,12 @@ function connect(){
     ws.removeEventListener('message',welcome);
     try{
       const data=JSON.parse(event.data);if(data.type!=='welcome'||data.protocol!==PROTOCOL_VERSION)throw new Error('Incompatible server');
-      const candidate=await new SharedSession('client',data.peerId).start();
+      const candidate=await new SharedSession('client',data.peerId,{simulation:world}).start();
       if(socket!==ws||ws.readyState!==WebSocket.OPEN){await candidate.stop();return;}
       candidate.localNetworkId=data.networkId;candidate.playerId=playerId;
       const transport=new WebSocketTransport({socket:ws});candidate.connect(0,transport);
       ws.send(JSON.stringify({type:'ready',character:world.exportCharacter(playerId)}));
-      remote=candidate;seenEvents.clear();connecting=false;clearTimeout(timeout);lastServerAt=performance.now();lastServerTick=-1;lastEventTick=-1;accumulator=0;
+      remote=candidate;seenEvents.clear();connecting=false;clearTimeout(timeout);connectedAt=lastServerAt=performance.now();lastServerTick=-1;lastEventTick=-1;accumulator=0;
     }catch(error){console.warn('Shared world unavailable',error);if(socket===ws)disconnect(error.stack??String(error));}
   });
 }
@@ -57,7 +57,7 @@ function update(){
         world.replaceSnapshot(state);mode='online';
         if(pendingLevel&&remote.localCharacter()?.appliedSequence===pendingLevel.sequence){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
       }else{world.input(playerId,intent);if(!paused)world.step(DT);}
-      if(now-lastServerAt>3500)disconnect(`No authoritative updates; last tick ${lastServerTick}`);
+      if(now-connectedAt>5000&&now-lastServerAt>1000)disconnect(`No authoritative updates; continuing locally from tick ${lastServerTick}`);
     }else if(!paused){
       world.input(playerId,intent);while(accumulator>=DT&&steps++<6){world.step();events.push(...world.events);accumulator-=DT;}
     }else accumulator=0;

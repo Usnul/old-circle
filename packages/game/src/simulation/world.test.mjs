@@ -33,6 +33,14 @@ test('restoring an unchanged snapshot does not teleport or wake every actor',asy
   w.replaceSnapshot(w.snapshot());expect(calls).toBe(0);
 });
 
+test('prediction suspends distant physics and AI, then local authority resumes both',async()=>{
+  const w=await setup(),p=w.addPlayer('predicted'),a=w.spawnActor('distant',{},[180,heightAt(180,100)+6,100]);
+  let thoughts=0;const think=w.think.bind(w);w.think=(...args)=>{thoughts++;return think(...args);};
+  const y=a.y;for(let i=0;i<30;i++)w.step(1/60,{predictPlayer:p.id});
+  expect(thoughts).toBe(0);expect(a.y).toBe(y);expect(w.actor(a.id)).toBe(a);
+  run(w,30);expect(thoughts).toBeGreaterThan(0);expect(a.y).toBeLessThan(y-.5);expect(w.predictionSleeping.size).toBe(0);
+});
+
 test('older world saves retain progression above a raised terrain surface',async()=>{
   const w=await setup(),p=w.addPlayer('returning');p.embers=345;p.seals=['Dawn'];
   const saved=w.snapshot();delete saved.contentVersion;saved.actors[0].y=-2;saved.actors[0].checkpoint=[0,0,24];
@@ -79,6 +87,14 @@ test('reconnect imports the character and replaces every world-owned state',asyn
   local.spawnActor('offline-only',{hp:0},[10,2,0]);server.addPlayer('player');server.spawnActor('server-enemy',{hp:90},[12,2,0]);
   const character=local.exportCharacter('player');server.importCharacter('player',character);local.replaceSnapshot(server.snapshot());
   expect(local.actor('offline-only')).toBeUndefined();expect(local.actor('server-enemy').hp).toBe(90);expect(local.actor('player').embers).toBe(432);expect(local.actor('player').seals).toEqual(['Dawn']);
+});
+
+test('character handoff preserves velocity, crouch and action phase without restarting locomotion',async()=>{
+  const local=await setup(),server=await setup(),p=local.addPlayer('moving');server.addPlayer(p.id);
+  local.setCrouch(p,true);local.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});run(local,45);local.attack(p);local.advanceAttack(p,.2);
+  const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
+  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId'])expect(returning[key],key).toBe(p[key]);
+  server.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});server.step();expect(returning.vx).toBeGreaterThan(1);expect(returning.attackAge).toBeGreaterThan(.2);
 });
 test('a fast arrow hits a thin wall before the actor behind it',async()=>{
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);

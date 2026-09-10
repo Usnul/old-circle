@@ -30,6 +30,7 @@ export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:
 const rotation={x:0,y:0,z:0,w:1};
 const q=[0,0,0,1];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
 
 export class GameWorld {
   constructor(){
@@ -38,7 +39,7 @@ export class GameWorld {
     for(const c of [Transform64,RigidBody,Collider,Actor,Projectile])this.ecd.registerComponentType(c);
     this.actors=new Map();this.projectiles=new Set();this.events=[];this.tick=0;this.time=15.2;this.layout=buildLayout();
     this.ray=new Ray3();this.hit=new PhysicsSurfacePoint();this.overlaps=new Uint32Array(512);
-    this.navigation=null;this.mind=new EnemyMind(this);
+    this.navigation=null;this.mind=new EnemyMind(this);this.predictionSleeping=new Set();
   }
   async start({populate=true,navigation=true}={}){
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
@@ -105,10 +106,17 @@ export class GameWorld {
   input(id,intent){const a=this.actor(id);if(a)a.intent={x:clamp(Number(intent.x)||0,-1,1),z:clamp(Number(intent.z)||0,-1,1),yaw:Number(intent.yaw)||0,buttons:(intent.buttons|0)&127};}
   equip(id,weapon){const a=this.actor(id);if(a&&WEAPONS[weapon]&&a.attackAge<0&&(a.kind!=='player'||a.inventory.weapons.includes(weapon)))a.weapon=weapon;}
   event(type,actor,data={}){this.events.push({key:`${this.tick}:${actor.id}:${type}:${this.events.length}`,type,id:actor.id,position:[actor.x,actor.y,actor.z],tick:this.tick,...data});}
-  step(dt=DT){
+  step(dt=DT,{predictPlayer}={}){
     this.tick++;this.time=(this.time+dt/90)%24;this.events=[];
+    const predicted=predictPlayer&&this.actor(predictPlayer);
+    if(!predicted){for(const b of this.predictionSleeping)this.physics.wake(b);this.predictionSleeping.clear();}
     for(const [id,e] of this.actors){
       const a=this.actor(id),t=this.ecd.getComponent(e,Transform64),b=this.ecd.getComponent(e,RigidBody);
+      // Prediction owns one character. Distant server actors cannot collide
+      // with it during this short replay; keep their ECS/collider rows warm,
+      // but suspend their physics through Meep until local authority resumes.
+      if(predicted&&a.id!==predictPlayer&&Math.hypot(a.x-predicted.x,a.y-predicted.y,a.z-predicted.z)>24){this.physics.sleep(b);this.predictionSleeping.add(b);continue;}
+      if(this.predictionSleeping.delete(b))this.physics.wake(b);
       if(a.hp<=0){
         this.syncActorCollider(a);b.gravityScale=0;
         a.deadTime+=dt;b.linearVelocity.fill(0);
@@ -122,7 +130,7 @@ export class GameWorld {
       this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       a.stamina=Math.min(a.staminaMax,a.stamina+dt*22);a.mana=Math.min(a.manaMax,a.mana+dt*3);
-      if(a.kind==='enemy')this.think(a,dt);
+      if(a.kind==='enemy'&&!predicted)this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
       if(!!(buttons&BUTTON.CROUCH)!==a.crouch)this.setCrouch(a,!!(buttons&BUTTON.CROUCH));a.yaw=input.yaw;
       const halfHeight=a.boss?1.2675:a.crouch?.495:.845;
@@ -312,13 +320,23 @@ export class GameWorld {
       if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;this.teleport(a,a.home);}
     }
   }
-  exportCharacter(id){const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,checkpointId,hearths,inventory}=a;return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory)};}
+  exportCharacter(id){
+    const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,checkpointId,hearths,inventory}=a;
+    const motion=Object.fromEntries(motionFields.map(key=>[key,a[key]]));
+    Object.assign(motion,{crouch:a.crouch,grounded:a.grounded,attackKind:a.attackKind,hitIds:[...a.hitIds],projectileReleased:a.projectileReleased,mantle:structuredClone(a.mantle),deathVelocity:[...a.deathVelocity]});
+    return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory),motion};
+  }
   importCharacter(id,s){
     const a=this.actor(id);if(!a||s.version!==1)throw new Error('Unsupported character save version');
     const fields=['vigor','endurance','might','insight'];
     if(!fields.every(k=>Number.isFinite(s.stats?.[k])&&s.stats[k]>=1)||![s.x,s.y,s.z,s.hp,s.stamina,s.mana,s.level,s.embers].every(Number.isFinite))throw new Error('Malformed character state');
     if(!WEAPONS[s.weapon]||!Array.isArray(s.seals)||!Array.isArray(s.checkpoint)||s.checkpoint.length!==3||!s.checkpoint.every(Number.isFinite))throw new Error('Malformed equipment or checkpoint');
     if(s.inventory&&!Array.isArray(s.inventory.weapons))throw new Error('Malformed inventory');
+    if(s.motion){
+      const m=s.motion;
+      if(!motionFields.every(key=>Number.isFinite(m[key]))||!Array.isArray(m.hitIds)||!m.hitIds.every(id=>typeof id==='string')||!Array.isArray(m.deathVelocity)||m.deathVelocity.length!==3||!m.deathVelocity.every(Number.isFinite))throw new Error('Malformed character motion');
+      if(m.mantle&&(!['hang','climb'].includes(m.mantle.phase)||!Number.isFinite(m.mantle.t)||![m.mantle.from,m.mantle.to].every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))))throw new Error('Malformed mantle state');
+    }
     // Client progression is trusted at reconnect, per game policy. World state never comes from this payload.
     Object.assign(a,{origin:s.origin,weapon:s.weapon,stats:{...s.stats},level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
     a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
@@ -327,6 +345,11 @@ export class GameWorld {
     a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
+    if(s.motion){
+      for(const key of motionFields)a[key]=s.motion[key];
+      Object.assign(a,{crouch:!!s.motion.crouch,grounded:!!s.motion.grounded,attackKind:s.motion.attackKind==='nova'?'nova':'weapon',hitIds:[...s.motion.hitIds],projectileReleased:!!s.motion.projectileReleased,mantle:structuredClone(s.motion.mantle??null),deathVelocity:[...s.motion.deathVelocity]});
+      this.syncActorCollider(a,true);const b=this.ecd.getComponent(this.actors.get(id),RigidBody);b.linearVelocity.set(a.vx,a.vy,a.vz);
+    }
   }
   snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
   restoreWorld(snapshot){
@@ -343,7 +366,7 @@ export class GameWorld {
   replaceSnapshot(snapshot,{preservePlayer}={}){
     const saved=preservePlayer?this.exportCharacter(preservePlayer):null;
     const ids=new Set(snapshot.actors.map(a=>a.id));
-    for(const [id,e] of this.actors)if(!ids.has(id)){this.ecd.removeEntity(e);this.actors.delete(id);}
+    for(const [id,e] of this.actors)if(!ids.has(id)){this.predictionSleeping.delete(this.ecd.getComponent(e,RigidBody));this.ecd.removeEntity(e);this.actors.delete(id);}
     for(const value of snapshot.actors){
       let a=this.actor(value.id);if(!a)a=this.spawnActor(value.id,value,[value.x,value.y,value.z]);
       const resized=a.crouch!==value.crouch||a.boss!==value.boss;

@@ -1,5 +1,3 @@
-import { BinaryClassSerializationAdapter } from '@woosh/meep-engine/src/engine/ecs/storage/binary/BinaryClassSerializationAdapter.js';
-
 // Actor is gameplay state only. Spatial and collision state live in Meep components.
 export class Actor {
   static typeName='OldCircleActor';
@@ -17,10 +15,4 @@ export class Actor {
 export class Projectile {
   static typeName='OldCircleProjectile';
   owner='';weapon='bow';damage=20;age=0;life=4;velocity=[0,0,0];hitIds=[];radius=.08;
-}
-// Length-delimited, versioned gameplay payloads inside Meep's binary adapters.
-export class JsonComponentAdapter extends BinaryClassSerializationAdapter {
-  constructor(klass){super();this.klass=klass;this.version=1;}
-  serialize(buffer,value){buffer.writeUTF8String(JSON.stringify(value));}
-  deserialize(buffer,value){Object.assign(value,JSON.parse(buffer.readUTF8String()));}
 }

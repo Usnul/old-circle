@@ -8,11 +8,14 @@ import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {SharedSession,PROTOCOL_VERSION,NET_DT} from '@old-circle/game/network/session.mjs';
 
 const root=resolve(import.meta.dirname,'../../..');
+// Disk saves are independent of network framing. Protocol upgrades must not
+// invalidate the persistent world's existing Meep binary envelope.
+const WORLD_SAVE_VERSION=1;
 const contentTypes={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.wav':'audio/wav','.svg':'image/svg+xml'};
 export async function startServer({port=Number(process.env.PORT??8787),address=process.env.HOST??'127.0.0.1',dataDir=process.env.OLD_CIRCLE_DATA_DIR??resolve(root,'.local/server')}={}){
   const storage=resolve(dataDir),savePath=resolve(storage,'world.meep'),clientRoot=resolve(root,'packages/client/dist');
   await mkdir(storage,{recursive:true});let saved;
-  try{const bytes=await readFile(savePath),b=new BinaryBuffer();b.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(b.readUint32()!==PROTOCOL_VERSION)throw new Error('Unsupported world save');saved=JSON.parse(b.readUTF8String());saved.actors=saved.actors.filter(a=>a.kind!=='player');}catch(e){if(e.code!=='ENOENT')throw e;}
+  try{const bytes=await readFile(savePath),b=new BinaryBuffer();b.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(b.readUint32()!==WORLD_SAVE_VERSION)throw new Error('Unsupported world save');saved=JSON.parse(b.readUTF8String());saved.actors=saved.actors.filter(a=>a.kind!=='player');}catch(e){if(e.code!=='ENOENT')throw e;}
   const host=await new SharedSession('host').start(saved),sockets=new Map(),reservedPeers=new Set();
   const http=createServer(async(req,res)=>{
     if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size}));return;}
@@ -55,7 +58,7 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
   let last=performance.now(),accumulator=0;
   const ticker=setInterval(()=>{const now=performance.now();accumulator+=Math.min(.25,(now-last)/1000);last=now;let steps=0;while(accumulator>=NET_DT&&steps++<8){host.tick();accumulator-=NET_DT;}},8);
   let saving=Promise.resolve();
-  function save(){saving=saving.catch(()=>{}).then(async()=>{const b=new BinaryBuffer();b.writeUint32(PROTOCOL_VERSION);b.writeUTF8String(JSON.stringify(host.sim.snapshot()));await writeFile(savePath+'.tmp',new Uint8Array(b.data,0,b.position));await rename(savePath+'.tmp',savePath);});return saving;}
+  function save(){saving=saving.catch(()=>{}).then(async()=>{const b=new BinaryBuffer();b.writeUint32(WORLD_SAVE_VERSION);b.writeUTF8String(JSON.stringify(host.sim.snapshot()));await writeFile(savePath+'.tmp',new Uint8Array(b.data,0,b.position));await rename(savePath+'.tmp',savePath);});return saving;}
   const saver=setInterval(()=>save().catch(e=>console.error('World save failed',e)),15000);
   let stopping;
   function stop(){return stopping??=(async()=>{clearInterval(ticker);clearInterval(saver);await save();for(const socket of wss.clients)socket.terminate();await new Promise(r=>wss.close(r));await new Promise(r=>http.close(r));await host.stop();})();}

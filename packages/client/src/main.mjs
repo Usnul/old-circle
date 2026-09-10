@@ -40,7 +40,7 @@ async function start(character){
   $('#title').hidden=true;$('#loading').hidden=false;
   try{
     if(!navigator.gpu)throw new Error('Old Circle requires WebGPU. Open this game in a WebGPU-capable desktop browser.');
-    const {WorldView}=await import('./render/scene.mjs');view=new WorldView();
+    const {WorldView}=await import('./render/scene.mjs');view=new WorldView();if(Number.isFinite(character?.motion?.yaw))view.yaw=character.motion.yaw;
     await view.start((text,p)=>{$('#loading-text').textContent=text;$('#loading-progress').style.width=`${p*100}%`;});
     input=await new GameInput(view.engine,{
       action:name=>{if(!started)return;if(['journal','map','escape'].includes(name)){menu?closeModal():name==='map'?map():journal();}else send({type:'equip',weapon:name});},
