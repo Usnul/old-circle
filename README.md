@@ -25,6 +25,8 @@ pnpm server                  # serves the built client at http://127.0.0.1:8787
 
 The production host defaults to loopback. `HOST`, `PORT` and `OLD_CIRCLE_DATA_DIR` configure it. A remote deployment needs HTTPS/WSS for WebGPU and a secure browser context. Public hosting, authentication and operational deployment are not configured here.
 
+The production build includes Brotli sidecars for compressible code and native assets. The host streams them when the browser accepts Brotli, with an uncompressed fallback. Geometry currently transfers in 27.3 MiB and decodes to the unchanged 115.7 MiB catalogue used by the offline cache. Compression runs during the build, outside the live simulation.
+
 ## Play
 
 WASD walks, Shift sprints, C crouches, Space jumps and grabs nearby ledges. Keep Space held to climb; release it to hang, then press Space to climb or C to drop. Mouse looks; left click attacks; Q casts frost nova; R drinks a flask; E rests at a nearby hearth. Keys 1–4 select owned weapons. After sprint exhaustion, recover at least 25 stamina (or a quarter of maximum) and release Shift before sprinting again. Tab opens attributes, equipment and the hearth forge, saving and the PvP toggle; M opens the map. Escape releases the mouse and opens the journal. The journal pauses solo simulation; the shared world keeps running. In embedded browsers that reject pointer lock, free mouse look, edge turning and arrow keys remain available.
