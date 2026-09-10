@@ -35,7 +35,7 @@ import {Characters} from './characters.mjs';
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
 const quat=new Quaternion();
 export class WorldView {
-  constructor(){this.models=new Map();this.characters=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
+  constructor(){this.models=new Map();this.characters=new Map();this.corpses=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
   async start(progress=()=>{}){
     progress('Kindling the light…',.1);
@@ -140,6 +140,17 @@ export class WorldView {
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
       this.characterRenderer.update(rig,a);
     }
+    const dead=new Set();
+    for(const state of snapshot.ragdolls??[]){
+      dead.add(state.key);let rig=this.corpses.get(state.key);
+      if(!rig){
+        rig=!present.has(state.actorId)&&this.characters.get(state.actorId);if(rig)this.characters.delete(state.actorId);
+        else rig=this.characterRenderer.create({archetype:state.name==='briarHound'?'hound':state.appearance,kind:state.appearance==='player'?'player':'enemy',weapon:state.weapon??'sword'});
+        this.corpses.set(state.key,rig);
+      }
+      this.characterRenderer.corpse(rig,this.poses.corpse(state,renderTime));
+    }
+    for(const [key,rig] of this.corpses)if(!dead.has(key)){this.characterRenderer.remove(rig);this.corpses.delete(key);}
     for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
     const liveProjectiles=new Set();for(const p of snapshot.projectiles){liveProjectiles.add(p.id);let m=this.missiles.get(p.id);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell');this.missiles.set(p.id,m);}const v=p.velocity;this.pose(m,p.position,1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}

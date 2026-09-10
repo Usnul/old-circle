@@ -3,6 +3,7 @@ import {GameWorld,BUTTON} from './world.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {SpatialAtlas} from '../world/spatial-atlas.mjs';
 const worlds=[];
 async function setup(){const w=await new GameWorld().start({populate:false});worlds.push(w);return w;}
@@ -34,6 +35,13 @@ test('PvP requires both participants to opt in; collisions apply knockback',asyn
   const w=await setup(),a=w.addPlayer('attacker'),b=w.addPlayer('victim');w.teleport(b,[2,a.y,a.z]);const hp=b.hp;
   expect(w.damage(a,b,20,300)).toBe(false);a.pvp=true;expect(w.damage(a,b,20,300)).toBe(false);b.pvp=true;
   expect(w.damage(a,b,20,300)).toBe(true);expect(b.hp).toBe(hp-20);w.step();expect(b.vx).toBeGreaterThan(0);
+});
+
+test('death removes the standing collision capsule and respawn restores it',async()=>{
+  const w=await setup(),p=w.addPlayer('fallen'),enemy=w.spawnActor('attacker',{},[2,3,24]),e=w.actors.get(p.id);
+  w.setCrouch(p,true);w.damage(enemy,p,1000,200);expect(w.ecd.getComponent(e,Collider)).toBeUndefined();
+  const snapshot=w.snapshot();snapshot.actors.find(a=>a.id===p.id).crouch=false;w.replaceSnapshot(snapshot);expect(w.ecd.getComponent(e,Collider)).toBeUndefined();
+  w.respawn(p);expect(w.ecd.getComponent(e,Collider)).toBeDefined();expect(p.hp).toBe(p.healthMax);expect(p.crouch).toBe(false);
 });
 test('Meep line-of-sight queries and nova damage respect cover',async()=>{
   const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,heightAt(100,30)+1,30]);

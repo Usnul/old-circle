@@ -9,3 +9,11 @@ test('a respawn snaps without interpolating through the world',()=>{
   const poses=new PresentationPoses(),a={id:'player',x:0,y:1,z:0,yaw:0};poses.accept({actors:[a]},0);
   const b={...a,x:100};poses.accept({actors:[b]},1/30);expect(poses.sample(b,.04).x).toBe(100);
 });
+
+test('ragdoll joints use the same delayed Meep timeline and expire from the key table',()=>{
+  const poses=new PresentationPoses(),a={key:'enemy:18',joints:[{position:[0,2,0],rotation:[0,0,0,1]}]};
+  poses.accept({actors:[],ragdolls:[a]},0);
+  const b={...a,joints:[{position:[.2,1.8,0],rotation:[0,0,Math.sin(.1),Math.cos(.1)]}]};poses.accept({actors:[],ragdolls:[b]},1/30);
+  const p=poses.corpse(b,.05).joints[0];expect(p.position[0]).toBeCloseTo(.1);expect(p.position[1]).toBeCloseTo(1.9);expect(p.rotation[2]).toBeCloseTo(Math.sin(.05));
+  for(let i=0;i<18;i++)poses.accept({actors:[]},(i+2)/30);expect(poses.keys.size).toBe(0);
+});

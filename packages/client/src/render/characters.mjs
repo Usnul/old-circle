@@ -7,11 +7,16 @@ import {AnimationClip} from '@woosh/meep-engine/src/engine/ecs/animation/Animati
 import {SceneBundle} from '@woosh/meep-engine/src/shade/renderer/loader/SceneBundle.js';
 import {SkinnedMesh} from '@woosh/meep-engine/src/shade/renderer/scene/SkinnedMesh.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
-import {actorRig,actorScale,actorFeet,createSkeleton,animationPlan} from '@old-circle/game/simulation/animation.mjs';
+import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
+import {TransformAuthority} from '@woosh/meep-engine/src/shade/renderer/scene/TransformAuthority.js';
+import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {m4_invert} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_invert.js';
+import {m4_multiply} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_multiply.js';
+import {actorRig,actorScale,actorFeet,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 
 export class Characters {
-  constructor(view){this.view=view;this.bundles=new Map();}
+  constructor(view){this.view=view;this.bundles=new Map();this.pool=new Map();}
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);
     const [name,appearance]=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
@@ -28,9 +33,21 @@ export class Characters {
     skeleton.root.updateMatrices();this.bundles.set(url,bundle);return bundle;
   }
   create(a){
-    const mesh=new SGMesh();mesh.url=actorRig(a)+':'+(a.kind==='player'?'player':a.archetype);
+    const url=actorRig(a)+':'+(a.kind==='player'?'player':a.archetype),available=this.pool.get(url),rig=available?.pop();
+    if(rig){
+      rig.dead=false;rig.deathMaterials=null;rig.clips.clear();
+      const instance=this.view.meshSystem.instance_of(rig.id);
+      const source=this.bundle(url);
+      for(let s=0;s<(instance?.skins.length??0);s++)for(let i=0;i<instance.skins[s].joints.length;i++){
+        const joint=instance.skins[s].joints[i];joint.transform_authority=TransformAuthority.GPU;joint.transform_local.copy(source.skins[s].joints[i].transform_local);
+      }
+      for(const {mesh,material} of rig.baseMaterials??[]){mesh.material=material;mesh.updateMatrices();}
+      rig.animation=new Animation();this.view.ecd.addComponentToEntity(rig.id,rig.animation);
+      rig.weapon=a.archetype==='hound'?null:this.view.model(a.weapon);rig.weaponName=a.weapon;return rig;
+    }
+    const mesh=new SGMesh();mesh.url=url;
     const t=new Transform64(),animation=new Animation(),id=new Entity().add(t).add(mesh).add(animation).build(this.view.ecd);
-    return {id,t,animation,clips:new Map(),weapon:a.archetype==='hound'?null:this.view.model(a.weapon),weaponName:a.weapon};
+    return {id,t,url,animation,clips:new Map(),weapon:a.archetype==='hound'?null:this.view.model(a.weapon),weaponName:a.weapon};
   }
   update(rig,a){
     const {view}=this,scale=actorScale(a),yaw=a.yaw+Math.PI;
@@ -50,5 +67,48 @@ export class Characters {
       const pose=weaponPose(a);for(const {id,t} of rig.weapon){t.setTranslation(...pose.origin);t.setScale(scale,scale,scale);t.setRotation(...pose.rotation);t.updateMatrix();t64_announce_change(view.ecd,id);}
     }
   }
-  remove(rig){this.view.ecd.removeEntity(rig.id);if(rig.weapon)this.view.remove(rig.weapon);if(rig.telegraph)this.view.remove(rig.telegraph);}
+  corpse(rig,state){
+    const {view}=this;
+    if(!rig.dead){
+      view.ecd.removeComponentFromEntity(rig.id,Animation);rig.dead=true;rig.t.makeIdentity();t64_announce_change(view.ecd,rig.id);
+      if(rig.telegraph){view.remove(rig.telegraph);delete rig.telegraph;}
+      rig.worldPoses=state.joints.map(()=>new Transform64());rig.inverse=new Float64Array(16);rig.matrix=new Float64Array(16);
+    }
+    const instance=view.meshSystem.instance_of(rig.id);if(!instance)return;
+    const skin=instance.skins[0],bones=rigs[state.name].bones;
+    if(!rig.deathMaterials){
+      // Scene-bundle clips declare GPU ownership even before playback starts.
+      // Unregistering Animation stops the clips; physics must claim the joints.
+      for(const joint of skin.joints)joint.transform_authority=TransformAuthority.CPU;
+      rig.baseMaterials??=[];rig.deathMaterials=[];view.meshSystem.traverse_meshes(rig.id,mesh=>{
+        if(!rig.baseMaterials.some(entry=>entry.mesh===mesh))rig.baseMaterials.push({mesh,material:mesh.material});
+        mesh.material=mesh.material.clone();mesh.material.transparency_mode=TransparencyMode.Transparent;rig.deathMaterials.push(mesh.material);mesh.updateMatrices();
+      });
+      for(const part of rig.weapon??[]){
+        const geometry=view.ecd.getComponent(part.id,ShadedGeometry),material=geometry.material.clone();
+        material.transparency_mode=TransparencyMode.Transparent;
+        view.ecd.removeComponentFromEntity(part.id,ShadedGeometry);view.ecd.addComponentToEntity(part.id,ShadedGeometry.from(geometry.geometry,material));rig.deathMaterials.push(material);
+      }
+    }
+    for(let i=0;i<state.joints.length;i++){
+      const pose=state.joints[i],world=rig.worldPoses[i];world.setTranslation(...pose.position);world.setRotation(...pose.rotation);world.setScale(state.scale,state.scale,state.scale);world.updateMatrix();
+      if(bones[i].parent<0)skin.joints[i].transform_local.copy(world);
+      else{m4_invert(rig.inverse,rig.worldPoses[bones[i].parent]);m4_multiply(rig.matrix,rig.inverse,world);skin.joints[i].transform_local.fromMatrix(rig.matrix);}
+    }
+    // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
+    for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
+    const alpha=Math.max(0,Math.min(1,(45-state.age)/4));for(const material of rig.deathMaterials)material.diffuse_color.setA(alpha);
+    if(rig.weapon){
+      const pose=rig.worldPoses[bones.findIndex(b=>b.name==='weapon')],grip=state.weapon==='sword'?.25:0;
+      for(const {id,t} of rig.weapon){t.copy(pose);t.setTranslation(pose[12]+pose[4]*grip,pose[13]+pose[5]*grip,pose[14]+pose[6]*grip);t.updateMatrix();t64_announce_change(view.ecd,id);}
+    }
+  }
+  remove(rig){
+    const {view}=this;if(view.ecd.getComponent(rig.id,Animation))view.ecd.removeComponentFromEntity(rig.id,Animation);
+    if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
+    // Meep 3.20 retains a skin's matrix range after unregistration (MEEP-005).
+    // Retain the registered instance offstage and reuse it on the next spawn.
+    rig.t.makeIdentity();rig.t.setTranslation(0,-10000,0);rig.t.updateMatrix();t64_announce_change(view.ecd,rig.id);
+    let available=this.pool.get(rig.url);if(!available){available=[];this.pool.set(rig.url,available);}available.push(rig);
+  }
 }

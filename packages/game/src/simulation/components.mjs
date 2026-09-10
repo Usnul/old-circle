@@ -12,6 +12,7 @@ export class Actor {
   mantle=null;checkpoint=[0,0,24];intent={x:0,z:0,yaw:0,buttons:0};
   x=0;y=0;z=0;vx=0;vy=0;vz=0;
   animationTime=0;gaitPhase=0;projectileReleased=false;
+  deathTick=0;deathVelocity=[0,0,0];
 }
 export class Projectile {
   static typeName='OldCircleProjectile';

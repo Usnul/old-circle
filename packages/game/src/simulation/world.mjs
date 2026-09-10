@@ -105,6 +105,7 @@ export class GameWorld {
     for(const [id,e] of this.actors){
       const a=this.actor(id),t=this.ecd.getComponent(e,Transform64),b=this.ecd.getComponent(e,RigidBody);
       if(a.hp<=0){
+        this.syncActorCollider(a);b.gravityScale=0;
         a.deadTime+=dt;b.linearVelocity.fill(0);
         if(a.kind==='player'&&a.deadTime>4)this.respawn(a);
         if(a.kind==='enemy'&&a.deadTime>(a.boss?1200:180)&&![...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<30;})){
@@ -113,6 +114,7 @@ export class GameWorld {
         continue;
       }
       a.hurtTime=Math.max(0,a.hurtTime-dt);a.cooldown=Math.max(0,a.cooldown-dt);
+      this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       a.stamina=Math.min(a.staminaMax,a.stamina+dt*22);a.mana=Math.min(a.manaMax,a.mana+dt*3);
       if(a.kind==='enemy')this.think(a,dt);
@@ -163,7 +165,7 @@ export class GameWorld {
       const a=this.actor(id),t=this.ecd.getComponent(e,Transform64),b=this.ecd.getComponent(e,RigidBody);
       a.x=t.translation_x;a.y=t.translation_y;a.z=t.translation_z;
       a.vx=b.linearVelocity[0];a.vy=b.linearVelocity[1];a.vz=b.linearVelocity[2];
-      if(a.y < -25 || Math.abs(a.x)>235 || a.z < -465 || a.z>145){a.hp=0;this.event('death',a);}
+      if(a.hp>0&&(a.y < -25 || Math.abs(a.x)>235 || a.z < -465 || a.z>145)){a.hp=0;a.deathTick=this.tick;a.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(a);this.event('death',a);}
     }
     this.stepProjectiles(dt);this.checkEncounters();
   }
@@ -183,12 +185,18 @@ export class GameWorld {
     if(a.attackAge>(a.attackKind==='nova'?1:w.cooldown))a.attackAge=-1;
   }
   setCrouch(a,crouch){
-    if(a.kind!=='player')return;
+    if(a.kind!=='player'||a.hp<=0)return;
     const e=this.actors.get(a.id),y=a.y+(crouch?-.35:.35);
     if(!crouch&&this.physics.overlap(CapsuleShape3D.from(.32,1.05),[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
     this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=.8;
     this.ecd.addComponentToEntity(e,c);const b=this.ecd.getComponent(e,RigidBody);
     this.physics.setPose(b,{x:a.x,y,z:a.z},rotation);a.y=y;a.crouch=crouch;
+  }
+  syncActorCollider(a,rebuild=false){
+    const e=this.actors.get(a.id);let collider=this.ecd.getComponent(e,Collider);
+    if(rebuild&&collider){this.ecd.removeComponentFromEntity(e,Collider);collider=null;}
+    if(a.hp<=0){if(collider)this.ecd.removeComponentFromEntity(e,Collider);return;}
+    if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=.8;this.ecd.addComponentToEntity(e,c);}
   }
   melee(a){
     const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova')return;
@@ -214,6 +222,7 @@ export class GameWorld {
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
     this.event('hit',v,{damage:Math.round(amount),source:a.id});
     if(v.hp===0){
+      v.deathTick=this.tick;v.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(v);
       this.event('death',v);v.deadTime=0;
       if(a.kind==='player'){
         const reward=v.boss?BOSSES[v.archetype].reward:(ENEMIES[v.archetype]?.reward??45);
@@ -288,7 +297,7 @@ export class GameWorld {
     a.embers-=levelCost(a.level);a.level++;a.stats[stat]++;
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);this.rest(a);return true;
   }
-  respawn(a){a.hp=a.healthMax;a.deadTime=0;a.flasks=3;a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.event('respawn',a);}
+  respawn(a){a.hp=a.healthMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.mantle=null;a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
   teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
   checkEncounters(){
     for(const id of this.actors.keys()){
@@ -318,9 +327,10 @@ export class GameWorld {
     for(const [id,e] of this.actors)if(!ids.has(id)){this.ecd.removeEntity(e);this.actors.delete(id);}
     for(const value of snapshot.actors){
       let a=this.actor(value.id);if(!a)a=this.spawnActor(value.id,value,[value.x,value.y,value.z]);
-      if(a.crouch!==value.crouch)this.setCrouch(a,value.crouch);
+      const resized=a.crouch!==value.crouch||a.boss!==value.boss;
       const moved=a.x!==value.x||a.y!==value.y||a.z!==value.z;
       Object.assign(a,structuredClone(value));if(moved)this.teleport(a,[value.x,value.y,value.z]);
+      this.syncActorCollider(a,resized);
       const velocity=this.ecd.getComponent(this.actors.get(a.id),RigidBody).linearVelocity;velocity[0]=value.vx;velocity[1]=value.vy;velocity[2]=value.vz;
     }
     for(const e of this.projectiles)this.ecd.removeEntity(e);this.projectiles.clear();
