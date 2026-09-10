@@ -1,5 +1,6 @@
 """Masonry at metre scale, with explicit collision pieces and usable openings."""
 import math,random
+from mathutils import Vector,noise
 
 def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     random.seed(813)
@@ -59,16 +60,27 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     beam((0,0,25.4),(0,0,27.8),.085,'brass',.025)
     finish('bellTower',physical)
 
-    # Ridge mesh, with strata and independently cut summits; never scaled sphere props.
-    vertices=[];faces=[];rings=16;sectors=28
-    for j in range(rings):
-        t=j/(rings-1);radius=(1-t)**.8
-        for i in range(sectors):
-            a=i*math.tau/sectors;r=radius*(1+.13*math.sin(i*2.6+j*.4))
-            vertices.append((math.cos(a)*r+math.sin(t*4)*.13,math.sin(a)*r,t*(1+.12*math.sin(i*1.7))+.035*math.sin(j*2+i)))
-    for j in range(rings-1):
-        for i in range(sectors):
-            a=j*sectors+i;b=j*sectors+(i+1)%sectors;c=a+sectors;d=b+sectors
-            faces.extend([(a,b,c),(b,d,c)])
-    mesh('Mountain strata',vertices,faces,'stoneDark')
-    finish('mountain')
+    # Metre-scale ridges share saddles and broad foothills. A height grid gives
+    # every summit real area; collapsed radial rings created vertical fins.
+    ridges=[
+      ('mountain',[(-23,4,76,58,48),(17,-8,89,55,46),(46,8,48,42,37)]),
+      ('mountainRidge',[(-38,5,53,44,42),(-4,-9,72,62,51),(38,1,65,48,40)]),
+      ('mountainShoulder',[(-29,-8,64,54,45),(8,8,52,59,48),(43,-5,38,40,38)]),
+    ]
+    for variant,(name,peaks) in enumerate(ridges):
+        vertices=[];faces=[];nx=64;ny=48
+        for j in range(ny+1):
+            y=-65+j*130/ny
+            for i in range(nx+1):
+                x=-88+i*176/nx
+                h=max(height*max(0,1-math.hypot((x-cx)/rx,(y-cy)/ry))**1.12 for cx,cy,height,rx,ry in peaks)
+                erosion=noise.fractal(Vector((x*.075,y*.075,variant*11.7)),.8,2,4)
+                foothill=min(1,h/12)
+                z=h+foothill*(erosion*3.4+math.sin(h*.55+x*.09)*.7)
+                vertices.append((x,y,z))
+        for j in range(ny):
+            for i in range(nx):
+                a=j*(nx+1)+i;b=a+1;c=a+nx+1;d=c+1
+                faces.extend([(a,b,c),(b,d,c)])
+        mesh(name+' eroded strata',vertices,faces,'stoneDark')
+        finish(name)

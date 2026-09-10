@@ -96,7 +96,7 @@ export function buildLayout() {
   // Adjacent cliffs conceal the world edge and give the final crown a mountain skyline.
   for(let i=0;i<17;i++){
     const x=-330+i*42,z=-470-Math.sin(i*1.6)*25;
-    add('mountain',x,z,[31+(i%3)*6,46+(i%5)*13,38],i*2.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
+    add(['mountain','mountainRidge','mountainShoulder'][i%3],x,z,[.85+(i%3)*.08,.72+(i%5)*.09,.9],Math.sin(i*1.7)*.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
   }
   return {props,solids,lights};
 }
