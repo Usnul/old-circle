@@ -10,9 +10,11 @@ import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 import {TransformAuthority} from '@woosh/meep-engine/src/shade/renderer/scene/TransformAuthority.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
+import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {m4_invert} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_invert.js';
 import {m4_multiply} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_multiply.js';
-import {actorRig,actorScale,actorFeet,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
+import {actorRig,actorScale,actorFeet,actorSocket,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 
 export class Characters {
@@ -66,6 +68,18 @@ export class Characters {
     if(rig.weapon){
       const pose=weaponPose(a);for(const {id,t} of rig.weapon){t.setTranslation(...pose.origin);t.setScale(scale,scale,scale);t.setRotation(...pose.rotation);t.updateMatrix();t64_announce_change(view.ecd,id);}
     }
+    if(a.kind==='player'){
+      rig.lantern??={parts:view.model('pilgrimLantern'),light:view.light([a.x,a.y,a.z],[1,.62,.30],2.4,Light.Type.POINT,false,7),socket:new Transform64(),position:new Vector3()};
+      actorSocket(rig.lantern.socket,a,'hips');this.lanternPose(rig,rig.lantern.socket,1);
+    }
+  }
+  lanternPose(rig,socket,alpha){
+    const {view}=this,{parts,light,position}=rig.lantern;
+    position.set(-.32,.10,-.08).applyMatrix4(socket);
+    for(const {id,t} of parts){t.copy(socket);t.setTranslation(...position);t.updateMatrix();t64_announce_change(view.ecd,id);}
+    // The light originates at the ember, below the attachment hook.
+    position.set(-.32,-.12,-.08).applyMatrix4(socket);
+    light.t.setTranslation(...position);light.t.updateMatrix();t64_announce_change(view.ecd,light.id);light.l.intensity.set(2.4*alpha);
   }
   corpse(rig,state){
     const {view}=this;
@@ -89,6 +103,10 @@ export class Characters {
         material.transparency_mode=TransparencyMode.Transparent;
         view.ecd.removeComponentFromEntity(part.id,ShadedGeometry);view.ecd.addComponentToEntity(part.id,ShadedGeometry.from(geometry.geometry,material));rig.deathMaterials.push(material);
       }
+      for(const part of rig.lantern?.parts??[]){
+        const geometry=view.ecd.getComponent(part.id,ShadedGeometry),material=geometry.material.clone();material.transparency_mode=TransparencyMode.Transparent;
+        view.ecd.removeComponentFromEntity(part.id,ShadedGeometry);view.ecd.addComponentToEntity(part.id,ShadedGeometry.from(geometry.geometry,material));rig.deathMaterials.push(material);
+      }
     }
     for(let i=0;i<state.joints.length;i++){
       const pose=state.joints[i],world=rig.worldPoses[i];world.setTranslation(...pose.position);world.setRotation(...pose.rotation);world.setScale(state.scale,state.scale,state.scale);world.updateMatrix();
@@ -98,6 +116,7 @@ export class Characters {
     // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
     for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
     const alpha=Math.max(0,Math.min(1,(45-state.age)/4));for(const material of rig.deathMaterials)material.diffuse_color.setA(alpha);
+    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],alpha);
     if(rig.weapon){
       const pose=rig.worldPoses[bones.findIndex(b=>b.name==='weapon')],grip=state.weapon==='sword'?.25:0;
       for(const {id,t} of rig.weapon){t.copy(pose);t.setTranslation(pose[12]+pose[4]*grip,pose[13]+pose[5]*grip,pose[14]+pose[6]*grip);t.updateMatrix();t64_announce_change(view.ecd,id);}
@@ -106,6 +125,7 @@ export class Characters {
   remove(rig){
     const {view}=this;if(view.ecd.getComponent(rig.id,Animation))view.ecd.removeComponentFromEntity(rig.id,Animation);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
+    if(rig.lantern){view.remove(rig.lantern.parts);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
     // Meep 3.20 retains a skin's matrix range after unregistration (MEEP-005).
     // Retain the registered instance offstage and reuse it on the next spawn.
     rig.t.makeIdentity();rig.t.setTranslation(0,-10000,0);rig.t.updateMatrix();t64_announce_change(view.ecd,rig.id);

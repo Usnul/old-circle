@@ -246,6 +246,21 @@ cone((0,0,.95),.48,.6,.24,'brass')
 ico((0,0,1.1),(.27,.27,.22),'ember',2)
 finish('brazier')
 
+# A pilgrim's caged lantern, hanging from the origin at its belt hook.
+# Open brass ribs leave the ember visible without a transparent glass shell.
+for z,r,h in [(-.115,.095,.035),(-.315,.095,.035)]:
+ cone((0,0,z),r,r*.82,h,'brass',12)
+cone((0,0,-.083),.078,.025,.055,'iron',12)
+cone((0,0,-.343),.064,.025,.04,'iron',12)
+for i in range(6):
+ a=i*math.tau/6;x,y=math.cos(a)*.072,math.sin(a)*.072
+ beam((x,y,-.12),(x,y,-.30),.009,'brass',.009,6)
+ico((0,0,-.222),(.036,.036,.07),'ember',2)
+beam((0,0,-.30),(0,0,-.25),.018,'iron',.013,8)
+bpy.ops.mesh.primitive_torus_add(major_radius=.035,minor_radius=.006,major_segments=20,minor_segments=6,location=(0,0,-.025),rotation=(math.pi/2,0,0))
+keep(bpy.context.object,'brass')
+finish('pilgrimLantern')
+
 # Armour pieces are authored around their attachment pivots for procedural joint animation.
 ico((0,0,1.15),(.32,.21,.48),'iron',2)
 cube((0,0,.9),(.58,.40,.13),'brass',.02)
