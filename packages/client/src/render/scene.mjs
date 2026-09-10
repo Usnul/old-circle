@@ -115,7 +115,12 @@ export class WorldView {
         })));complete++;progress('Remembering the old road…',.15+complete/entries.length*.65);
       }));
     }
-    const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
+    const layout=buildLayout(),groundMeshes=[];this.reliquaries=new Map();
+    for(const p of layout.props){
+      const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);
+      if(p.relic)this.reliquaries.set(p.relic,{prop:p,parts,opened:false});
+      if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);
+    }
     this.banners=new WorldBanners(this,layout.banners);
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
@@ -195,6 +200,7 @@ export class WorldView {
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
+      for(const [id,reliquary] of this.reliquaries){const opened=(player.relics??[]).includes(id);if(opened!==reliquary.opened){this.remove(reliquary.parts);const p=reliquary.prop;reliquary.parts=this.model(opened?'reliquarySpent':'reliquary',p.position,p.scale,p.yaw);reliquary.opened=opened;}}
       const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);

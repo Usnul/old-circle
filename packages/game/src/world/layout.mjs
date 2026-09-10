@@ -1,5 +1,6 @@
 import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS } from './regions.mjs';
 import {CAVES,inCaveFootprint} from './interiors.mjs';
+import {DUNGEONS,dungeonPoint,dungeonFootprint} from './dungeons.mjs';
 
 export function buildLayout() {
   const props=[], solids=[], lights=[], banners=[];
@@ -115,6 +116,12 @@ export function buildLayout() {
     }
   }
   // Regional monuments share a visual grammar, but never the same silhouette.
+  for(const dungeon of DUNGEONS){
+    add('dungeon_'+dungeon.id,0,0,1,0,0);
+    for(const local of dungeon.lamps){const [x,y,z]=dungeonPoint(dungeon,local);lamp(x,z,y);}
+    for(const local of dungeon.tombs){const [x,y,z]=dungeonPoint(dungeon,local);add('cryptTomb',x,z,1,0,y);}
+    const [x,y,z]=dungeonPoint(dungeon,dungeon.treasure.at);add('reliquary',x,z,1,0,y).relic=dungeon.treasure.id;
+  }
   const [ox,oy,oz]=landmarkPosition('oak');add('tree',ox,oz-8,3.7,0,heightAt(ox,oz-8));lamp(ox+5,oz+4);
   for(let i=0;i<9;i++){add('arch',109+i*6,-114,1.5,0);if(i%2===0)lamp(109+i*6,-110);}
   const [sx,sy,sz]=landmarkPosition('spire');
@@ -137,6 +144,6 @@ export function buildLayout() {
   // Remove cover inside authored rock after scatter, preserving all random
   // sequences and placements elsewhere when a local interior changes.
   const vegetation=new Set(['tree','pine','magicTree','winterTree','groundcover','groundcover1','dryGrass','moorGrass','fern','bracken','fallenTrunk']);
-  for(let i=props.length-1;i>=0;i--)if(vegetation.has(props[i].model)&&inCaveFootprint(props[i].position[0],props[i].position[2],3))props.splice(i,1);
+  for(let i=props.length-1;i>=0;i--){const p=props[i],x=p.position[0],z=p.position[2];if((vegetation.has(p.model)&&inCaveFootprint(x,z,3))||((vegetation.has(p.model)||/^(rock|sandstone|frostRock)/.test(p.model))&&dungeonFootprint(x,z,2)))props.splice(i,1);}
   return {props,solids,lights,banners};
 }

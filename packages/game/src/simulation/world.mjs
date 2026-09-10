@@ -22,12 +22,14 @@ import { heightAt, terrainSurface, landmarkPosition, REGIONS, regionAt, SPAWN,WO
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
+import {DUNGEONS,dungeonPoint} from '../world/dungeons.mjs';
 import {loadNavigation} from '../world/navigation-data.mjs';
 import { WEAPONS, BOSSES, ENEMIES, ORIGINS, canDamage, maxHealth, maxStamina, maxMana, levelCost } from '../content/catalog.mjs';
 import {ARMOR,armorFor,migrateInventory,weaponDamage,reinforcementLimit,reinforcementCost,hasAllSeals} from '../content/equipment.mjs';
 import {updateStamina} from './stamina.mjs';
 import {BOSS_MOVES} from '../content/boss-moves.mjs';
 import {stepHazard,clearBossHazards} from './boss-attacks.mjs';
+import {knownRelics,flaskCapacity,nearbyRelic} from '../content/relics.mjs';
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
@@ -59,7 +61,11 @@ export class GameWorld {
         vertices[i]=Math.cos(prop.yaw)*x+Math.sin(prop.yaw)*z;vertices[i+1]=y;vertices[i+2]=-Math.sin(prop.yaw)*x+Math.cos(prop.yaw)*z;
         for(let j=0;j<3;j++){min[j]=Math.min(min[j],vertices[i+j]+prop.position[j]);max[j]=Math.max(max[j],vertices[i+j]+prop.position[j]);}
       }
-      const entity=this.body(prop.position,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
+      // Keep each convex body's local vertices near its own centre, including
+      // masonry exported as part of a large world-space Blender collection.
+      const center=min.map((v,j)=>(v+max[j])/2);
+      for(let i=0;i<vertices.length;i++)vertices[i]-=center[i%3]-prop.position[i%3];
+      const entity=this.body(center,ConvexHullShape3D.from(vertices,new Uint32Array(part.indices)),BodyKind.Static);
       this.contactSurfaces.set(entity,/trunk|tree|wood|plank/i.test(prop.model)?'wood':prop.model.startsWith('frostRock')?'snow':'stone');
       this.layout.solids.push({position:min.map((v,j)=>(v+max[j])/2),size:min.map((v,j)=>max[j]-v)});
     }
@@ -92,6 +98,10 @@ export class GameWorld {
     }
     const [kx,kz]=CAVES[0].keeper;
     this.spawnActor('cave-keeper',{kind:'enemy',archetype:'mage',name:'The Lost Bellkeeper',weapon:'staff',hp:100,healthMax:100},[kx,heightAt(kx,kz)+1,kz]);
+    for(const dungeon of DUNGEONS)for(const enemy of dungeon.encounters){
+      const p=dungeonPoint(dungeon,enemy.at);p[1]+=.85;
+      this.spawnActor(`${dungeon.id}-${enemy.id}`,{kind:'enemy',archetype:enemy.type,name:enemy.name,weapon:ENEMIES[enemy.type].weapon,hp:enemy.health,healthMax:enemy.health,dungeon:dungeon.id},p);
+    }
   }
   spawnActor(id,values={},position){
     const a=Object.assign(new Actor(),values,{id});
@@ -206,7 +216,7 @@ export class GameWorld {
       if((buttons&BUTTON.ATTACK)&&a.cooldown===0)this.attack(a);
       if((pressed&BUTTON.NOVA)&&a.kind==='player'&&a.cooldown===0&&a.mana>=28){a.mana-=28;a.cooldown=1.2;this.nova(a,6.5,30+a.stats.insight*.85,'frost');}
       if((pressed&BUTTON.HEAL)&&a.flasks>0&&a.hp<a.healthMax){a.flasks--;a.hp=Math.min(a.healthMax,a.hp+70);this.event('heal',a);}
-      if((pressed&BUTTON.INTERACT)&&a.kind==='player')this.rest(a);
+      if((pressed&BUTTON.INTERACT)&&a.kind==='player')this.interact(a);
       if(a.attackAge>=0)this.advanceAttack(a,dt);
       t.setRotation(0,Math.sin(a.yaw/2),0,Math.cos(a.yaw/2));
     }
@@ -347,10 +357,16 @@ export class GameWorld {
   }
   rest(a){
     const {hearth,reason}=restStatus(a,[...this.actors.keys()].map(id=>this.actor(id)));if(reason)return false;
-    a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.flasks=3;a.checkpoint=hearthArrival(hearth);a.checkpointId=hearth.id;
+    a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.flasks=flaskCapacity(a);a.checkpoint=hearthArrival(hearth);a.checkpointId=hearth.id;
     a.inventory.arrows=Math.max(30,a.inventory.arrows);a.sprintExhausted=false;
     if(!a.hearths.includes(hearth.id))a.hearths.push(hearth.id);
     this.event('rest',a,{hearth:hearth.id,name:hearth.name});return true;
+  }
+  interact(a){
+    const relic=nearbyRelic(a);if(!relic)return this.rest(a);
+    const [x,y,z]=relic.position;if(!this.lineOfSight([a.x,a.y+.3,a.z],[x,y+1.35,z],this.actors.get(a.id)))return false;
+    a.relics=knownRelics([...(a.relics??[]),relic.id]);a.embers+=relic.embers;a.flasks=Math.min(flaskCapacity(a),a.flasks+(relic.flasks??0));
+    this.event('relic-found',a,{relic:relic.id,name:relic.name,reward:relic.embers});return true;
   }
   levelUp(id,stat){
     const a=this.actor(id);if(!a||!Object.hasOwn(a.stats,stat)||a.embers<levelCost(a.level))return false;
@@ -358,7 +374,7 @@ export class GameWorld {
     a.embers-=levelCost(a.level);a.level++;a.stats[stat]++;
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);this.rest(a);return true;
   }
-  respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;Object.assign(a,optionalMotion,{sprintExhausted:false});a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
+  respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=flaskCapacity(a);a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;Object.assign(a,optionalMotion,{sprintExhausted:false});a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
   teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
   checkEncounters(){
     for(const id of this.actors.keys()){
@@ -372,7 +388,7 @@ export class GameWorld {
     const motion=Object.fromEntries(motionFields.map(key=>[key,a[key]]));
     for(const key of Object.keys(optionalMotion))motion[key]=a[key];
     Object.assign(motion,{crouch:a.crouch,grounded:a.grounded,sprintExhausted:a.sprintExhausted,attackKind:a.attackKind,hitIds:[...a.hitIds],projectileReleased:a.projectileReleased,mantle:structuredClone(a.mantle),deathVelocity:[...a.deathVelocity]});
-    return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory),motion};
+    return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],relics:[...a.relics],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory),motion};
   }
   importCharacter(id,s){
     const a=this.actor(id);if(!a||s.version!==1)throw new Error('Unsupported character save version');
@@ -391,7 +407,7 @@ export class GameWorld {
     a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
     a.hearths=[...new Set(['hearth',a.checkpointId,...(Array.isArray(s.hearths)?s.hearths.filter(id=>HEARTHS.some(h=>h.id===id)):[])])];
     a.inventory=migrateInventory(s.inventory,s.weapon,a.seals);
-    a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
+    a.relics=knownRelics(s.relics);a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,flaskCapacity(a));
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
     Object.assign(a,optionalMotion);
@@ -405,15 +421,18 @@ export class GameWorld {
   }
   snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
   restoreWorld(snapshot){
-    const authoredHomes=new Map([...this.actors.keys()].map(id=>{const a=this.actor(id);return [id,a.kind==='enemy'?[...a.home]:null];}));
-    this.replaceSnapshot(snapshot);
+    const authored=new Map([...this.actors.keys()].map(id=>this.actor(id)).filter(a=>a.kind==='enemy').map(a=>[a.id,structuredClone(a)]));
+    const ids=new Set(snapshot.actors.map(a=>a.id)),added=snapshot.contentVersion!==WORLD_VERSION?[...authored.values()].filter(a=>!ids.has(a.id)):[];
+    this.replaceSnapshot({...snapshot,actors:[...snapshot.actors,...added]});
     // Content updates may raise terrain beneath a saved position. Preserve
     // progression while placing bodies and checkpoints back above that surface.
     for(const id of this.actors.keys()){
-      const a=this.actor(id),home=authoredHomes.get(id);
+      const a=this.actor(id),definition=authored.get(id),home=definition?.home;
       a.inventory=migrateInventory(a.inventory,a.weapon,a.seals);
+      a.relics=knownRelics(a.relics);
       if(home){
-        const moved=home[0]!==a.home[0]||home[2]!==a.home[2],outsideLeash=Math.hypot(a.x-a.home[0],a.z-a.home[2])>(a.boss?29:38);
+        a.dungeon=definition.dungeon;
+        const moved=home.some((v,i)=>v!==a.home[i]),outsideLeash=Math.hypot(a.x-a.home[0],a.z-a.home[2])>(a.boss?29:38);
         a.home=home;
         // Old motor/content versions could leave enemies permanently outside
         // their return tile. Restore only displaced living NPCs; encounter
@@ -421,8 +440,8 @@ export class GameWorld {
         if(a.hp>0&&(moved||outsideLeash)){this.teleport(a,home);a.path=null;a.patrolGoal=null;a.patrolWaitUntil=this.tick+120;a.intent={x:0,z:0,yaw:a.yaw,buttons:0};}
       }
       if(snapshot.contentVersion!==WORLD_VERSION){
-        this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
-        a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
+        if(!a.dungeon)this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
+        if(!home)a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
         a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);
       }
     }

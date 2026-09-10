@@ -4,6 +4,7 @@ import {bt_mesh_from_indexed_geometry} from '@woosh/meep-engine/src/core/geom/3d
 import {bt_mesh_build_face_bvh} from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/query/bt_mesh_build_face_bvh.js';
 import {WORLD_VERSION} from './regions.mjs';
 import {SpatialAtlas} from './spatial-atlas.mjs';
+import {decodeDungeonNavigation,withDungeonNavigation} from './dungeon-navigation.mjs';
 
 export function encodeNavigation(atlas){
   const b=new BinaryBuffer(),{positions,indices}=atlas.geometry;
@@ -40,11 +41,11 @@ export function decodeNavigation(bytes){
 let prepared;
 export function loadNavigation(){
   return prepared??=(async()=>{
-    const url=new URL('../content/navigation.bin',import.meta.url);
-    let bytes;
-    if(url.protocol==='file:'){
-      const {readFile}=await import('node:fs/promises'),data=await readFile(url);bytes=data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);
-    }else{const response=await fetch(url);if(!response.ok)throw new Error('Could not load world navigation');bytes=await response.arrayBuffer();}
-    return decodeNavigation(bytes);
+    const read=async url=>{
+      if(url.protocol==='file:'){const {readFile}=await import('node:fs/promises'),data=await readFile(url);return data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);}
+      const response=await fetch(url);if(!response.ok)throw new Error('Could not load world navigation');return response.arrayBuffer();
+    };
+    const [ground,dungeons]=await Promise.all([read(new URL('../content/navigation.bin',import.meta.url)),read(new URL('../content/dungeon-navigation.bin',import.meta.url))]);
+    return withDungeonNavigation(decodeNavigation(ground),decodeDungeonNavigation(dungeons));
   })();
 }

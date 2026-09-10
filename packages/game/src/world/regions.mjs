@@ -1,8 +1,9 @@
 import {computeCatmullRomSpline} from '@woosh/meep-engine/src/core/math/spline/computeCatmullRomSpline.js';
 import {create_simplex_noise_2d} from '@woosh/meep-engine/src/core/math/noise/create_simplex_noise_2d.js';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
+import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
-export const WORLD_VERSION = 3;
+export const WORLD_VERSION = 4;
 export const WORLD_BOUNDS=Object.freeze({minX:-240,minZ:-480,width:480,depth:640});
 export const SPAWN = [0, 0, 23];
 export const REGIONS = [
@@ -22,6 +23,7 @@ export const LANDMARKS = [
   { id: 'spire', name: 'The Listening Spire', position: [-115, 0, -225], region: 'magic', kind: 'boss' },
   { id: 'pilgrims', name: 'The Frozen Pilgrims', position: [95, 0, -265], region: 'tundra', kind: 'boss' },
   { id: 'halo', name: 'The Broken Halo', position: [0, 0, -361], region: 'crown', kind: 'boss' },
+  ...DUNGEONS.map(d=>({id:d.id,name:d.name,position:dungeonPoint(d,d.entrance),region:d.region,kind:'dungeon'})),
 ];
 export const ROUTES = [
   ['hearth', 'abbey'], ['hearth', 'cave'], ['cave', 'abbey'], ['abbey', 'oak'],
@@ -72,6 +74,14 @@ function sculptedHeightAt(x, z) {
   y+=roughness*(noise(x*.035,z*.035)+noise(x*.085+41,z*.085)*.22)*smooth((pathDistance(x,z)-5)/18);
   // The abbey was cut into a level basin. The shoulder eases into the hillside.
   const abbey=smooth((Math.hypot(x/1.05,z+48)-19)/17);y=.65+(y-.65)*abbey;
+  // Excavated foundations keep the authored lower rooms clear of the hill.
+  // Their shoulders ease into the same native terrain sampler as the road.
+  for(const d of DUNGEONS)for(const room of d.rooms){
+    if(room.level!==0||room.rise)continue;
+    const px=x-d.origin[0],n=d.origin[1]-z,[x0,n0,x1,n1]=room.rect;
+    const distance=Math.hypot(Math.max(x0-px,0,px-x1),Math.max(n0-n,0,n-n1));
+    if(distance<4)y=d.elevation-.35+(y-d.elevation+.35)*smooth(distance/4);
+  }
   return y;
 }
 let surface;

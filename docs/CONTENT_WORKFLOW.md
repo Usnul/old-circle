@@ -95,6 +95,14 @@ A new damaging move needs a shared simulation pose/shape, a readable visual, a r
 
 Weapon ownership, arrows, owned armor and per-weapon reinforcement ranks live in the character inventory. `content/equipment.mjs` defines protection, poise, pace, hearing, regeneration, seal unlocks and reinforcement prices. Add inventory fields to `migrateInventory` with explicit old-save defaults. New command fields require a network protocol bump. Armor variants in `build_characters.py` share the pilgrim joint order, bind matrices and animation clips; export their meshes with no duplicated runtime clip set. Keep the source armatures in the Blender file. The renderer selects their geometry from the equipped item and preserves that appearance on ragdolls. Origins should only supply different initial stats and equipment. Add new persistent fields to the explicit character export/import and update the save migration/version policy. Do not import server-owned world state from a returning client.
 
+## Author layered dungeons
+
+`world/dungeons.mjs` defines local X/north coordinates, floor elevations, slopes, room connections, doors, enemy homes and personal relics. `tools/blender/dungeons.py` builds their masonry and native convex collision sources into `old-circle-kit.blend`; the standard asset build compiles them into Meep geometry. Keep convex body origins inside their own geometry: runtime placement centres each hull without changing its world-space vertices. Floors must meet along matching sampled edges, with enough clearance for a character at doors and landings.
+
+After changing floors or collision, run the asset build and `node tools/world-check.mjs bake`. This validates the native topology and the entrance-to-relic path and writes both navigation assets. Dungeon regression tests cover every room pair, a complete walk to the upper reward, the return drop, enemy pursuit between stacked floors, personal collection and old-world migration. Room names and the map come from the same definitions. Workshop composition views include the lower court and upper lantern chamber; inspect entrances, low ceilings, stairs and rewards under automatic exposure in daylight and darkness.
+
+Add relics through the dungeon's treasure definition and migrate persistent fields through the character allowlist. A world-content update merges newly authored NPCs into older disk saves while retaining existing encounter health and deaths; authoritative network replacement remains exact. Relic ownership is personal, so the renderer chooses a closed or opened reliquary for the local character.
+
 ## Generate icons and sound
 
 Run inference separately from the game and from each other. No model remains resident after these scripts exit. The scripts check current GPU usage and impose PyTorch allocation ceilings; other applications can still change GPU usage after a check, so watch total usage with `nvidia-smi`. Keep total project use around or below 18 GiB.

@@ -5,6 +5,23 @@ import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {armorIds} from '../content/equipment.mjs';
 import {castBossMove} from '../simulation/boss-attacks.mjs';
+import {RELICS} from '../content/relics.mjs';
+
+test('a delayed relic interaction replays once and replicates the permanent reward',async()=>{
+  const sim=await new GameWorld().start({populate:false,navigation:false}),p=sim.addPlayer('relic-seeker'),r=RELICS[0];
+  sim.teleport(p,[r.position[0],r.position[1]+.85,r.position[2]+1.5]);
+  const host=await new SharedSession('host',0,{simulation:sim}).start(),client=await new SharedSession('client',1).start();
+  try{
+    client.localNetworkId=host.addPlayer(1,p.id,'pilgrim',sim.exportCharacter(p.id));
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
+    client.localInput.buttons=64;client.tick();client.localInput.buttons=0;
+    for(let i=0;i<12;i++){host.tick();b.deliver_all();client.tick();}
+    a.deliver_all();frames(20);
+    const actor=host.sim.actor(p.id);expect(actor.relics).toEqual([r.id]);expect(actor.embers).toBe(r.embers);expect(actor.flasks).toBe(4);
+    expect(client.localCharacter().actor.relics).toEqual([r.id]);expect(client.localCharacter().actor.embers).toBe(r.embers);
+  }finally{await client.stop();await host.stop();await sim.stop();}
+},30000);
 
 test('a late joining peer sees a pending root trap and receives its damage only once',async()=>{
   const sim=await new GameWorld().start({populate:false,navigation:false});sim.think=()=>{};

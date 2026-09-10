@@ -38,12 +38,13 @@ export class EnemyMind {
   }
   steer(goal,speed,dt){
     const w=this.world,a=this.actor,dx=goal[0]-a.x,dz=goal[2]-a.z,d=Math.hypot(dx,dz);let next=goal;
-    if(d>.1&&!w.lineOfSight([a.x,a.y,a.z],[goal[0],goal[1],goal[2]],w.actors.get(a.id),this.target&&w.actors.get(this.target.id))){
+    const halfHeight=a.boss?1.2675:.845,from=[a.x,a.y-halfHeight,a.z],to=[goal[0],goal[1]-(this.target&&goal[0]===this.target.x&&goal[2]===this.target.z?(this.target.boss?1.2675:.845):halfHeight),goal[2]];
+    if((d>.1||Math.abs(from[1]-to[1])>.65)&&(w.navigation?.inDungeon(from)||w.navigation?.inDungeon(to)||!w.lineOfSight([a.x,a.y,a.z],[goal[0],goal[1],goal[2]],w.actors.get(a.id),this.target&&w.actors.get(this.target.id)))){
       if(!a.path||w.tick-(a.pathTick??0)>60){
-        const halfHeight=a.boss?1.2675:.845,result=w.navigation?.tile(a.home).path([a.x,a.y-halfHeight,a.z],[goal[0],goal[1]-halfHeight,goal[2]]);
+        const result=w.navigation?.tile(a.home).path(from,to);
         a.path=result?.reachable?result.points:[];a.pathTick=w.tick;
       }
-      while(a.path?.length&&Math.hypot(a.path[0][0]-a.x,a.path[0][2]-a.z)<.8)a.path.shift();
+      while(a.path?.length&&Math.hypot(...a.path[0].map((v,i)=>v-from[i]))<.65)a.path.shift();
       next=a.path?.[0];
       if(!next){a.intent={x:0,z:0,yaw:a.yaw,buttons:0};return false;}
     }
@@ -61,8 +62,8 @@ export class EnemyMind {
     }
     if(!a.patrolGoal){
       a.patrolIndex=(a.patrolIndex??0)+1;const angle=(seed%628)/100+a.patrolIndex*2.399963,radius=a.boss?2.5:3+(seed+a.patrolIndex)%5;
-      const x=a.home[0]+Math.cos(angle)*radius,z=a.home[2]+Math.sin(angle)*radius;
-      a.patrolGoal=[x,heightAt(x,z)+(a.boss?1.2675:.845),z];a.path=null;a.patrolDeadline=w.tick+900;
+      const patrolRadius=a.dungeon?2:radius,x=a.home[0]+Math.cos(angle)*patrolRadius,z=a.home[2]+Math.sin(angle)*patrolRadius;
+      a.patrolGoal=[x,a.dungeon?a.home[1]:heightAt(x,z)+(a.boss?1.2675:.845),z];a.path=null;a.patrolDeadline=w.tick+900;
     }
     a.phase='patrol';
     if(Math.hypot(a.patrolGoal[0]-a.x,a.patrolGoal[2]-a.z)<.65||w.tick>a.patrolDeadline||!this.steer(a.patrolGoal,a.archetype==='hound'?.28:.4,dt)){

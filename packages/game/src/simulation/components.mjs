@@ -3,7 +3,7 @@ export class Actor {
   static typeName='OldCircleActor';
   id='';kind='enemy';archetype='hollow';name='';origin='pilgrim';weapon='sword';
   hp=100;healthMax=100;stamina=100;staminaMax=100;sprintExhausted=false;mana=70;manaMax=70;
-  level=1;embers=0;flasks=3;pvp=false;seals=[];stats={vigor:12,endurance:12,might:12,insight:8};
+  level=1;embers=0;flasks=3;pvp=false;seals=[];relics=[];dungeon='';stats={vigor:12,endurance:12,might:12,insight:8};
   inventory={weapons:['sword'],arrows:30,armor:'mail',armors:['mail'],reinforcements:{sword:0}};
   yaw=0;cooldown=0;attackAge=-1;attackId=0;hitIds=[];hurtTime=0;deadTime=0;grounded=false;crouch=false;
   phase='idle';home=[0,0,0];boss=false;bossMove='';hazardSequence=0;active=false;windup=0;attackKind='';lastButtons=0;

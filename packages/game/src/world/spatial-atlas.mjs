@@ -4,6 +4,7 @@ import { bt_mesh_build_face_bvh } from '@woosh/meep-engine/src/core/geom/3d/topo
 import { CapsuleShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
 import {Actor} from '../simulation/components.mjs';
 import { heightAt,LANDMARKS,ROAD_PATHS,landmarkPosition,pathDistance } from './regions.mjs';
+import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 
 // Real SH, order 2 (three bands / nine coefficients), Y up. Coefficients encode
 // a directional distribution, not just an average which would cancel two-way traffic.
@@ -84,8 +85,11 @@ export const COMPOSITION_VIEWS=[
   {id:'first-light',label:'First Light',from:'hearth',toward:'abbey',fromOffset:[0,0,4],targetOffset:[-7,18,-16],yaw:0,pitch:-.05,time:15.2,requirement:'Abbey bell tower rises from the meadow basin; the gate is framed by near ruins.'},
   {id:'bellkeeper-mouth',label:'Bellkeeper’s Mouth',from:'cave',toward:'cave',fromOffset:[0,0,18],targetOffset:[0,2.4,5],yaw:0,pitch:.1,time:16,requirement:'Warm cave entrance separates from cool vegetation; route through the arch is legible.'},
   {id:'last-ascent',label:'Last Ascent',from:'pilgrims',toward:'halo',fromOffset:[-29,0,-34],targetOffset:[0,heightAt(0,-385)-heightAt(0,-361)+40,-24],yaw:.65,pitch:-.32,distance:7,time:9,requirement:'Final halo dominates the upper third; approach route remains visible.'},
+  {id:'reliquary-court',label:'Reliquary · Lower Court',fromPosition:dungeonPoint(DUNGEONS[0],[0,3,0]),targetPosition:dungeonPoint(DUNGEONS[0],[0,12,1.7]),yaw:0,pitch:.1,distance:4,time:15,requirement:'The chapter doorway and side burial route are legible below the returning bridge.'},
+  {id:'reliquary-lantern',label:'Reliquary · Lantern Chamber',fromPosition:dungeonPoint(DUNGEONS[0],[0,23,4.8]),targetPosition:dungeonPoint(DUNGEONS[0],[0,27,6]),yaw:0,pitch:.15,distance:2.8,time:23,requirement:'The Quiet Flame draws the eye through a sheltered upper chamber at night.'},
 ];
 export function compositionPoints(view){
+  if(view.fromPosition)return {from:[...view.fromPosition],to:[...view.targetPosition]};
   const base=landmarkPosition(view.from),offset=view.fromOffset??[0,0,0],x=base[0]+offset[0],z=base[2]+offset[2];
   return {from:[x,heightAt(x,z)+offset[1],z],to:landmarkPosition(view.toward).map((v,i)=>v+(view.targetOffset?.[i]??0))};
 }

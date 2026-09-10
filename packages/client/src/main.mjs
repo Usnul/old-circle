@@ -1,6 +1,6 @@
 import './ui/style.scss';
 import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catalog.mjs';
-import { LANDMARKS,HEARTHS,regionAt } from '@old-circle/game/world/regions.mjs';
+import { LANDMARKS,HEARTHS,regionAt,heightAt } from '@old-circle/game/world/regions.mjs';
 import {restStatus} from '@old-circle/game/simulation/resting.mjs';
 import {GameInput} from './input.mjs';
 import {compassMarkup,updateCompass} from './ui/compass.mjs';
@@ -9,6 +9,8 @@ import {worldToMap} from '@old-circle/game/world/map.mjs';
 import {equipmentMarkup} from './ui/equipment.mjs';
 import {ARMOR,armorFor,reinforcement,hasAllSeals} from '@old-circle/game/content/equipment.mjs';
 import {BOSS_MOVES,bossEnraged} from '@old-circle/game/content/boss-moves.mjs';
+import {RELICS,flaskCapacity,nearbyRelic} from '@old-circle/game/content/relics.mjs';
+import {dungeonRoomAt} from '@old-circle/game/world/dungeons.mjs';
 
 const app=document.querySelector('#app');
 const SAVE_KEY='old-circle-character-v1';
@@ -67,6 +69,7 @@ async function start(character){
       if(data.type==='equipment-result'){toast(data.ok?'Your equipment is ready.':'This change needs a safe hearth and the required embers or seals.');if(equipmentOpen)equipment();return;}
       if(data.snapshot)for(const e of data.snapshot.events??[])if(e.id===playerId){
         if(e.type==='armor-found')toast(`Recovered ${ARMOR[e.armor].name}. Change armor at a hearth.`);
+        if(e.type==='relic-found')toast(`${e.name} recovered. +${e.reward} embers · Flask capacity ${flaskCapacity(snapshot.actors.find(a=>a.id===playerId))}`);
         if(e.type==='circle-completed'){completionPending=true;send({type:'save'});}
       }
       if(data.type==='ready'){$('#loading').hidden=true;$('#hud').hidden=false;started=true;$('#capture-mouse').hidden=inspecting;requestAnimationFrame(frame);view.engine.viewStack.el.focus();}
@@ -82,7 +85,7 @@ function journal(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
   const rest=restStatus(p,snapshot.actors),checkpoint=HEARTHS.find(h=>h.id===p.checkpointId)??HEARTHS[0],cost=levelCost(p.level);
   const benefits={vigor:'+5 health',endurance:'+3 stamina',might:'Stronger melee and arrows',insight:'+4 focus, stronger spells and arrows'};
-  modal(`<div class="panel-top"><div><div class="eyebrow">The wanderer’s journal</div><h2>Your place in the circle</h2></div><button class="close" aria-label="Close">×</button></div><div class="eyebrow" id="journal-progress">Level ${p.level} · ${p.embers} embers · ${p.seals.length} / 6 seals</div><div class="stats-grid">${Object.entries(p.stats).map(([name,n])=>`<div class="stat-row"><span>${name[0].toUpperCase()+name.slice(1)}<small>${benefits[name]}</small></span><span><span data-stat-value="${name}">${n}</span> <button data-stat="${name}" aria-label="Improve ${name}" title="${rest.reason??(p.embers<cost?'Not enough embers':benefits[name])}" ${rest.reason||p.embers<cost?'disabled':''}>+</button></span></div>`).join('')}</div><p>${p.inventory.arrows} arrows · ${armorFor(p).name}</p><p id="growth-status" role="status" aria-live="polite"></p><p>Return point: <strong>${checkpoint.name}</strong><br>${p.hearths?.length??1} of ${HEARTHS.length} hearths kindled. Rest at a hearth to remember it.</p><div class="button-row"><button class="subtle" id="show-equipment">Equipment & forge</button><button class="subtle" id="show-map">World map</button><button class="subtle" id="toggle-pvp">PvP ${p.pvp?'on':'off'} — ${p.pvp?'disable':'enable'}</button><button class="subtle" id="save-game">Save journey</button></div><div class="seal-list">${Object.values(BOSSES).map(b=>`<div class="${p.seals.includes(b.seal)?'recovered':''}"><span>${p.seals.includes(b.seal)?'✦':'○'} ${b.seal}</span><small>${b.name}</small></div>`).join('')}</div>${hasAllSeals(p)?'<button class="subtle" id="read-ending">The circle is broken · Read the ending</button>':''}`);
+  modal(`<div class="panel-top"><div><div class="eyebrow">The wanderer’s journal</div><h2>Your place in the circle</h2></div><button class="close" aria-label="Close">×</button></div><div class="eyebrow" id="journal-progress">Level ${p.level} · ${p.embers} embers · ${p.seals.length} / 6 seals</div><div class="stats-grid">${Object.entries(p.stats).map(([name,n])=>`<div class="stat-row"><span>${name[0].toUpperCase()+name.slice(1)}<small>${benefits[name]}</small></span><span><span data-stat-value="${name}">${n}</span> <button data-stat="${name}" aria-label="Improve ${name}" title="${rest.reason??(p.embers<cost?'Not enough embers':benefits[name])}" ${rest.reason||p.embers<cost?'disabled':''}>+</button></span></div>`).join('')}</div><p>${p.inventory.arrows} arrows · ${armorFor(p).name} · ${flaskCapacity(p)} flasks</p>${RELICS.filter(r=>(p.relics??[]).includes(r.id)).map(r=>`<p><strong>✦ ${r.name}</strong><br>${r.description}</p>`).join('')}<p id="growth-status" role="status" aria-live="polite"></p><p>Return point: <strong>${checkpoint.name}</strong><br>${p.hearths?.length??1} of ${HEARTHS.length} hearths kindled. Rest at a hearth to remember it.</p><div class="button-row"><button class="subtle" id="show-equipment">Equipment & forge</button><button class="subtle" id="show-map">World map</button><button class="subtle" id="toggle-pvp">PvP ${p.pvp?'on':'off'} — ${p.pvp?'disable':'enable'}</button><button class="subtle" id="save-game">Save journey</button></div><div class="seal-list">${Object.values(BOSSES).map(b=>`<div class="${p.seals.includes(b.seal)?'recovered':''}"><span>${p.seals.includes(b.seal)?'✦':'○'} ${b.seal}</span><small>${b.name}</small></div>`).join('')}</div>${hasAllSeals(p)?'<button class="subtle" id="read-ending">The circle is broken · Read the ending</button>':''}`);
   document.querySelectorAll('[data-stat]').forEach(b=>b.onclick=()=>{journalPending=true;refreshJournal();send({type:'level',stat:b.dataset.stat});});$('#show-equipment').onclick=equipment;$('#read-ending')?.addEventListener('click',ending);$('#show-map').onclick=map;$('#toggle-pvp').onclick=()=>{send({type:'pvp',enabled:!p.pvp});p.pvp=!p.pvp;journal();};$('#save-game').onclick=()=>{send({type:'save'});closeModal();toast('Your journey is remembered.');};refreshJournal();
 }
 function refreshJournal(){
@@ -133,11 +136,11 @@ function updateHud(){
   for(const [id,v,m] of [['health',p.hp,p.healthMax],['mana',p.mana,p.manaMax],['stamina',p.stamina,p.staminaMax]])$(`#${id}`).style.width=`${Math.max(0,v/m*100)}%`;
   $('#embers').textContent=Math.floor(p.embers).toLocaleString();$('#flask-count').textContent=p.flasks;$('#weapon-name').textContent=WEAPONS[p.weapon].name+(reinforcement(p)?' +'+reinforcement(p):'');
   document.querySelectorAll('[data-weapon]').forEach(b=>{b.classList.toggle('active',b.dataset.weapon===p.weapon);b.disabled=!p.inventory.weapons.includes(b.dataset.weapon);b.title=b.disabled?'Find this weapon on your journey':WEAPONS[b.dataset.weapon].name;});
-  const region=regionAt(p.x,p.z),hour=snapshot.time;$('#daytime').textContent=`${hour<6||hour>=18?'Night':hour>16?'Evening':'Day'} · ${region.name}`;$('#pvp-state').textContent=`PvP ${p.pvp?'on':'off'}`;
+  const region=regionAt(p.x,p.z),room=dungeonRoomAt([p.x,p.y-.845,p.z],heightAt),hour=snapshot.time;$('#daytime').textContent=`${hour<6||hour>=18?'Night':hour>16?'Evening':'Day'} · ${room?.room.name??region.name}`;$('#pvp-state').textContent=`PvP ${p.pvp?'on':'off'}`;
   const next=Object.values(BOSSES).find(b=>!p.seals.includes(b.seal));$('#objective').textContent=next?LANDMARKS.find(l=>l.id===next.landmark).name.toUpperCase():'THE CIRCLE IS BROKEN';
-  if(lastArea!==region.id){lastArea=region.id;$('#area-name').textContent=region.name;$('#area-level').textContent=`Recommended level ${region.level.join('–')}`;$('#area-title').style.opacity=1;clearTimeout(areaTimer);areaTimer=setTimeout(()=>$('#area-title').style.opacity=0,5500);}
-  const rest=restStatus(p,snapshot.actors);$('#interact').hidden=!rest.hearth;
-  if(rest.hearth)$('#interact').innerHTML=rest.reason??`<kbd>E</kbd>Rest at ${rest.hearth.name}`;
+  const area=room?.dungeon.id??region.id;if(lastArea!==area){lastArea=area;$('#area-name').textContent=room?.dungeon.name??region.name;$('#area-level').textContent=`Recommended level ${region.level.join('–')}`;$('#area-title').style.opacity=1;clearTimeout(areaTimer);areaTimer=setTimeout(()=>$('#area-title').style.opacity=0,5500);}
+  const rest=restStatus(p,snapshot.actors),relic=nearbyRelic(p);$('#interact').hidden=!rest.hearth&&!relic;
+  if(relic)$('#interact').innerHTML=`<kbd>E</kbd>Recover ${relic.name}`;else if(rest.hearth)$('#interact').innerHTML=rest.reason??`<kbd>E</kbd>Rest at ${rest.hearth.name}`;
   $('#death').hidden=p.hp>0;
   const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;$('#boss-health').style.width=`${boss.hp/boss.healthMax*100}%`;$('#boss-move').textContent=boss.windup>0?BOSS_MOVES[boss.bossMove]?.name??'':bossEnraged(boss)?'The keeper’s vow breaks':'';}
 }

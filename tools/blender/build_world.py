@@ -185,6 +185,8 @@ finish('halo')
 from architecture import build_architecture
 build_architecture(cube,cone,beam,ico,mesh,finish,current)
 build_caves(WORLD,mesh,finish,cube,cone)
+from dungeons import build_dungeons
+build_dungeons(WORLD,cube,mesh,finish,cone)
 random.seed(195)
 
 # Trees with bent trunks, branching roots and clustered leaves; coherent repeated silhouettes.
