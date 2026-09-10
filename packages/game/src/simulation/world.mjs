@@ -133,7 +133,8 @@ export class GameWorld {
       if(!!(buttons&BUTTON.CROUCH)!==a.crouch)this.setCrouch(a,!!(buttons&BUTTON.CROUCH));a.yaw=input.yaw;
       const halfHeight=a.boss?1.2675:a.crouch?.495:.845;
       this.ray.set([a.x,a.y,a.z,0,-1,0,halfHeight+.14]);
-      a.grounded=b.linearVelocity[1]<.8&&this.physics.raycast(this.ray,this.hit,other=>other!==e)&&this.hit.normal[1]>.64;
+      // Support is lost by separating from the surface, not by moving uphill.
+      a.grounded=this.physics.raycast(this.ray,this.hit,other=>other!==e)&&this.hit.normal[1]>.64&&b.linearVelocity.reduce((sum,v,i)=>sum+v*this.hit.normal[i],0)<.8;
       if(a.grounded){
         if(a.airTime>.12&&a.fallSpeed>1.6&&!a.mantle){a.landingAge=0;a.landingStrength=Math.min(1,.3+(a.fallSpeed-1.6)/7);}
         a.airTime=0;a.fallSpeed=0;
@@ -155,8 +156,11 @@ export class GameWorld {
         // The support probe extends below the capsule. Approach actual contact
         // through velocity; cancelling gravity at the probe margin leaves feet
         // suspended above the surface and prevents a sleeping body settling.
-        const adhesion=Math.max(0,supportGap-.005)*18;
-        b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1]-adhesion-(len>0?.12:0);
+        const adhesion=Math.max(0,supportGap-.005)*18*normal[1]+(len>0?.12:0);
+        b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1];
+        // Pull along the contact normal so the solver cancels only adhesion.
+        // A vertical pull projects into downhill motion on a cross-slope.
+        for(let i=0;i<3;i++)b.linearVelocity[i]-=normal[i]*adhesion;
       }
       if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;b.gravityScale=1;a.grounded=false;a.airTime=0;a.fallSpeed=0;a.landingAge=-1;a.stamina-=12;this.event('jump',a);}
       if((buttons&BUTTON.JUMP)&&!a.grounded&&!a.mantle)this.tryMantle(a,e);

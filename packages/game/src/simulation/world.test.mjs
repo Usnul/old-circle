@@ -42,6 +42,14 @@ test('a supported character holds a gentle slope without drifting downhill',asyn
   expect(Math.hypot(p.x-start[0],p.z-start[2])).toBeLessThan(.015);
   expect(Math.abs(p.y-start[1])).toBeLessThan(.025);expect(p.grounded).toBe(true);
 });
+test('walking holds a cross-slope heading and keeps uphill contact',async()=>{
+  const w=await setup(),p=w.addPlayer('hill-walker');
+  w.teleport(p,[38,heightAt(38,-8)+1,-8]);run(w,60);const startX=p.x;w.input(p.id,{x:0,z:-1,yaw:0,buttons:0});run(w,500);
+  expect(Math.abs(p.x-startX)).toBeLessThan(.03);expect(p.z).toBeLessThan(-36);
+  w.teleport(p,[60,heightAt(60,10)+1,10]);w.input(p.id,{x:0,z:0,yaw:0,buttons:0});run(w,60);w.input(p.id,{x:1,z:0,yaw:0,buttons:0});
+  let unsupported=0;for(let i=0;i<120;i++){w.step();if(!p.grounded)unsupported++;}
+  expect(unsupported).toBeLessThan(3);expect(p.x).toBeGreaterThan(66.5);expect(Math.abs(p.z-10)).toBeLessThan(.1);
+});
 test('ground support settles the feet onto the surface instead of hovering inside the probe margin',async()=>{
   const w=await setup(),p=w.addPlayer('grounded');
   for(const [x,z] of [[0,23],[20,0],[100,35]]){
