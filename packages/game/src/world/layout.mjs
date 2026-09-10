@@ -1,4 +1,4 @@
-import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS } from './regions.mjs';
+import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS } from './regions.mjs';
 
 export function buildLayout() {
   const props=[], solids=[], lights=[];
@@ -15,13 +15,22 @@ export function buildLayout() {
   const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
-  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&!(z<-284&&z>-356&&x>14&&x<82);
+  const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&REGIONS.every(r=>Math.hypot(x-r.center[0],z-r.center[1])>23)&&!(z<-284&&z>-356&&x>14&&x<82);
+  const slope=(x,z)=>[(heightAt(x+1,z)-heightAt(x-1,z))/2,(heightAt(x,z+1)-heightAt(x,z-1))/2];
+  const plant=(model,x,z,size=1)=>{
+    const [dx,dz]=slope(x,z),p=add(model,x,z,size,random()*Math.PI*2,heightAt(x,z)-.03);
+    // Only non-colliding ground plants tilt to the local surface. Trees and
+    // structural props keep the same upright transforms in physics and view.
+    p.up=[-dx,1,-dz];return p;
+  };
+  const groves=[];
   // Groves share species and age structure. Meadow openings stay open; conifers
   // belong to the northern foothills instead of alternating with every oak.
   for(let grove=0;grove<140;grove++){
     const cx=random()*420-210,cz=random()*545-415,region=regionAt(cx,cz).id;
     if(!clear(cx,cz,10)||region==='desert'||region==='crown'||(region==='meadow'&&random()<.55))continue;
     const species=region==='magic'?'magicTree':region==='tundra'?(cz>-290?'pine':'winterTree'):'tree';
+    groves.push({x:cx,z:cz,region});
     for(let j=0;j<4+grove%5;j++){
       const a=random()*Math.PI*2,r=Math.sqrt(random())*11,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
       if(!clear(x,z)||regionAt(x,z).id!==region)continue;
@@ -30,22 +39,39 @@ export function buildLayout() {
   }
   // Outcrops form families: a buried parent boulder, scree, and vegetation in
   // sheltered gaps. Every member is checked against the route's walking space.
-  for(let group=0;group<95;group++){
+  for(let group=0;group<85;group++){
     const cx=random()*430-215,cz=random()*560-420;if(!clear(cx,cz,9))continue;
-    const region=regionAt(cx,cz).id,large=region==='desert'||region==='crown'?3.5:1.6;
-    for(let j=0;j<5;j++){
-      const a=random()*Math.PI*2,r=j===0?0:random()*large*2,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r,s=j===0?large:.3+random()*large*.32;
-      if(clear(x,z,5))add(`rock${(group+j)%3}`,x,z,[s,s*(.7+random()*.3),s],random()*6.28,heightAt(x,z)-s*.28);
+    const region=regionAt(cx,cz).id,large=region==='desert'||region==='crown'?3.4:2.2,[dx,dz]=slope(cx,cz),contour=Math.atan2(dz,dx)+Math.PI/2;
+    const family=region==='desert'?'sandstone':region==='tundra'?'frostRock':'rock';
+    for(let j=0;j<9;j++){
+      const a=contour+(j%2?Math.PI:0)+random()*.6,r=j===0?0:j<3?large*.8:large*(1+random()*1.4);
+      const x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r,s=j===0?large:j<3?large*(.62+random()*.22):.22+random()*large*.16;
+      if(!clear(x,z,3+s*1.5))continue;
+      const y=Math.min(heightAt(x,z),heightAt(x+s*.75,z),heightAt(x-s*.75,z),heightAt(x,z+s*.6),heightAt(x,z-s*.6));
+      add(`${family}${(group+j)%3}`,x,z,[s,s*(.74+random()*.22),s],contour+random()*.5,y-s*.24);
+      if(j<3&&(region==='wood'||region==='meadow'||region==='magic')){
+        const px=x+Math.cos(a+1.5)*s,pz=z+Math.sin(a+1.5)*s;if(clear(px,pz,4))plant(region==='wood'?'fern':'bracken',px,pz,.8+random()*.5);
+      }
     }
   }
-  for(let patch=0;patch<165;patch++){
-    const cx=random()*180-90,cz=random()*190-115;
-    if(regionAt(cx,cz).id!=='meadow'&&regionAt(cx,cz).id!=='wood')continue;
-    for(let j=0;j<15;j++){
-      const a=random()*6.28,r=Math.sqrt(random())*4.5,x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r;
-      if(pathDistance(x,z)<2.8||Math.hypot(x,z+48)<18||Math.hypot(x-38,z+23)<5)continue;
-      add('groundcover',x,z,.65+random()*.45,random()*6.28,heightAt(x,z)-.04);
+  // Fertile bands form continuous ground cover; the road, steep stone and
+  // sheltered woodland choose their own plant communities at metre scale.
+  for(let z=-410;z<134;z+=4.7)for(let x=-215;x<215;x+=4.7){
+    const px=x+(random()-.5)*2,pz=z+(random()-.5)*2,region=regionAt(px,pz).id;
+    const fertility=.5+.27*Math.sin(px*.067+Math.sin(pz*.041)*2)+.23*Math.sin(pz*.092+px*.023);
+    const density={meadow:.82,wood:.64,magic:.38,desert:.065,tundra:.12,crown:.045}[region];
+    if(random()>density*(.3+fertility*.7)||pathDistance(px,pz)<4.6||Math.hypot(px,pz+48)<20||Math.hypot(px-38,pz+23)<5||HEARTHS.some(h=>Math.hypot(px-h.position[0],pz-h.position[2])<4))continue;
+    const [dx,dz]=slope(px,pz);if(Math.hypot(dx,dz)>.43)continue;
+    const type=region==='desert'?'dryGrass':region==='tundra'||region==='crown'?'moorGrass':fertility>.72?'groundcover1':'groundcover';
+    plant(type,px,pz,1.1+random()*.4);
+  }
+  for(const grove of groves){
+    if(!['wood','magic','meadow'].includes(grove.region))continue;
+    for(let j=0;j<12;j++){
+      const a=random()*Math.PI*2,r=2+Math.sqrt(random())*10,x=grove.x+Math.cos(a)*r,z=grove.z+Math.sin(a)*r;
+      if(clear(x,z,4)&&Math.hypot(...slope(x,z))<.6)plant(j%4===0?'bracken':'fern',x,z,.7+random()*.6);
     }
+    const x=grove.x+5,z=grove.z+2;if(random()<.35&&clear(x,z,8)&&Math.hypot(...slope(x,z))<.2)add('fallenTrunk',x,z,1,random()*Math.PI*2,heightAt(x,z)-.1);
   }
   // Opening overlook: an architectural frame, a hearth and a low mantle wall.
   add('arch',-6,25,1.35,.35);
@@ -73,11 +99,11 @@ export function buildLayout() {
   // Walk-through rock hollow. Two exits, a clear floor, visible collision-sized roof.
   for(let i=0;i<8;i++){
     const z=-11-i*3.2, y=heightAt(38,z);
-    for(const s of [-1,1]){add('rock1',38+s*3.4,z,[1.35,3,1.7],i*.5,y);box(38+s*3.4,y+2.4,z,2.6,5,3.4);}
-    add('rock0',38,z,[3,1.2,1.5],i*.2,y+4.7);box(38,y+5.7,z,7,2,3.4);
+    for(const s of [-1,1]){add('rock1',38+s*4.15,z,[1.35,3,1.7],i*.5,y);box(38+s*4.15,y+2.4,z,2.6,5,3.4);}
+    add('rock0',38,z,[3.8,1.2,1.5],i*.2,y+4.7);box(38,y+5.7,z,8.6,2,3.4);
     if(i%2===0)lamp(36,z,y);
   }
-  add('arch',38,-10,1,0);add('arch',38,-37,1,0);
+  add('arch',38,-10,[1.18,1,1],0);add('arch',38,-37,[1.18,1,1],0);
   // Regional monuments share a visual grammar, but never the same silhouette.
   const [ox,oy,oz]=landmarkPosition('oak');add('tree',ox,oz-8,3.7,0,heightAt(ox,oz-8));lamp(ox+5,oz+4);
   for(let i=0;i<9;i++){add('arch',109+i*6,-114,1.5,0);if(i%2===0)lamp(109+i*6,-110);}

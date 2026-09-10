@@ -64,6 +64,9 @@ export class WorldView {
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
       this.materials[key]=m;
     }
+    for(const [name,color] of Object.entries({grass:[.16,.24,.075],grassLight:[.30,.34,.12],grassDark:[.075,.13,.055],grassDry:[.24,.22,.105],fernLeaf:[.12,.20,.085]})){
+      this.materials[name]??=new StandardShadeMaterial();this.materials[name].diffuse_color.set(...color);this.materials[name].roughness_factor=.92;
+    }
     this.materials.path=new StandardShadeMaterial();this.materials.path.diffuse_color.set(.28,.29,.23);
     this.materials.glassLeaf=new StandardShadeMaterial();this.materials.glassLeaf.diffuse_color.set(.12,.23,.27);
     this.materials.landscape=new StandardShadeMaterial();this.materials.landscape.roughness_factor=1;
@@ -98,7 +101,7 @@ export class WorldView {
         })));complete++;progress('Remembering the old road…',.15+complete/entries.length*.65);
       }));
     }
-    const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
+    const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
     this.audio=new WorldAudio(this.engine);await this.audio.start();
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
@@ -117,9 +120,10 @@ export class WorldView {
     progress('Remembering the daylight…',.96);await this.sky.prepare();
     progress('The circle opens.',1);return this;
   }
-  model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null){
+  model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null,up=null){
     const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
-    const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,material??c.material)).build(this.ecd);result.push({id,t});}return result;
+    const rotation=up?quat._lookRotation(Math.sin(yaw),-(up[0]*Math.sin(yaw)+up[2]*Math.cos(yaw))/up[1],Math.cos(yaw),...up):[0,Math.sin(yaw/2),0,Math.cos(yaw/2)];
+    const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(...rotation);t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,material??c.material)).build(this.ecd);result.push({id,t});}return result;
   }
   pose(parts,p,scale=1,yaw=0,pitch=0,roll=0){
     quat.fromEulerAnglesYXZ(pitch,yaw,roll);

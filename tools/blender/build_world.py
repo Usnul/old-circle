@@ -33,7 +33,8 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 PALETTE = {
  'stone': (.36,.37,.30), 'stoneLight': (.52,.50,.39), 'stoneDark': (.20,.24,.22),
- 'grass': (.22,.31,.12), 'grassLight': (.39,.43,.19), 'bark': (.14,.12,.085),
+ 'grass': (.16,.24,.075), 'grassLight': (.30,.34,.12), 'grassDark':(.075,.13,.055),
+ 'grassDry':(.24,.22,.105), 'fernLeaf':(.12,.20,.085), 'bark': (.14,.12,.085),
  'leaf': (.10,.21,.12), 'leafLight': (.20,.29,.13), 'brass': (.48,.31,.12),
  'iron': (.20,.23,.24), 'cloth': (.065,.095,.10), 'leather': (.12,.07,.035),
  'ember': (1,.37,.06), 'magic': (.20,.57,.76), 'bone': (.63,.60,.48),
@@ -179,11 +180,7 @@ for j in range(28):
 finish('halo')
 from architecture import build_architecture
 build_architecture(cube,cone,beam,ico,mesh,finish,current)
-for i in range(3):
- random.seed(193+i)
- ico((0,0,.6),(1.4,1.1,1),'stone',2)
- ico((.5,.2,.6),(.8,.7,.7),'stoneDark',1)
- finish('rock'+str(i))
+random.seed(195)
 
 # Trees with bent trunks, branching roots and clustered leaves; coherent repeated silhouettes.
 for name,foliage in [('tree','leaf'),('magicTree','magic'),('winterTree','snow')]:
@@ -234,15 +231,8 @@ for j in range(7):
  for k in range(5):
   a=k*math.tau/5; ico((x+math.cos(a)*.055,y+math.sin(a)*.055,h),(.05,.04,.02),'bone')
 finish('flowers')
-# A mixed patch, with flowers growing among blades rather than in isolated tufts.
-for j in range(36):
- a=random.random()*math.tau;r=math.sqrt(random.random())*.9;x,y=math.cos(a)*r,math.sin(a)*r;h=random.uniform(.14,.42)
- mesh('Meadow blades',[(x-.018,y,0),(x+.018,y,0),(x+.05,y+.03,h*.65),(x+.09,y+.06,h)],[(0,1,2),(0,2,3),(2,1,0),(3,2,0)],'grassLight' if j%5==0 else 'grass')
- if j in [7,23]:
-  beam((x,y,0),(x,y,h+.04),.006,'grass',.004,4)
-  for k in range(5):
-   a=k*math.tau/5;ico((x+math.cos(a)*.033,y+math.sin(a)*.033,h+.04),(.033,.025,.012),'bone')
-finish('groundcover')
+from nature import build_nature
+build_nature(beam,ico,mesh,finish)
 cone((0,0,.12),.7,.62,.24,'stoneDark')
 cone((0,0,.5),.13,.12,.7,'brass')
 cone((0,0,.95),.48,.6,.24,'brass')
