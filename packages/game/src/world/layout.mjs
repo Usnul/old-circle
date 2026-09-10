@@ -136,10 +136,11 @@ export function buildLayout() {
   }
   add('halo',0,-385,6,0,cy+40);
   for(let i=0;i<8;i++)lamp(-14+i*4,-351);
-  // Adjacent cliffs conceal the world edge and give the final crown a mountain skyline.
-  for(let i=0;i<17;i++){
-    const x=-330+i*42,z=-470-Math.sin(i*1.6)*25;
-    add(['mountain','mountainRidge','mountainShoulder'][i%3],x,z,[.85+(i%3)*.08,.72+(i%5)*.09,.9],Math.sin(i*1.7)*.4,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
+  // Overlapping massifs conceal the edge. Lower central saddles leave sky
+  // behind the final halo; the taller shoulders frame the climb on either side.
+  for(let i=0;i<9;i++){
+    const x=-340+i*85,z=-505+Math.cos(i*1.3)*18;
+    add(['mountain','mountainRidge','mountainShoulder'][i%3],x,z,[1.12+(i%3)*.08,.55+.3*(Math.abs(x)/340)**.8,1.15],Math.sin(i*1.7)*.25,heightAt(Math.max(-235,Math.min(235,x)),-460)-20);
   }
   // Remove cover inside authored rock after scatter, preserving all random
   // sequences and placements elsewhere when a local interior changes.

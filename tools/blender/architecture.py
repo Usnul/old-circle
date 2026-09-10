@@ -68,30 +68,34 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     ico((0,0,3.9),(.09,.07,.15),'brass',2)
     finish('bannerStand',physical)
 
-    # Metre-scale ridges share saddles and broad foothills. A height grid gives
-    # every summit real area; collapsed radial rings created vertical fins.
+    # Broad massifs meet at saddles. Rounded summit profiles and warped ridge
+    # lines avoid repeating a row of cones behind the pilgrimage landmarks.
     ridges=[
       ('mountain',[(-23,4,76,58,48),(17,-8,89,55,46),(46,8,48,42,37)]),
       ('mountainRidge',[(-38,5,53,44,42),(-4,-9,72,62,51),(38,1,65,48,40)]),
       ('mountainShoulder',[(-29,-8,64,54,45),(8,8,52,59,48),(43,-5,38,40,38)]),
     ]
     for variant,(name,peaks) in enumerate(ridges):
-        vertices=[];faces=[];nx=64;ny=48
+        vertices=[];faces=[];nx=80;ny=60
         for j in range(ny+1):
             y=-65+j*130/ny
             for i in range(nx+1):
                 x=-88+i*176/nx
-                h=max(height*max(0,1-math.hypot((x-cx)/rx,(y-cy)/ry))**1.12 for cx,cy,height,rx,ry in peaks)
-                erosion=noise.fractal(Vector((x*.075,y*.075,variant*11.7)),.8,2,4)
+                wx=x+8*noise.noise(Vector((x*.018,y*.018,variant*11.7)))
+                wy=y+7*noise.noise(Vector((x*.024+31,y*.024,variant*11.7)))
+                h=max(height*max(0,1-((wx-cx)/rx)**2-((wy-cy)/ry)**2)**1.65 for cx,cy,height,rx,ry in peaks)
+                erosion=noise.fractal(Vector((x*.032,y*.047,variant*11.7)),.8,2,4)
+                gullies=abs(noise.noise(Vector((x*.11+y*.035,y*.08,variant*7.1))))
                 foothill=min(1,h/12)
                 # The ridge continues below the world's edge. A flat base at
                 # mountain altitude exposed a floating underside from the east.
                 skirt=90*max(0,1-h/20)**2
-                z=h+foothill*(erosion*3.4+math.sin(h*.55+x*.09)*.7)-skirt
+                z=h+foothill*(erosion*6-gullies*2)-skirt
                 vertices.append((x,y,z))
         for j in range(ny):
             for i in range(nx):
                 a=j*(nx+1)+i;b=a+1;c=a+nx+1;d=c+1
                 faces.extend([(a,b,c),(b,d,c)])
-        mesh(name+' eroded strata',vertices,faces,'stoneDark')
+        ridge=mesh(name+' eroded strata',vertices,faces,'stoneDark')
+        for poly in ridge.data.polygons:poly.use_smooth=True
         finish(name)

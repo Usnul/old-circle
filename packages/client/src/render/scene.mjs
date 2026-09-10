@@ -15,6 +15,8 @@ import { LightSystem } from '@woosh/meep-engine/src/engine/graphics3/LightSystem
 import { Light } from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import { ParticipatingMediaSystem } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMediaSystem.js';
 import { ParticipatingMedia } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMedia.js';
+import {VolumetricsParticleSpec} from '@woosh/meep-engine/src/shade/renderer/volumetrics/ParticipatingMediaVolume.js';
+import {MIE_PARTICLES_STANDARD_PRECOMPUTED} from '@woosh/meep-engine/src/core/math/physics/mie/MIE_PARTICLES_STANDARD_PRECOMPUTED.js';
 import { StandardShadeMaterial } from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
@@ -131,8 +133,10 @@ export class WorldView {
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.ambient=new WorldAmbient(this);
-    const fog=new ParticipatingMedia();fog.target_extinction=.0006;fog.fade_distance=30;
-    const ft=new Transform64();ft.setTranslation(0,24,-120);ft.setScale(650,140,800);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
+    // Atmospheric perspective reaches over the backdrop summits as well as
+    // the road; a shallow box left distant peaks as crisp as the foreground.
+    const fog=new ParticipatingMedia();fog.particle_spec=VolumetricsParticleSpec.fromMeep(MIE_PARTICLES_STANDARD_PRECOMPUTED.CONTINENTAL_HAZE_SMALL);fog.target_extinction=.00035;fog.fade_distance=45;
+    const ft=new Transform64();ft.setTranslation(0,110,-150);ft.setScale(1100,400,1150);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
     for(const [x,z,w,d,strength] of [[-85,-55,65,90,.012],[35,-185,38,70,.014],[-112,-210,90,80,.009],[95,-248,85,80,.004],[0,-78,42,22,.009]]){
       const low=new ParticipatingMedia();low.target_extinction=strength;low.fade_distance=7;
       const lt=new Transform64();lt.setTranslation(x,heightAt(x,z)+2,z);lt.setScale(w,9,d);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);

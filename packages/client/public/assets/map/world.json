@@ -7,7 +7,7 @@
     "depth": 640
   },
   "projection": "north-up; one map unit per world metre",
-  "props": 3734,
+  "props": 3726,
   "waterFootprints": 0,
-  "sourceHash": "bd184518e6cdd1b5df62ed13459531f9d97c9ca8fdd8c2104a8b470f696420b5"
+  "sourceHash": "c697732f65b2db9dea3ce6a676495a6bd988256465d4a08c018e810ff1e617bf"
 }
