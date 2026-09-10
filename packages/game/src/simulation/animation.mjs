@@ -41,7 +41,7 @@ const directions=['','_forward_right','_right','_back_right','_back','_back_left
 /** Identical clip times and weights drive GPU skinning and CPU damage sockets. */
 export function animationPlan(a){
   const hound=a.archetype==='hound',data=rigs[actorRig(a)],clock=a.animationTime??0,gait=a.gaitPhase??0,speed=Math.hypot(a.vx,a.vz);
-  const prefix=hound?'':a.weapon+'_',move=smooth(speed/.6),run=smooth((speed-3.5)/2.4),plan=[];
+  const prefix=hound?'':a.weapon+'_',move=smooth(speed/.6),run=smooth((speed-(hound?1.8:3.5))/(hound?1.7:2.4)),plan=[];
   const add=(name,weight,time)=>{if(weight>0&&data.clips[name])plan.push({name,weight,time:Math.max(0,Math.min(data.clips[name].duration,time))});};
   const loop=(name,weight,phase)=>add(name,weight,(phase%1)*data.clips[name].duration);
   const travel=(kind,weight,stride)=>{
@@ -57,10 +57,15 @@ export function animationPlan(a){
   else if(a.attackAge>=0){action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;const length=data.clips[action]?.duration??.7;actionWeight=smooth(actionTime/.09)*(1-smooth((actionTime-length+.12)/.12));}
   else if(a.windup>0&&a.attackKind==='nova'){action='nova';actionTime=Math.min(.5,1-a.windup);actionWeight=.85;}
   else if(a.hurtTime>0){action='hurt';actionTime=.3-a.hurtTime;actionWeight=.8;}
-  else if(!a.grounded){action='jump';actionTime=a.vy>0?.15:.46;actionWeight=.85;}
+  else if(!a.grounded){
+    // Phase follows physical ascent/descent, with a short takeoff blend. The
+    // apex no longer swaps between two unrelated held poses.
+    action='jump';actionTime=.08+clamp((6.4-a.vy)/12.8)*.48;actionWeight=.85*smooth((a.airTime??.1)/.08);
+  }
+  else if(!hound&&!a.crouch&&a.landingAge>=0){action='land';actionTime=a.landingAge;actionWeight=(a.landingStrength??1)*(1-smooth((actionTime-.17)/.05));}
   const base=1-actionWeight;
   if(!hound&&a.crouch){loop(prefix+'crouch',base*(1-move),clock/3.2);travel('crouch_walk',base*move,1.12);}
-  else{loop(prefix+'idle',base*(1-move),clock/(hound?3.4:3.2));travel('walk',base*move*(1-run),1.12);travel('run',base*move*run,1.84);}
+  else{loop(prefix+'idle',base*(1-move),clock/(hound?3.4:3.2));travel('walk',base*move*(1-run),hound?1.04:1.12);travel('run',base*move*run,hound?1.36:1.84);}
   if(action)add(action,actionWeight,actionTime);
   if(!plan.length)loop(prefix+'idle',1,clock/3.2);
   const total=plan.reduce((n,p)=>n+p.weight,0);for(const p of plan)p.weight/=total;

@@ -32,6 +32,23 @@ test('Blender directional gaits plant the support foot while facing independentl
     expect(Math.hypot(...end.map((v,i)=>v-start[i]))).toBeLessThan(.012*scale);
   }
 });
+test('hound walk and run plant each diagonal pair throughout its support phase',()=>{
+  for(const [speed,stride] of [[1.1,1.04],[4.1,1.36]])for(const name of ['lowerFL','lowerBR','lowerFR','lowerBL']){
+    const a=actor();a.archetype='hound';a.vz=-speed;
+    const bone=rigs.briarHound.bones.find(b=>b.name===name),shift=name==='lowerFR'||name==='lowerBL'?.5:0;
+    const foot=phase=>{a.gaitPhase=(phase+shift)*stride;a.z=-a.gaitPhase;return new Vector3(0,bone.length,0).applyMatrix4(actorSocket(new Transform64(),a,name));};
+    const start=foot(.1),end=foot(.4);expect(start.distanceTo(end)).toBeLessThan(.006);
+  }
+});
+test('airborne pose progresses continuously through the apex and landing keeps feet planted',()=>{
+  const a=actor();Object.assign(a,{grounded:false,airTime:.6});
+  const times=[5,2,.02,-.02,-2,-5].map(vy=>{a.vy=vy;return animationPlan(a).find(p=>p.name==='jump').time;});
+  expect(times.every((time,i)=>i===0||time>times[i-1])).toBe(true);expect(times[3]-times[2]).toBeLessThan(.003);
+  Object.assign(a,{grounded:true,landingAge:0,landingStrength:1});const foot=rigs.pilgrim.bones.findIndex(b=>b.name==='footL'),chest=rigs.pilgrim.bones.findIndex(b=>b.name==='chest');
+  const start=actorJointPoses(a);a.landingAge=.075;const compressed=actorJointPoses(a);
+  expect(compressed[chest].position[1]).toBeLessThan(start[chest].position[1]-.05);
+  expect(Math.hypot(...compressed[foot].position.map((v,i)=>v-start[foot].position[i]))).toBeLessThan(.01);
+});
 test('damage endpoints are the transformed native blade at every active time',()=>{
   const a=actor();a.attackKind='weapon';a.yaw=.71;
   for(const weapon of ['sword','spear'])for(let time=.24;time<.43;time+=.03){

@@ -21,6 +21,21 @@ test('walk, sprint and jump are simulated by Meep physics',async()=>{
   const next=p.z;w.input(p.id,{x:0,z:-1,yaw:0,buttons:BUTTON.SPRINT});run(w,60);expect(next-p.z).toBeGreaterThan(walking*1.4);expect(p.stamina).toBeLessThan(p.staminaMax);
   const y=p.y;w.input(p.id,{x:0,z:0,yaw:0,buttons:BUTTON.JUMP});run(w,12);expect(p.y).toBeGreaterThan(y+.4);
 });
+test('a physical jump produces one landing response and preserves its phase through character import',async()=>{
+  const w=await setup(),p=w.addPlayer('landing');w.teleport(p,[160,heightAt(160,120)+1,120]);run(w,90);
+  w.input(p.id,{x:0,z:0,yaw:0,buttons:BUTTON.JUMP});w.step();w.input(p.id,{x:0,z:0,yaw:0,buttons:0});
+  let landed=0,peakAir=0,peakFall=0;
+  for(let i=0;i<150;i++){
+    w.step();peakAir=Math.max(peakAir,p.airTime);peakFall=Math.max(peakFall,p.fallSpeed);
+    if(p.landingAge===0){
+      landed++;expect(p.grounded).toBe(true);expect(p.landingStrength).toBeGreaterThan(.5);
+      const saved=w.exportCharacter(p.id);p.landingAge=-1;w.importCharacter(p.id,saved);expect(p.landingAge).toBe(0);
+    }
+  }
+  expect(landed).toBe(1);expect(peakAir).toBeGreaterThan(.8);expect(peakFall).toBeGreaterThan(4);expect(p.landingAge).toBe(-1);
+  const legacy=w.exportCharacter(p.id);for(const key of ['airTime','fallSpeed','landingAge','landingStrength'])delete legacy.motion[key];
+  p.landingAge=.1;p.airTime=2;w.importCharacter(p.id,legacy);expect(p.landingAge).toBe(-1);expect(p.airTime).toBe(0);
+});
 test('a supported character holds a gentle slope without drifting downhill',async()=>{
   const w=await setup(),p=w.addPlayer('slope');w.teleport(p,[100,heightAt(100,35)+1,35]);run(w,120);
   const start=[p.x,p.y,p.z];run(w,600);

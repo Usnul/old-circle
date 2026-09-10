@@ -156,7 +156,7 @@ def human_pose(kind,time,duration,weapon):
     chest_yaw=.06*math.sin(cycle) if walk else .015*math.sin(cycle)
     if kind=='hurt':root.y+=.10*math.sin(math.pi*phase);lean=-.22*math.sin(math.pi*phase)
     if kind=='land':root.z-=.22*math.sin(math.pi*phase)
-    if kind=='jump':lean=.1;root.z-=.07*math.sin(math.pi*phase)
+    if kind=='jump':lean=.12*math.sin(math.pi*phase);root.z-=.05*math.sin(math.pi*phase)
     if kind=='mantle':root.y-=.14*math.sin(math.pi*phase);root.z-=.25*(1-smooth(phase))
     if kind=='sword':chest_yaw=keypose([(0,(0,0,.0)),(.18,(0,0,-.50)),(.43,(0,0,.60)),(.72,(0,0,0))],time).z
     rot=Matrix.Rotation(chest_yaw,4,'Z')@Matrix.Rotation(lean,4,'X')
@@ -175,6 +175,8 @@ def human_pose(kind,time,duration,weapon):
         if crouch:foot.y-=.08
         if kind in ['jump','hang','mantle']:
             foot=body((side*.18,-.1 if suffix=='L' else .05,-.63 if kind=='hang' else -.69))
+            if kind=='jump':
+                tuck=math.sin(math.pi*phase)**2;foot=body((side*.17,-.06-(.19 if suffix=='L' else .10)*tuck,-.83+.22*tuck))
             if kind=='mantle' and suffix=='L':foot=body((side*.18,-.38,-.26))
         knee=elbow(hip,foot,.43,.41,(0,-1,.1));toe=foot+v((0,-.21,.015 if lift>.01 else -.03))
         poses['thigh'+suffix]=(hip,knee);poses['calf'+suffix]=(knee,foot);poses['foot'+suffix]=(foot,toe)
@@ -200,7 +202,7 @@ def human_pose(kind,time,duration,weapon):
         amount=1 if kind=='hang' else 1-smooth(phase)
         right=body((.31,-.23,.14+.66*amount));left=body((-.31,-.23,.14+.66*amount));direction=v((0,0,-1))
     elif kind=='jump':
-        right=body((.39,-.1,.4));left=body((-.39,-.2,.34))
+        tuck=math.sin(math.pi*phase);right=body((.39,-.1,.12+.28*tuck));left=body((-.39,-.2,.10+.24*tuck))
     for suffix,side,shoulder,hand in [('R',1,shoulderR,right),('L',-1,shoulderL,left)]:
         if (hand-shoulder).length>.577:hand=shoulder+(hand-shoulder).normalized()*.577
         if suffix=='R':right=hand
@@ -237,7 +239,7 @@ def hound_mesh():
 def hound_pose(kind,time,duration,weapon):
     phase=time/duration;cycle=phase*TAU;moving=kind in ['walk','run'];poses={}
     for name,parent,head,tail,*_ in HOUND:poses[name]=(v(head),v(tail))
-    bob=.035*math.sin(cycle*2) if moving else .012*math.sin(cycle)
+    bob=(-.09 if kind=='run' else -.045)-.018*math.cos(cycle*2) if moving else .012*math.sin(cycle)
     for name in ['hips','chest','head','jaw','tail']:
         a,b=poses[name];poses[name]=(a+v((0,0,bob)),b+v((0,0,bob)))
     if kind=='idle':
@@ -247,8 +249,11 @@ def hound_pose(kind,time,duration,weapon):
         a,b=poses['jaw'];poses['jaw']=(a+v((0,-.23*amount,0)),b+v((0,-.24*amount,-.15*amount)))
     a,b=poses['tail'];poses['tail']=(a,b+v((.15*math.sin(cycle),0,0)))
     for index,(suffix,x,y) in enumerate([('FL',-.20,-.32),('FR',.20,-.32),('BL',-.20,.37),('BR',.20,.37)]):
-        ph=cycle+(0 if index in [0,3] else math.pi);foot=v((x,y-.03+(math.sin(ph)*.23 if moving else 0),.08+max(0,math.cos(ph))*.10 if moving else .08))
-        hip=v((x,y,.65+bob));bend=elbow(hip,foot,.314,.298,(0,1,0));poses['upper'+suffix]=(hip,bend);poses['lower'+suffix]=(bend,foot)
+        f=((cycle+(0 if index in [0,3] else math.pi))%TAU)/TAU;stride=.34 if kind=='run' else .26
+        travel=(-stride*(1-4*f) if f<.5 else stride-4*stride*(f-.5)) if moving else 0
+        lift=(.14 if kind=='run' else .09)*math.sin((f-.5)*TAU) if moving and f>=.5 else 0
+        foot=v((x,y-.03+travel,.08+max(0,lift)))
+        hip=v((x,y,.65+bob));bend=elbow(hip,foot,math.hypot(.09,.30),math.hypot(.12,.27),(0,1,0));poses['upper'+suffix]=(hip,bend);poses['lower'+suffix]=(bend,foot)
     return poses
 
 def export(name,definitions,mesh_builder,pose_builder,clips):

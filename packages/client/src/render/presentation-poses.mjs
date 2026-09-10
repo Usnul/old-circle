@@ -62,7 +62,11 @@ export class PresentationPoses {
     const result={...actor,x:t.translation_x,y:t.translation_y,z:t.translation_z,yaw:2*Math.atan2(t.rotation[1],t.rotation[3])};
     const a=first.actors.get(actor.id),b=second.actors.get(actor.id);
     if(a&&b){
+      const state=alpha<1?a:b;
+      for(const key of ['grounded','crouch','airTime','landingAge','landingStrength'])result[key]=state[key];
       for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=a[key]+(b[key]-a[key])*alpha;
+      if(!a.grounded&&!b.grounded&&Number.isFinite(a.airTime)&&Number.isFinite(b.airTime))result.airTime=a.airTime+(b.airTime-a.airTime)*alpha;
+      if(a.landingAge>=0&&b.landingAge>=a.landingAge)result.landingAge=a.landingAge+(b.landingAge-a.landingAge)*alpha;
       if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=a.attackAge+(b.attackAge-a.attackAge)*alpha;
     }
     return result;

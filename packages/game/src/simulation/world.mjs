@@ -30,6 +30,7 @@ const rotation={x:0,y:0,z:0,w:1};
 const q=[0,0,0,1];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
+const optionalMotion={airTime:0,fallSpeed:0,landingAge:-1,landingStrength:0};
 
 export class GameWorld {
   constructor(){
@@ -125,6 +126,7 @@ export class GameWorld {
       a.hurtTime=Math.max(0,a.hurtTime-dt);a.cooldown=Math.max(0,a.cooldown-dt);
       this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
+      if(a.landingAge>=0){a.landingAge+=dt;if(a.landingAge>.22)a.landingAge=-1;}
       a.stamina=Math.min(a.staminaMax,a.stamina+dt*22);a.mana=Math.min(a.manaMax,a.mana+dt*3);
       if(a.kind==='enemy'&&!predicted)this.think(a,dt);
       const input=a.intent,buttons=input.buttons,pressed=buttons&~a.lastButtons;a.lastButtons=buttons;
@@ -132,6 +134,10 @@ export class GameWorld {
       const halfHeight=a.boss?1.2675:a.crouch?.495:.845;
       this.ray.set([a.x,a.y,a.z,0,-1,0,halfHeight+.14]);
       a.grounded=b.linearVelocity[1]<.8&&this.physics.raycast(this.ray,this.hit,other=>other!==e)&&this.hit.normal[1]>.64;
+      if(a.grounded){
+        if(a.airTime>.12&&a.fallSpeed>1.6&&!a.mantle){a.landingAge=0;a.landingStrength=Math.min(1,.3+(a.fallSpeed-1.6)/7);}
+        a.airTime=0;a.fallSpeed=0;
+      }else{a.airTime+=dt;a.fallSpeed=Math.max(a.fallSpeed,-b.linearVelocity[1]);}
       const normal=a.grounded?Array.from(this.hit.normal):[0,1,0],radius=.32*(a.boss?1.5:1);
       const supportGap=a.grounded?this.hit.t-halfHeight-radius*(1/normal[1]-1):0;
       const len=Math.hypot(input.x,input.z),sprinting=(buttons&BUTTON.SPRINT)&&a.stamina>5&&len>0&&!a.crouch;
@@ -152,7 +158,7 @@ export class GameWorld {
         const adhesion=Math.max(0,supportGap-.005)*18;
         b.linearVelocity[1]=-(normal[0]*b.linearVelocity[0]+normal[2]*b.linearVelocity[2])/normal[1]-adhesion-(len>0?.12:0);
       }
-      if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;b.gravityScale=1;a.grounded=false;a.stamina-=12;this.event('jump',a);}
+      if((pressed&BUTTON.JUMP)&&a.grounded&&a.stamina>=12){b.linearVelocity[1]=6.4;b.gravityScale=1;a.grounded=false;a.airTime=0;a.fallSpeed=0;a.landingAge=-1;a.stamina-=12;this.event('jump',a);}
       if((buttons&BUTTON.JUMP)&&!a.grounded&&!a.mantle)this.tryMantle(a,e);
       if(a.mantle){
         const mantle=a.mantle;mantle.t+=dt;
@@ -312,7 +318,7 @@ export class GameWorld {
     a.embers-=levelCost(a.level);a.level++;a.stats[stat]++;
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);this.rest(a);return true;
   }
-  respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
+  respawn(a){a.hp=a.healthMax;a.stamina=a.staminaMax;a.mana=a.manaMax;a.deadTime=0;a.flasks=3;a.crouch=false;a.attackAge=-1;a.hurtTime=0;a.mantle=null;Object.assign(a,optionalMotion);a.embers=Math.floor(a.embers*.75);this.teleport(a,a.checkpoint);this.syncActorCollider(a,true);this.event('respawn',a);}
   teleport(a,p){const e=this.actors.get(a.id),b=this.ecd.getComponent(e,RigidBody);this.physics.setPose(b,{x:p[0],y:p[1],z:p[2]},rotation);b.linearVelocity.fill(0);[a.x,a.y,a.z]=p;}
   checkEncounters(){
     for(const id of this.actors.keys()){
@@ -324,6 +330,7 @@ export class GameWorld {
   exportCharacter(id){
     const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,checkpointId,hearths,inventory}=a;
     const motion=Object.fromEntries(motionFields.map(key=>[key,a[key]]));
+    for(const key of Object.keys(optionalMotion))motion[key]=a[key];
     Object.assign(motion,{crouch:a.crouch,grounded:a.grounded,attackKind:a.attackKind,hitIds:[...a.hitIds],projectileReleased:a.projectileReleased,mantle:structuredClone(a.mantle),deathVelocity:[...a.deathVelocity]});
     return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory),motion};
   }
@@ -336,6 +343,7 @@ export class GameWorld {
     if(s.motion){
       const m=s.motion;
       if(!motionFields.every(key=>Number.isFinite(m[key]))||!Array.isArray(m.hitIds)||!m.hitIds.every(id=>typeof id==='string')||!Array.isArray(m.deathVelocity)||m.deathVelocity.length!==3||!m.deathVelocity.every(Number.isFinite))throw new Error('Malformed character motion');
+      if(!Object.keys(optionalMotion).every(key=>m[key]===undefined||Number.isFinite(m[key])))throw new Error('Malformed landing state');
       if(m.mantle&&(!['hang','climb'].includes(m.mantle.phase)||!Number.isFinite(m.mantle.t)||![m.mantle.from,m.mantle.to].every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))))throw new Error('Malformed mantle state');
     }
     // Client progression is trusted at reconnect, per game policy. World state never comes from this payload.
@@ -346,8 +354,10 @@ export class GameWorld {
     a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,3);
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
+    Object.assign(a,optionalMotion);
     if(s.motion){
       for(const key of motionFields)a[key]=s.motion[key];
+      for(const [key,fallback] of Object.entries(optionalMotion))a[key]=s.motion[key]??fallback;
       Object.assign(a,{crouch:!!s.motion.crouch,grounded:!!s.motion.grounded,attackKind:s.motion.attackKind==='nova'?'nova':'weapon',hitIds:[...s.motion.hitIds],projectileReleased:!!s.motion.projectileReleased,mantle:structuredClone(s.motion.mantle??null),deathVelocity:[...s.motion.deathVelocity]});
       this.syncActorCollider(a,true);const b=this.ecd.getComponent(this.actors.get(id),RigidBody);b.linearVelocity.set(a.vx,a.vy,a.vz);
     }

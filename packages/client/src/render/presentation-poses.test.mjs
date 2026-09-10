@@ -9,6 +9,13 @@ test('a respawn snaps without interpolating through the world',()=>{
   const poses=new PresentationPoses(),a={id:'player',x:0,y:1,z:0,yaw:0};poses.accept({actors:[a]},0);
   const b={...a,x:100};poses.accept({actors:[b]},1/30);expect(poses.sample(b,.04).x).toBe(100);
 });
+test('landing state changes on the body timeline instead of the newest Worker message',()=>{
+  const poses=new PresentationPoses(),air={id:'player',x:0,y:2,z:0,yaw:0,grounded:false,airTime:.5,landingAge:-1};
+  poses.accept({actors:[air]},0);const landed={...air,y:1,grounded:true,airTime:0,landingAge:0,landingStrength:1};poses.accept({actors:[landed]},1/30);
+  const before=poses.sample(landed,.05);expect(before.y).toBeCloseTo(1.5);expect(before.grounded).toBe(false);expect(before.landingAge).toBe(-1);
+  const recovering={...landed,landingAge:1/30};poses.accept({actors:[recovering]},2/30);
+  const after=poses.sample(recovering,1/12);expect(after.grounded).toBe(true);expect(after.landingAge).toBeCloseTo(1/60);
+});
 
 test('fixed simulation frames keep walking smooth under uneven Worker message arrival',()=>{
   const poses=new PresentationPoses(),arrivals=Array.from({length:90},(_,i)=>({frame:i*2,time:i/30+[0,.008,.002,.016,.004][i%5]}));
