@@ -14,9 +14,12 @@ export const HAZARD_EFFECTS={
   'hazard-bell':{color:[1.3,.7,.24,.7],velocity:[3,.3,3],lift:.5,size:.08},
 };
 export const FOOTSTEP_EFFECTS={
-  'step-grass':{color:[.24,.30,.10,.5],size:.025},'step-gravel':{color:[.38,.33,.24,.4],size:.028},
-  'step-sand':{color:[.53,.38,.20,.4],size:.038},'step-snow':{color:[.83,.88,.92,.65],size:.035},
-  'step-stone':{color:[.4,.37,.30,.14],size:.018},'step-wood':{color:[.35,.25,.14,.14],size:.018},
+  'step-grass':{texture:'step-leaf',color:[.28,.34,.13,.85],size:.065,life:.55,lift:.85,spread:.30,gravity:2.4,growth:0,count:4},
+  'step-gravel':{texture:'step-grit',color:[.43,.39,.31,.85],size:.055,life:.5,lift:.9,spread:.40,gravity:3,growth:0,count:5},
+  'step-sand':{texture:'step-dust',color:[.60,.46,.29,.62],size:.16,life:.7,lift:.65,spread:.27,gravity:.65,growth:.18,count:4},
+  'step-snow':{texture:'step-dust',color:[.86,.91,.95,.8],size:.13,life:.65,lift:.8,spread:.35,gravity:1.2,growth:.14,count:5},
+  'step-stone':{texture:'step-dust',color:[.49,.46,.40,.35],size:.105,life:.45,lift:.60,spread:.18,gravity:1,growth:.09,count:2},
+  'step-wood':{texture:'step-leaf',color:[.44,.32,.19,.6],size:.045,life:.4,lift:.65,spread:.22,gravity:2.4,growth:0,count:2},
 };
 export const AMBIENT_EFFECTS={
   pollen:{life:7,color:[.7,.74,.36,.55],size:.033,fall:-.02,speed:.65},
@@ -27,36 +30,46 @@ export const AMBIENT_EFFECTS={
   ash:{life:6,color:[.48,.43,.37,.45],size:.035,fall:-.16,speed:.9},
 };
 // Every visual particle is simulated on Meep's GPU VM, including ambient motes.
-export function effect(kind='embers',rate=35){
-  if(!programs.has(kind))programs.set(kind,compile(kind));
+export function effect(kind='embers',rate=35,scale=1){
+  const step=FOOTSTEP_EFFECTS[kind],key=step?`${kind}:${scale}`:kind;
+  if(!programs.has(key))programs.set(key,compile(kind,scale));
   const natural=FOOTSTEP_EFFECTS[kind]||AMBIENT_EFFECTS[kind]&&!AMBIENT_EFFECTS[kind].glow;
-  return ParticleEffect.from({...programs.get(kind),texture:'/assets/vfx/mote.png',spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color'},prewarm:kind==='motes'?2:0});
+  return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${step?.texture??'mote'}.png`,spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color',...(step?{rotation:'rotation'}:{})},prewarm:kind==='motes'?2:0});
 }
-function compile(kind){
+function compile(kind,scale){
   const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],hazard=HAZARD_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave';
-  const lifetime=step?.6:hazard?1:profile?.life??(ambient?6:shock||frost?1:1.9),color=hazard?.color??step?.color??profile?.color??(frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
-  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4}]);
+  const lifetime=step?.life??(hazard?1:profile?.life??(ambient?6:shock||frost?1:1.9)),color=hazard?.color??step?.color??profile?.color??(frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
+  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4},...(step?[{name:'rotation',components:1},{name:'normal',components:3}]:[])]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
   const set=(g,name,value)=>op(g,'setAttribute',{value},{name});
   const random=op(init,'random',{}, {components:3});
   const signed=op(init,'mad',{a:random,b:[2,2,2],c:[-1,-1,-1]});
-  const jitter=op(init,'mul',{a:signed,b:step?[.07,.012,.07]:kind==='snow'?[12,4,12]:ambient?[16,2,16]:[.2,.1,.2]});
+  const normal=step?op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_UP}):null;
+  // Scatter in the contact plane, then lift along its normal, including on slopes.
+  const tangent=step?op(init,'sub',{a:signed,b:op(init,'scale',{v:normal,s:op(init,'dot',{a:signed,b:normal})})}):null;
+  const jitter=step?op(init,'scale',{v:tangent,s:[.065*scale]}):op(init,'mul',{a:signed,b:kind==='snow'?[12,4,12]:ambient?[16,2,16]:[.2,.1,.2]});
   set(init,'position',op(init,'add',{a:op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_POSITION}),b:jitter}));
-  let velocity=op(init,'mul',{a:signed,b:hazard?.velocity??(step?[.22,.12,.22]:ambient?[.15,.10,.15]:frost||shock?[7,.2,7]:[.5,1,.5])});
-  velocity=op(init,'add',{a:velocity,b:hazard?[0,hazard.lift,0]:step?[0,.45,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
-  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',[hazard?.size??step?.size??profile?.size??(ambient?.035:shock||frost?.09:.11)]);
+  let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:hazard?.velocity??(ambient?[.15,.10,.15]:frost||shock?[7,.2,7]:[.5,1,.5])});
+  velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):hazard?[0,hazard.lift,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
+  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[hazard?.size??profile?.size??(ambient?.035:shock||frost?.09:.11)]);
+  if(step){set(init,'normal',normal);set(init,'rotation',op(init,'mul',{a:op(init,'random',{}, {components:1}),b:[Math.PI*2]}));}
   set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});
   const age=op(update,'add',{a:op(update,'attribute',{}, {name:'age'}),b:dt});set(update,'age',age);
   const fadeIn=op(update,'smoothstep',{e0:[0],e1:[ambient?.65:.08],x:age});
   const fadeOut=op(update,'sub',{a:[1],b:op(update,'smoothstep',{e0:[lifetime*.45],e1:[lifetime],x:age})});
   const envelope=op(update,'mul',{a:fadeIn,b:fadeOut});
-  // Fade RGB as well as alpha: additive light must approach zero before recycle.
-  set(update,'color',op(update,'scale',{v:color,s:envelope}));
+  // Lit alpha particles keep their albedo as coverage fades; additive light must fade RGB too.
+  set(update,'color',step?op(update,'mul',{a:color,b:op(update,'vec4',{x:[1],y:[1],z:[1],w:envelope})}):op(update,'scale',{v:color,s:envelope}));
   op(update,'kill',{condition:op(update,'compare',{a:age,b:[lifetime]},{op:'ge'})});
   const pos=op(update,'attribute',{}, {name:'position'});let vel=op(update,'attribute',{}, {name:'velocity'});
-  if(step){vel=op(update,'add',{a:vel,b:op(update,'scale',{v:[0,-1.4,0],s:dt})});set(update,'velocity',vel);}
+  if(step){
+    const gravity=op(update,'scale',{v:op(update,'attribute',{}, {name:'normal'}),s:[-step.gravity*scale]});
+    vel=op(update,'add',{a:vel,b:op(update,'scale',{v:gravity,s:dt})});set(update,'velocity',vel);
+    set(update,'size',op(update,'add',{a:op(update,'attribute',{}, {name:'size'}),b:op(update,'mul',{a:dt,b:[step.growth*scale]})}));
+    set(update,'rotation',op(update,'add',{a:op(update,'attribute',{}, {name:'rotation'}),b:op(update,'mul',{a:dt,b:[step.growth? .25:3]})}));
+  }
   if(profile){
     const wind=op(update,'scale',{v:op(update,'builtin',{}, {id:VM_BUILTIN.EMITTER_DIRECTION}),s:[profile.speed]});
     const target=op(update,'add',{a:wind,b:[0,profile.fall,0]});
