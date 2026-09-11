@@ -82,9 +82,24 @@ test.each(['grass','gravel','sand','snow','stone','wood','unknown'])('%s contact
   for(let i=0;i<3;i++)expect(t.matrix[4+i]).toBeCloseTo(normal[i],6);
   expect(Array.from(feet.pool[0].t.matrix).every(Number.isFinite)).toBe(true);
   expect(transient.life).toBeGreaterThan(p.life);
+  const soft=['grass','gravel','sand','snow'].includes(selected),decal=feet.pool[0].decal;
+  expect(decal.uri_albedo).toBe(`/assets/vfx/boot-${soft?'imprint':'print'}.png`);
+  expect(decal.uri_normal).toBe(soft?'/assets/vfx/boot-imprint-normal.png':'');
   // A raised wooden floor wins over the terrain biome below it.
   feet.contact(a,foot,{...hit,surface:'wood'},1);
   expect(view.audio.footstep.mock.calls.at(-1)[3]).toBe('wood');
+});
+
+test.each([false,true])('pooled %s footprints switch relief off on hard floors and restore it on soft ground',hound=>{
+  const {feet}=fixture(),a=walker(),f={...foot,hound};
+  feet.contact(a,f,{...hit,surface:'grass'},0);const mark=feet.pool[0],shape=hound?'paw':'boot';
+  expect(mark.decal.uri_normal).toBe(`/assets/vfx/${shape}-imprint-normal.png`);
+  feet.update([],a.id,1,8,8);feet.contact(a,f,{...hit,surface:'wood'},8);
+  expect(feet.pool[0]).toBe(mark);expect(mark.decal.uri_normal).toBe('');
+  expect(mark.decal.uri_albedo).toBe(`/assets/vfx/${shape}-print.png`);
+  feet.update([],a.id,1,12,4);feet.contact(a,f,{...hit,surface:'snow'},12);
+  expect(feet.pool[0]).toBe(mark);expect(mark.decal.uri_normal).toBe(`/assets/vfx/${shape}-imprint-normal.png`);
+  expect(mark.decal.uri_albedo).toBe(`/assets/vfx/${shape}-imprint.png`);
 });
 
 test('crowd particles leave a reserve for the player and all emission remains bounded',()=>{

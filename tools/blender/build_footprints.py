@@ -61,5 +61,52 @@ for name,mask in [('step-dust',dust),('step-grit',grit),('step-leaf',leaf)]:
     image=bpy.data.images.new(name,width=n,height=n,alpha=True)
     image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
     publish_image(image,out/(name+'.png'));image.use_fake_user=True;image.pack()
+# Soft-ground imprints share the old sole/pad silhouettes, with coherent coverage
+# and a shallow depression. Keep this after the unchanged print/particle builders.
+def blur(field,sigma):
+    radius=int(np.ceil(sigma*3));positions=np.arange(-radius,radius+1)
+    weights=np.exp(-positions*positions/(2*sigma*sigma));weights/=weights.sum()
+    for axis in [0,1]:
+        padding=[(0,0),(0,0)];padding[axis]=(radius,radius)
+        padded=np.pad(field,padding,mode='edge')
+        field=sum(weight*np.take(padded,np.arange(field.shape[axis])+i,axis=axis)
+                  for i,weight in enumerate(weights))
+    return field
+
+n=256;y,x=np.mgrid[-1:1:complex(n),-1:1:complex(n)]
+for name,width,length in [('boot',.29,.44),('paw',.22,.26)]:
+    if name=='boot':
+        sole=np.maximum(1-(x/.62)**4-((y+.25)/.64)**4,1-(x/.49)**6-((y-.57)/.27)**6)
+        shape=(sole>0).astype(np.float64)
+        tread=blur(np.where((np.sin((y+x*.18)*32)>.2)&(y<.25),.36,1),1.25)
+    else:
+        shape=(1-(x/.55)**2-((y-.32)/.4)**2>0).astype(np.float64)
+        for px,py in [(-.55,-.20),(-.21,-.50),(.21,-.50),(.55,-.20)]:
+            shape=np.maximum(shape,(1-((x-px)/.22)**2-((y-py)/.27)**2>0).astype(np.float64))
+        tread=np.ones((n,n))
+    bevel=blur(shape,2.2)
+    # Low-frequency wear disturbs the thin rim without translucent pixel grain.
+    wear=.96+.025*np.sin(x*17+y*13)+.015*np.sin(y*29-x*11)
+    rim=4*bevel*(1-bevel)*wear
+    grey=np.clip(.55+.075*(1-tread)+.31*rim,0,1)
+    alpha=smooth(.025,.43,blur(shape,1.3))*.94
+    pixels=np.ones((n,n,4),dtype=np.float32);pixels[:,:,:3]=grey[:,:,None];pixels[:,:,3]=alpha
+    image=bpy.data.images.new(name+'-imprint',width=n,height=n,alpha=True)
+    image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
+    publish_image(image,out/(name+'-imprint.png'));image.use_fake_user=True;image.pack()
+
+    # PNG +X is decal local +X; PNG rows down are decal local +Y. A negative
+    # height forms a dent, so -dh/dx and -dh/dy point INTO its outer boundary.
+    # Derivative spacing is in metres at the authored projector dimensions.
+    height=-.003*bevel*(.60+.40*tread)
+    dh_dy,dh_dx=np.gradient(height,length/(n-1),width/(n-1))
+    normal=np.stack((-dh_dx,-dh_dy,np.ones_like(height)),axis=2)
+    normal/=np.linalg.norm(normal,axis=2)[:,:,None]
+    pixels=np.ones((n,n,4),dtype=np.float32);pixels[:,:,:3]=normal*.5+.5
+    image=bpy.data.images.new(name+'-imprint-normal',width=n,height=n,alpha=True)
+    image.colorspace_settings.name='Non-Color'
+    image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
+    publish_image(image,out/(name+'-imprint-normal.png'));image.use_fake_user=True;image.pack()
+
 bpy.context.preferences.filepaths.save_version=0
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets/blender/footprints.blend'))

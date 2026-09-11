@@ -10,8 +10,9 @@ import {effect,FOOTSTEP_EFFECTS} from './effects.mjs';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
 
 const surfaces={
-  grass:{color:[.07,.10,.03,.42],life:7},gravel:{color:[.12,.10,.055,.55],life:10},
-  sand:{color:[.22,.14,.06,.6],life:14},snow:{color:[.10,.16,.19,.68],life:18},
+  // Flattened grass exposes warm soil; the rim and depression carry the shape.
+  grass:{color:[.34,.24,.12,.86],life:7,imprint:true},gravel:{color:[.20,.17,.12,.65],life:10,imprint:true},
+  sand:{color:[.36,.25,.13,.72],life:14,imprint:true},snow:{color:[.24,.32,.37,.78],life:18,imprint:true},
   stone:{color:[.18,.16,.12,.28],life:3},wood:{color:[.16,.11,.06,.24],life:3},
 };
 // Fraction of the viewport, independent of resolution. A normal actor reaches
@@ -42,7 +43,7 @@ export class WorldFootsteps {
     this.view=view;this.contacts=new FootContacts();this.pool=[];this.sequence=0;this.lastQuery=-1;this.current=new Map();
     // Short bursts cannot wait for their first texture fetch and decode.
     const assets=view.engine?.assetManager;
-    if(assets)for(const name of ['step-dust','step-grit','step-leaf','boot-print','paw-print'])assets.promise(`/assets/vfx/${name}.png`,GameAssetType.Image).catch(error=>console.warn(`Footstep image ${name} could not be loaded`,error));
+    if(assets)for(const name of ['step-dust','step-grit','step-leaf',...['boot','paw'].flatMap(shape=>[shape+'-print',shape+'-imprint',shape+'-imprint-normal'])])assets.promise(`/assets/vfx/${name}.png`,GameAssetType.Image).catch(error=>console.warn(`Footstep image ${name} could not be loaded`,error));
   }
   update(actors,playerId,epoch,now,dt){
     if(epoch!==this.contacts.epoch){this.contacts.reset(epoch);this.pending=null;}
@@ -91,8 +92,13 @@ export class WorldFootsteps {
     // Leave room for the player's next contacts while crowded NPC prints fade.
     if(!local&&this.pool.filter(m=>m.active&&m.hound===foot.hound).length>=56)return;
     let mark=this.pool.find(m=>!m.active&&m.hound===foot.hound);
-    if(!mark){if(this.pool.filter(m=>m.hound===foot.hound).length>=64)return;const decal=new Decal(),t=new Transform64();decal.uri_albedo=`/assets/vfx/${foot.hound?'paw':'boot'}-print.png`;decal.color.setA(0);const id=new Entity().add(t).build(view.ecd);mark={decal,t,id,hound:foot.hound};this.pool.push(mark);}
+    if(!mark){if(this.pool.filter(m=>m.hound===foot.hound).length>=64)return;const decal=new Decal(),t=new Transform64();decal.color.setA(0);const id=new Entity().add(t).build(view.ecd);mark={decal,t,id,hound:foot.hound};this.pool.push(mark);}
     const {t,decal,id}=mark;
+    const texture=`/assets/vfx/${foot.hound?'paw':'boot'}-${profile.imprint?'imprint':'print'}`;
+    decal.uri_albedo=texture+'.png';
+    // Hard floors receive a surface scuff, without the soft ground depression.
+    // Reset on reuse so a snowy footprint cannot carve the next wooden floor.
+    decal.uri_normal=profile.imprint?texture+'-normal.png':'';
     // Meep projects along +Z into the surface. The PNG's toes are at low V,
     // which the native atlas maps to local -Y, so +Y points toward the heel.
     t64_look_rotation(t,...n.map(v=>-v),...heading.map(v=>-v));t.setTranslation(...hit.position.map((v,i)=>v+n[i]*.018));
