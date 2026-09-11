@@ -4,7 +4,8 @@ import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 import {line3_compute_segment_closest_point_t} from '@woosh/meep-engine/src/core/geom/3d/line/line3_compute_segment_closest_point_t.js';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
-import {ROAD_PATHS} from './world-definition.mjs';
+import {ROAD_PATHS,WORLD_BOUNDS} from './world-definition.mjs';
+import {TERRAIN_GRID} from './terrain-data.mjs';
 import {DUNGEONS} from './dungeons.mjs';
 import {pathDistance} from './roads.mjs';
 
@@ -68,8 +69,9 @@ function sculptedHeightAt(x,z){
 /** One native sampler supplies physics and the vertex heights exported to Blender.
  * Meep UVs address texel centres (u * width - .5), not vertex-grid indices. */
 export function generateTerrain(){
-  const width=241,height=321,sampler=new Sampler2D(new Float32Array(width*height),1,width,height),vertices=new Float32Array(width*height);
-  for(let z=0;z<height;z++)for(let x=0;x<width;x++)sampler.data[z*width+x]=sculptedHeightAt((x+.5)/width*480-240,(z+.5)/height*640-480)+15;
+  const {cols:width,rows:height}=TERRAIN_GRID,{minX,minZ,width:spanX,depth:spanZ}=WORLD_BOUNDS;
+  const sampler=new Sampler2D(new Float32Array(width*height),1,width,height),vertices=new Float32Array(width*height);
+  for(let z=0;z<height;z++)for(let x=0;x<width;x++)sampler.data[z*width+x]=sculptedHeightAt((x+.5)/width*spanX+minX,(z+.5)/height*spanZ+minZ)+15;
   for(let z=0;z<height;z++)for(let x=0;x<width;x++)vertices[z*width+x]=sampler.sampleChannelCatmullRomUV(x/(width-1),z/(height-1),0)-15;
   return {sampler,vertices};
 }
