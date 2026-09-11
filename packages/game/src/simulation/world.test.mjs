@@ -9,10 +9,12 @@ import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {SpatialAtlas} from '../world/spatial-atlas.mjs';
 import {ARMOR,weaponDamage,reinforcementLimit} from '../content/equipment.mjs';
 import {BOSSES,ENEMIES,WEAPONS,enemyDamage} from '../content/catalog.mjs';
+import {castBossMove} from './boss-attacks.mjs';
 const worlds=[];
 async function setup(){const w=await new GameWorld().start({populate:false});worlds.push(w);return w;}
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
 const run=(w,n)=>{for(let i=0;i<n;i++)w.step();};
+const atHome=(x,z,o=1)=>[x,heightAt(x,z)+o,z];
 
 // A previous spelling of this call did not exist on PhysicsSystem, and the
 // optional invocation that guarded it silently skipped the whole optimisation.
@@ -224,10 +226,62 @@ test('sword damage cannot reach beyond the visible blade tip',async()=>{
   for(let i=0;i<16;i++){a.attackAge=.18+i/60;w.melee(a);}
   expect(b.hp).toBe(100);
 });
-test('boss resets only after the last living participant leaves or dies',async()=>{
-  const w=await setup(),a=w.addPlayer('one'),b=w.addPlayer('two');const boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:20,healthMax:420,active:true},[0,2,-48]);
-  w.teleport(a,[1,2,-45]);w.teleport(b,[2,2,-45]);a.hp=0;w.checkEncounters();expect(boss.hp).toBe(20);
-  b.hp=0;w.checkEncounters();expect(boss.hp).toBe(420);expect(boss.active).toBe(false);
+test('a co-op boss only returns after the final living participant leaves or dies, without teleporting',async()=>{
+  const w=await setup(),a=w.addPlayer('one'),b=w.addPlayer('two'),home=atHome(160,120,1.2675);
+  const boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:20,healthMax:100,active:true},atHome(166,120,1.2675));boss.home=home;
+  w.teleport(a,atHome(164,120));w.teleport(b,atHome(165,123));w.checkEncounters();expect(boss.returning).toBe(false);
+  w.teleport(a,atHome(194,120));w.checkEncounters();expect(boss.returning).toBe(false);
+  const before=[boss.x,boss.y,boss.z];b.hp=0;w.checkEncounters();
+  expect(boss.returning).toBe(true);expect(boss.active).toBe(true);expect(boss.hp).toBe(20);expect([boss.x,boss.y,boss.z]).toEqual(before);
+  w.step();expect(Math.hypot(boss.x-before[0],boss.z-before[2])).toBeLessThan(.2);expect(boss.hp).toBeGreaterThan(20);
+});
+
+test('a boss physically runs home and continues regenerating there until fully healed',async()=>{
+  const w=await setup(),home=atHome(160,120,1.2675);
+  const boss=w.spawnActor('warden',{boss:true,archetype:'warden',hp:10,healthMax:100,active:true},atHome(168,120,1.2675));boss.home=home;
+  w.checkEncounters();expect(boss.returning).toBe(true);
+  run(w,30);const distance=()=>Math.hypot(boss.x-home[0],boss.z-home[2]);
+  expect(distance()).toBeGreaterThan(1);expect(distance()).toBeLessThan(8);expect(boss.hp).toBeGreaterThan(10);expect(boss.hp).toBeLessThan(100);
+  let steps=30;while(distance()>=.65&&steps++<300)w.step();
+  expect(distance()).toBeLessThan(.65);expect(boss.returning).toBe(true);expect(boss.active).toBe(true);
+  const arrivalHp=boss.hp;run(w,60);expect(boss.hp).toBeGreaterThan(arrivalHp);expect(boss.returning).toBe(true);
+  while(boss.returning&&steps++<1400)w.step();
+  expect(boss.hp).toBe(100);expect(boss.returning).toBe(false);expect(boss.active).toBe(false);expect(distance()).toBeLessThan(.65);
+});
+
+test('re-entering the arena beyond initial detection range stops boss regeneration on the same frame',async()=>{
+  const w=await setup(),p=w.addPlayer('returning-player'),home=atHome(160,120,1.2675);
+  const boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:35,healthMax:100,active:true},atHome(156,120,1.2675));boss.home=home;
+  run(w,30);expect(boss.returning).toBe(true);const hp=boss.hp;
+  w.teleport(p,atHome(187,120));expect(Math.hypot(p.x-boss.x,p.z-boss.z)).toBeGreaterThan(23);
+  expect(Math.hypot(p.x-home[0],p.z-home[2])).toBeLessThan(29);
+  w.step();expect(boss.returning).toBe(false);expect(boss.hp).toBe(hp);expect(boss.targetId).toBe(p.id);
+  run(w,20);expect(boss.returning).toBe(false);expect(boss.hp).toBe(hp);expect(boss.active).toBe(true);
+});
+
+test('dead bosses do not regenerate and retain the twenty-minute unobserved respawn',async()=>{
+  const w=await setup(),home=atHome(160,120,1.2675);
+  const boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:0,healthMax:120,active:true,returning:true},atHome(168,120,1.2675));boss.home=home;
+  run(w,120);expect(boss.hp).toBe(0);expect(boss.deadTime).toBeCloseTo(2);
+  boss.deadTime=1199.95;w.step();expect(boss.hp).toBe(0);run(w,4);
+  expect(boss.hp).toBe(120);expect(boss.deadTime).toBe(0);expect(boss.returning).toBe(false);expect(boss.active).toBe(false);
+});
+
+test('snapshot restoration resumes boss return movement and healing without relocating the boss',async()=>{
+  const w=await setup(),home=atHome(160,120,1.2675);
+  const boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:30,healthMax:100,active:true},atHome(168,120,1.2675));boss.home=home;
+  run(w,30);expect(boss.returning).toBe(true);const hp=boss.hp,position=[boss.x,boss.y,boss.z];
+  const copy=await setup();copy.replaceSnapshot(w.snapshot());const restored=copy.actor('boss');
+  expect(restored.returning).toBe(true);expect(restored.active).toBe(true);expect(restored.hp).toBe(hp);expect([restored.x,restored.y,restored.z]).toEqual(position);
+  copy.step();expect(restored.hp).toBeGreaterThan(hp);expect(Math.hypot(restored.x-position[0],restored.z-position[2])).toBeLessThan(.2);
+  expect(Math.hypot(restored.x-home[0],restored.z-home[2])).toBeGreaterThan(1);
+});
+
+test('a boss cancels its cast and clears live hazards when beginning to return',async()=>{
+  const w=await setup(),boss=w.spawnActor('boss',{boss:true,archetype:'warden',hp:40,healthMax:100,active:true},atHome(160,120,1.2675));
+  castBossMove(w,boss,'judgment');expect(w.projectiles.size).toBeGreaterThan(0);expect(boss.attackAge).toBe(0);
+  w.checkEncounters();expect(boss.returning).toBe(true);expect(boss.attackAge).toBe(-1);expect(boss.windup).toBe(0);expect(w.projectiles.size).toBe(0);
+  run(w,120);expect(w.projectiles.size).toBe(0);
 });
 test('reconnect imports the character and replaces every world-owned state',async()=>{
   const local=await setup(),server=await setup();const p=local.addPlayer('player');p.embers=432;p.seals=['Dawn'];
@@ -252,6 +306,40 @@ test('a fast arrow connects with a visible actor over its swept travel',async()=
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);
   const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.attack(a);w.advanceAttack(a,.47);w.stepProjectiles(.2);expect(b.hp).toBeLessThan(100);expect(w.projectiles.size).toBe(0);
 });
+test.each(['bow','staff'])('%s follows camera pitch upward and downward without changing projectile speed',async weapon=>{
+  const w=await setup(),p=w.addPlayer('aiming',weapon==='bow'?'wayfarer':'ember');w.teleport(p,atHome(160,120,10));
+  for(const pitch of [-.5,.5]){
+    w.input(p.id,{x:0,z:0,yaw:0,pitch,buttons:0});w.attack(p);w.advanceAttack(p,WEAPONS[weapon].release);
+    const shot=w.snapshot().projectiles.at(-1);
+    expect(Math.sign(shot.velocity[1])).toBe(-Math.sign(pitch));expect(shot.velocity[2]).toBeLessThan(0);
+    expect(Math.hypot(...shot.velocity)).toBeCloseTo(WEAPONS[weapon].speed);
+  }
+});
+
+test.each([['bow',3],['bow',-3],['staff',3],['staff',-3]])('%s can hit a target at height offset %s using camera pitch',async(weapon,rise)=>{
+  const w=await setup(),p=w.addPlayer('aiming',weapon==='bow'?'wayfarer':'ember');w.teleport(p,atHome(160,120,10));
+  const victim=w.spawnActor('elevated-target',{hp:200,healthMax:200},[p.x+.8,p.y+rise,p.z-6]);
+  const pitch=-Math.atan2(victim.y-(p.y+.7),6);w.input(p.id,{x:0,z:0,yaw:0,pitch,buttons:0});
+  w.attack(p);w.advanceAttack(p,WEAPONS[weapon].release);expect(w.projectiles.size).toBe(1);
+  const saved=w.snapshot();w.replaceSnapshot(saved);expect(w.actor(p.id).intent.pitch).toBe(pitch);
+  for(let i=0;i<60&&w.projectiles.size;i++)w.stepProjectiles(1/60);
+  expect(w.projectiles.size).toBe(0);expect(200-w.actor(victim.id).hp).toBeCloseTo(weaponDamage(p));
+  expect(w.events.some(e=>e.type==='hit'&&e.id===victim.id)).toBe(true);
+});
+
+test('world input defaults invalid or omitted pitch to level aim and clamps finite values through snapshots',async()=>{
+  const w=await setup(),p=w.addPlayer('aiming');
+  for(const pitch of [undefined,NaN,Infinity,-Infinity,'invalid']){
+    w.input(p.id,{yaw:0,pitch});expect(p.intent.pitch).toBe(0);
+  }
+  w.input(p.id,{yaw:0,pitch:100});expect(p.intent.pitch).toBe(1.35);
+  w.input(p.id,{yaw:0,pitch:-100});expect(p.intent.pitch).toBe(-1.35);
+  for(const pitch of [-.4,.6]){
+    w.input(p.id,{yaw:.2,pitch});const saved=w.snapshot();w.input(p.id,{yaw:0});w.replaceSnapshot(saved);
+    expect(w.actor(p.id).intent.pitch).toBe(pitch);expect(w.actor(p.id).intent.yaw).toBe(.2);
+  }
+});
+
 test('nova damages nearby visible actors and excludes distant actors',async()=>{
   const w=await setup(),a=w.addPlayer('caster');w.teleport(a,[100,15,30]);
   const near=w.spawnActor('near',{hp:100},[102,15,30]),far=w.spawnActor('far',{hp:100},[110,15,30]);

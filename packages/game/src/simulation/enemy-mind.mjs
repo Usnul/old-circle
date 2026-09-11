@@ -13,6 +13,7 @@ import {castBossMove} from './boss-attacks.mjs';
 
 export const enemySeed=computeStringHash;
 const turn=(a,b,dt)=>a+clamp(Math.atan2(Math.sin(b-a),Math.cos(b-a)),-dt*2.6,dt*2.6);
+export const BOSS_ARENA_RADIUS=29;
 
 /** Meep behaviour tree, with replayable memory stored on the Actor component. */
 export class EnemyMind {
@@ -28,15 +29,15 @@ export class EnemyMind {
     const w=this.world,a=this.actor;let target=null,distance=Infinity;
     for(const id of w.actors.keys()){
       const p=w.actor(id);if(p.kind!=='player'||p.hp<=0)continue;
-      if(Math.hypot(p.x-a.home[0],p.z-a.home[2])>(a.boss?29:38))continue;
+      if(Math.hypot(p.x-a.home[0],p.z-a.home[2])>=(a.boss?BOSS_ARENA_RADIUS:38))continue;
       const dx=p.x-a.x,dz=p.z-a.z,d=Math.hypot(dx,p.y-a.y,dz),horizontal=Math.max(.01,Math.hypot(dx,dz));
       const hearing=(p.crouch?1.6:a.archetype==='hound'?10:Math.hypot(p.vx,p.vz)>4?9:4)*armorFor(p).noise;
       const facing=(-Math.sin(a.yaw)*dx-Math.cos(a.yaw)*dz)/horizontal;
       const detect=a.boss?23:p.crouch?7:19;
-      if(d<distance&&(a.boss||d<hearing||facing>.09)&&d<detect&&w.lineOfSight([a.x,a.y+.4,a.z],[p.x,p.y+.3,p.z],w.actors.get(a.id),w.actors.get(p.id))){target=p;distance=d;}
+      if(d<distance&&((a.boss&&a.active)||((a.boss||d<hearing||facing>.09)&&d<detect&&w.lineOfSight([a.x,a.y+.4,a.z],[p.x,p.y+.3,p.z],w.actors.get(a.id),w.actors.get(p.id))))){target=p;distance=d;}
     }
     if(target){a.targetId=target.id;a.memory=6;}
-    else if(a.memory>0){a.memory-=this.dt;const p=w.actor(a.targetId);if(p?.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<(a.boss?29:38)){target=p;distance=Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z);}}
+    else if(a.memory>0){a.memory-=this.dt;const p=w.actor(a.targetId);if(p?.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<(a.boss?BOSS_ARENA_RADIUS:38)){target=p;distance=Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z);}}
     this.target=target;this.distance=distance;return target!==null;
   }
   steer(goal,speed,dt){
@@ -57,6 +58,14 @@ export class EnemyMind {
   patrol(dt){
     const w=this.world,a=this.actor,seed=enemySeed(a.id),homeDistance=Math.hypot(a.x-a.home[0],a.z-a.home[2]);
     a.windup=0;
+    if(a.returning){
+      a.phase='return';
+      if(homeDistance<.65){
+        if(a.hp>=a.healthMax){a.returning=false;a.active=false;}
+        a.intent={x:0,z:0,yaw:a.yaw,buttons:0};
+      }else this.steer(a.home,1,dt);
+      return;
+    }
     if(homeDistance>(a.boss?8:14)){a.phase='return';this.steer(a.home,.7,dt);return;}
     if(a.patrolWaitUntil===undefined)a.patrolWaitUntil=w.tick+seed%180;
     if(w.tick<a.patrolWaitUntil){

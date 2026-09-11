@@ -32,6 +32,7 @@ app.innerHTML=`
 </section>
 <section class="screen loading" id="loading" hidden><div><div class="sigil"></div><div class="eyebrow">Old Circle</div><h2 id="loading-text">Loading world…</h2><div class="loading-bar"><div id="loading-progress"></div></div></div></section>
 <section class="hud" id="hud" hidden>
+ <div id="damage-feedback" class="damage-feedback" aria-hidden="true"></div><div id="aim-reticle" class="aim-reticle" aria-hidden="true" hidden></div>
  <div class="vitals"><div class="crest" aria-hidden="true">◌</div><div class="bars">${[['health','Health',''],['mana','Focus','mana'],['stamina','Stamina','stamina']].map(([id,label,style])=>`<div class="bar ${style}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="${id}"></span><small class="meter-value" id="${id}-value" aria-hidden="true"></small></div>`).join('')}</div></div>
  <div id="stamina-state" class="stamina-state" role="status"></div><div class="compass">${compassMarkup()}</div>
  <div class="world-status"><div class="mode" id="network-state">Solo journey</div><div id="daytime">Evening · The Waking Fields</div><div id="pvp-state">PvP off</div><p class="save-warning" data-save-warning role="status" hidden></p></div>
@@ -85,7 +86,7 @@ async function start(character){
     await view.start((text,p)=>{$('#loading-text').textContent=text;$('#loading-progress').style.width=`${p*100}%`;},character&&[character.x,character.y,character.z].every(Number.isFinite)?[character.x,character.y,character.z]:undefined);
     input=await new GameInput(view.engine,{
       action:name=>{if(!started||menu)return;if(['journal','map','escape'].includes(name)){name==='map'?map():journal();}else send({type:'equip',weapon:name});},
-      look:(x,y)=>{view.yaw-=x*.0025;view.pitch=clamp(view.pitch+y*.002,-.45,.95);},
+      look:(x,y)=>{view.yaw-=x*.0025;view.pitch=clamp(view.pitch+y*.002,-1.1,1.1);},
       captureChanged:locked=>{$('#capture-mouse').hidden=locked||menu||!started;},error:toast,inspect:inspecting
     }).start();
     $('#capture-mouse').onclick=()=>input.capture();
@@ -182,15 +183,18 @@ function frame(now){
   const dt=Math.min(.1,(now-previous)/1000);previous=now;
   if(view.streaming.error){toast('Part of the road could not load. Retrying…');console.warn(view.streaming.error);view.streaming.error=null;}
   if(started&&!menu){
-    input.update(dt);send({type:'input',intent:input.sample(view.yaw)});
+    input.update(dt);
   }
   const player=snapshot?.actors.find(a=>a.id===playerId),next=player&&Object.values(BOSSES).find(b=>!player.seals.includes(b.seal));
   if(started&&player&&completionPending&&player.hp>0&&player.attackAge<0)ending();
   if(player)updateCompass(view.yaw,player,next&&LANDMARKS.find(l=>l.id===next.landmark));
-  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}frameId=requestAnimationFrame(frame);
+  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);
+  if(started&&!menu)send({type:'input',intent:input.sample(view.yaw,view.aimPitch??view.pitch)});
+  if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}frameId=requestAnimationFrame(frame);
 }
 function updateHud(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
+  $('#aim-reticle').hidden=menu||p.hp<=0||!['bow','staff'].includes(p.weapon);
   if(menu)refreshJournal();
   $('#map-player')?.setAttribute('transform',`translate(${worldToMap(p.x,p.z).join(' ')})`);
   $('#stamina-state').textContent=p.sprintExhausted?'Recover stamina and release Shift to sprint again':'';
@@ -213,7 +217,7 @@ function updateHud(){
   const rest=restStatus(p,snapshot.actors),relic=nearbyRelic(p);$('#interact').hidden=!rest.hearth&&!relic;
   if(relic)$('#interact').innerHTML=`<kbd>E</kbd>Recover ${relic.name}`;else if(rest.hearth)$('#interact').innerHTML=rest.reason??`<kbd>E</kbd>Rest at ${rest.hearth.name}`;
   $('#death').hidden=p.hp>0;
-  const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;updateMeter('boss-health',boss.hp,boss.healthMax);$('#boss-move').textContent=boss.windup>0?BOSS_MOVES[boss.bossMove]?.name??'':bossEnraged(boss)?'Enraged':'';}
+  const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&(Math.hypot(a.x-p.x,a.z-p.z)<25||a.active&&Math.hypot(a.home[0]-p.x,a.home[2]-p.z)<40));$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;updateMeter('boss-health',boss.hp,boss.healthMax);$('#boss-move').textContent=boss.returning?'Returning · Regenerating':boss.windup>0?BOSS_MOVES[boss.bossMove]?.name??'':bossEnraged(boss)?'Enraged':'';}
 }
 function updateMeter(id,value,max){
   const fill=$(`#${id}`),meter=fill.parentElement,current=clamp(value,0,max);

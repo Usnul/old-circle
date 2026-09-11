@@ -80,13 +80,13 @@ export class GameInput {
     if(x||y)this.look(x*dt,y*dt);
   }
   pulse(action){if(this.enabled)this.pending.set(action,performance.now()+100);}
-  sample(yaw){
-    if(!this.enabled)return {x:0,z:0,yaw,buttons:0};
+  sample(yaw,pitch=0){
+    if(!this.enabled)return {x:0,z:0,yaw,pitch,buttons:0};
     const now=performance.now(),down=name=>this.map.isActive(name)||(this.pending.get(name)??0)>now;
     this.map.coordinate(this.axis,0,'move');const [side,forward]=this.axis;
     if(!this.map.isActive('attack'))this.suppressAttack=false;
     const attack=down('strike')||(this.activeLook&&!this.suppressAttack&&down('attack'));
-    return {x:-Math.sin(yaw)*forward+Math.cos(yaw)*side,z:-Math.cos(yaw)*forward-Math.sin(yaw)*side,yaw,
+    return {x:-Math.sin(yaw)*forward+Math.cos(yaw)*side,z:-Math.cos(yaw)*forward-Math.sin(yaw)*side,yaw,pitch,
       buttons:(down('sprint')?1:0)|(down('crouch')?2:0)|(down('jump')?4:0)|(attack?8:0)|(down('nova')?16:0)|(down('heal')?32:0)|(down('rest')?64:0)};
   }
 }

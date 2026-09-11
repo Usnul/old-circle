@@ -14,8 +14,9 @@ import { PhysicsSurfacePoint } from '@woosh/meep-engine/src/engine/physics/queri
 import { Actor, Projectile } from './components.mjs';
 import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
+import {rangedSightOrigin} from './aim.mjs';
 import {loadStaticScene} from '../world/static-scene-data.mjs';
-import {EnemyMind,enemySeed} from './enemy-mind.mjs';
+import {EnemyMind,enemySeed,BOSS_ARENA_RADIUS} from './enemy-mind.mjs';
 import { heightAt, landmarkPosition, REGIONS, SPAWN,WORLD_VERSION,WORLD_KILL_VOLUME,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
@@ -37,6 +38,7 @@ export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:
 const rotation=[0,0,0,1];
 const kill=WORLD_KILL_VOLUME;
 const q=[0,0,0,1];
+const BOSS_RETURN_REGEN_RATE=0.05;
 // Standing clearance is tested every tick that a body crouches or reaches for a
 // ledge; the query capsule is reused rather than rebuilt for each test.
 const standing=CapsuleShape3D.from(.32,1.05);
@@ -111,7 +113,7 @@ export class GameWorld {
     return a;
   }
   actor(id){const e=this.actors.get(id);return e===undefined?undefined:this.ecd.getComponent(e,Actor);}
-  input(id,intent){const a=this.actor(id);if(a)a.intent={x:clamp(Number(intent.x)||0,-1,1),z:clamp(Number(intent.z)||0,-1,1),yaw:Number(intent.yaw)||0,buttons:(intent.buttons|0)&127};}
+  input(id,intent){const a=this.actor(id);if(a)a.intent={x:clamp(Number(intent.x)||0,-1,1),z:clamp(Number(intent.z)||0,-1,1),yaw:Number.isFinite(Number(intent.yaw))?Number(intent.yaw):0,pitch:Number.isFinite(Number(intent.pitch))?clamp(Number(intent.pitch),-1.35,1.35):0,buttons:(intent.buttons|0)&127};}
   equip(id,weapon){const a=this.actor(id);if(a&&WEAPONS[weapon]&&a.attackAge<0&&(a.kind!=='player'||a.inventory.weapons.includes(weapon)))a.weapon=weapon;}
   equipArmor(id,armor){
     const a=this.actor(id);
@@ -135,6 +137,7 @@ export class GameWorld {
   step(dt=DT,{predictPlayer}={}){
     this.tick++;this.time=(this.time+dt/90)%24;this.events=[];
     const predicted=predictPlayer&&this.actor(predictPlayer);
+    if(!predicted)this.checkEncounters();
     if(!predicted){for(const b of this.predictionSleeping)this.physics.wake(b);this.predictionSleeping.clear();}
     for(const [id,e] of this.actors){
       const a=this.actor(id),t=this.ecd.getComponent(e,Transform64),b=this.ecd.getComponent(e,RigidBody);
@@ -148,11 +151,12 @@ export class GameWorld {
         a.deadTime+=dt;b.linearVelocity.fill(0);
         if(a.kind==='player'&&a.deadTime>4)this.respawn(a);
         if(a.kind==='enemy'&&a.deadTime>(a.boss?1200:180)&&![...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<30;})){
-          a.hp=a.healthMax;a.deadTime=0;a.active=false;a.attackAge=-1;a.windup=0;a.bossMove='';a.attackId=0;a.cooldown=1;a.memory=0;a.targetId=null;this.teleport(a,a.home);
+          a.hp=a.healthMax;a.deadTime=0;a.active=false;a.returning=false;a.attackAge=-1;a.windup=0;a.bossMove='';a.attackId=0;a.cooldown=1;a.memory=0;a.targetId=null;this.teleport(a,a.home);
         }
         continue;
       }
       a.hurtTime=Math.max(0,a.hurtTime-dt);a.cooldown=Math.max(0,a.cooldown-dt);
+      if(!predicted&&a.kind==='enemy'&&a.boss&&a.returning&&a.hp<a.healthMax)a.hp=Math.min(a.healthMax,a.hp+a.healthMax*BOSS_RETURN_REGEN_RATE*dt);
       this.syncActorCollider(a);
       a.animationTime+=dt;a.gaitPhase+=Math.hypot(a.vx,a.vz)*dt;
       if(a.landingAge>=0){a.landingAge+=dt;if(a.landingAge>.22)a.landingAge=-1;}
@@ -220,7 +224,7 @@ export class GameWorld {
       a.vx=b.linearVelocity[0];a.vy=b.linearVelocity[1];a.vz=b.linearVelocity[2];
       if(a.hp>0&&(a.y<kill.floor||a.x<kill.minX||a.x>kill.maxX||a.z<kill.minZ||a.z>kill.maxZ)){a.hp=0;a.deathTick=this.tick;a.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(a);this.event('death',a);}
     }
-    this.stepProjectiles(dt);this.checkEncounters();
+    this.stepProjectiles(dt);if(!predicted)this.checkEncounters();
   }
   think(a,dt){this.mind.tick(a,dt);}
   attack(a){
@@ -273,6 +277,7 @@ export class GameWorld {
     amount*=(1-(armor?.[type]??0))*(charmFor(v).received??1);impulse*=1-(armor?.poise??0);
     v.hp=Math.max(0,v.hp-amount);v.hurtTime=.35*(1-(armor?.poise??0));
     if(v.kind==='enemy'){v.targetId=a.id;v.memory=8;}
+    if(v.kind==='enemy'&&v.boss&&a.kind==='player'&&Math.hypot(a.x-v.home[0],a.z-v.home[2])<BOSS_ARENA_RADIUS)v.returning=false;
     const dx=v.x-a.x,dz=v.z-a.z,d=Math.max(.01,Math.hypot(dx,dz)),b=this.ecd.getComponent(this.actors.get(v.id),RigidBody);
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
     this.event('hit',v,{damage:Math.round(amount),source:a.id});
@@ -313,8 +318,18 @@ export class GameWorld {
   spawnProjectile(a,w){
     const t=new Transform64(),p=new Projectile(),e=this.ecd.createEntity();
     p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?weaponDamage(a):enemyDamage(a);
+    const origin=weaponPose(a).origin;
     p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
-    t.setTranslation(...weaponPose(a).origin);
+    if(a.kind==='player'){
+      const pitch=a.intent.pitch??0,direction=[-Math.sin(a.yaw)*Math.cos(pitch),-Math.sin(pitch),-Math.cos(a.yaw)*Math.cos(pitch)];
+      // The camera looks over the player's shoulder. Converge the weapon socket
+      // on that sight line's first obstruction so close targets match the reticle.
+      const eye=rangedSightOrigin(a);this.ray.set([...eye,...direction,80]);
+      const distance=this.physics.raycast(this.ray,this.hit,id=>id!==this.actors.get(a.id))?this.hit.t:80;
+      const delta=eye.map((v,i)=>v+direction[i]*Math.max(.5,distance)-origin[i]),length=Math.hypot(...delta);
+      p.velocity=delta.map(v=>v/length*w.speed);
+    }
+    t.setTranslation(...origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);
     return {p,t,e};
   }
@@ -371,8 +386,20 @@ export class GameWorld {
   checkEncounters(){
     for(const id of this.actors.keys()){
       const a=this.actor(id);if(!a.boss||!a.active||a.hp<=0)continue;
-      const alive=[...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<29;});
-      if(!alive){a.hp=a.healthMax;a.active=false;a.attackAge=-1;a.windup=0;a.cooldown=1;a.bossMove='';a.attackId=0;a.memory=0;a.targetId=null;a.path=null;clearBossHazards(this,a.id);this.teleport(a,a.home);}
+      const alive=[...this.actors.keys()].some(pid=>{const p=this.actor(pid);return p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<BOSS_ARENA_RADIUS;});
+      if(!alive&&!a.returning){
+        a.returning=true;
+        a.phase='return';
+        a.attackAge=-1;
+        a.windup=0;
+        a.memory=0;
+        a.path=null;
+        a.patrolGoal=null;
+        a.targetId=null;
+        a.attackKind='';
+        clearBossHazards(this,a.id);
+      }
+      if(alive&&a.returning){a.returning=false;a.path=null;}
     }
   }
   exportCharacter(id){

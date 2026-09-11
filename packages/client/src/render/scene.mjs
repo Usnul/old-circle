@@ -45,6 +45,8 @@ import {loadScenery,attachScenery} from './scenery-data.mjs';
 import {GeometryCache} from './geometry-cache.mjs';
 import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
 import {CombatTrails} from './combat-trails.mjs';
+import {CombatFeedback} from './combat-feedback.mjs';
+import {rangedSightOrigin} from '@old-circle/game/simulation/aim.mjs';
 
 const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59],skin:[.34,.22,.15],lining:[.018,.022,.02]};
 const quat=new Quaternion();
@@ -137,6 +139,7 @@ export class WorldView {
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
     this.combatTrails=new CombatTrails(this);
+    this.combatFeedback=new CombatFeedback(this,document.querySelector('#damage-feedback'));
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.ambient=new WorldAmbient(this);
@@ -209,13 +212,14 @@ export class WorldView {
     }
     for(const [key,rig] of this.corpses)if(!dead.has(key)){this.characterRenderer.remove(rig);this.corpses.delete(key);}
     for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
-    const liveProjectiles=new Set();for(const p of snapshot.projectiles){if(isBossHazard(p))continue;const key=p.key??p.id;liveProjectiles.add(key);let m=this.missiles.get(key);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell',[0,0,0],[1,1,1],0,p.effect==='cinder'?this.materials.ember:null);this.missiles.set(key,m);}const v=p.velocity;this.pose(m,p.position,p.effect==='cinder'?1.7:1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
+    const liveProjectiles=new Set();for(const p of snapshot.projectiles){if(isBossHazard(p))continue;const key=p.key??p.id;liveProjectiles.add(key);let m=this.missiles.get(key);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell',[0,0,0],[1,1,1],0,p.effect==='cinder'?this.materials.ember:null);this.missiles.set(key,m);}const v=p.velocity;this.pose(m,p.position,p.effect==='cinder'?1.7:1,Math.atan2(-v[0],-v[2]),-Math.PI/2+Math.atan2(v[1],Math.hypot(v[0],v[2])));}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
+    this.combatFeedback.update(snapshot,presented,playerId,dt);
     const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
       this.streaming.update(player,dt);
-      const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
+      const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);
       this.wantedCamera=[...wanted];this.cameraTarget=target;
@@ -223,7 +227,9 @@ export class WorldView {
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
       const playerRig=this.characters.get(playerId);if(playerRig)this.characterRenderer.viewAlpha(playerRig,(this.cameraDistance-1)/1.2);
-      this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
+      this.aimPitch=Math.atan2(this.cameraPosition[1]-target[1],Math.hypot(this.cameraPosition[0]-target[0],this.cameraPosition[2]-target[2]));
+      const kick=this.combatFeedback.cameraKick(),look=target.map((v,i)=>v-this.cameraPosition[i]);look[1]+=Math.hypot(...look)*kick.pitch;
+      this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...look,Math.cos(this.yaw)*Math.sin(kick.roll),Math.cos(kick.roll),-Math.sin(this.yaw)*Math.sin(kick.roll));this.cameraTransform.updateMatrix();
       this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
       this.ambient.update(player,snapshot.time,dt);
       this.banners.update(dt,player);

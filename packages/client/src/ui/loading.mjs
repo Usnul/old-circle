@@ -1,8 +1,15 @@
 export class LoadingScreen {
   constructor(element){this.element=element;this.cancelReveal=null;}
-  show(){this.cancelReveal?.();this.element.hidden=false;}
+  show(resetProgress=true){
+    this.cancelReveal?.();
+    if(resetProgress){
+      const progress=this.element.querySelector('#loading-progress');
+      if(progress)progress.style.width='0%';
+    }
+    this.element.hidden=false;
+  }
   reveal(engine){
-    this.show();
+    this.show(false);
     return new Promise((resolve,reject)=>{
       const {postRender,contextLost,contextFailed}=engine.graphics.on;
       let frames=0,animation=null,finished=false;

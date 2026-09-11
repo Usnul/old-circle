@@ -7,6 +7,7 @@ export class Actor {
   inventory={weapons:['sword'],arrows:30,armor:'mail',armors:['mail'],reinforcements:{sword:0}};
   yaw=0;cooldown=0;attackAge=-1;attackId=0;hitIds=[];hurtTime=0;deadTime=0;grounded=false;crouch=false;
   phase='idle';home=[0,0,0];boss=false;bossMove='';hazardSequence=0;active=false;windup=0;attackKind='';lastButtons=0;
+  returning=false;
   mantle=null;checkpoint=[0,0,24];checkpointId='hearth';hearths=['hearth'];intent={x:0,z:0,yaw:0,buttons:0};
   x=0;y=0;z=0;vx=0;vy=0;vz=0;
   animationTime=0;gaitPhase=0;projectileReleased=false;

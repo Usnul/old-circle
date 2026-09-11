@@ -47,6 +47,15 @@ test('suspended gameplay ignores menu shortcuts and action pulses',()=>withInput
   input.suspend(false);keyboard.keys.m.press();keyboard.keys.m.release();expect(action).toHaveBeenCalledWith('map');
 }));
 
+test('samples carry signed camera pitch with movement, default to level aim, and retain aim while suspended',()=>withInput(({input,keyboard})=>{
+  keyboard.keys.w.press();
+  const level=input.sample(0);expect(level.pitch).toBe(0);expect(level.z).toBe(-1);
+  for(const pitch of [-.45,.4])expect(input.sample(0,pitch)).toEqual({...level,pitch});
+  input.suspend(true);
+  expect(input.sample(-.2,.4)).toEqual({x:0,z:0,yaw:-.2,pitch:.4,buttons:0});
+  expect(input.sample(-.2).pitch).toBe(0);
+}));
+
 test('pointer lock denial falls back to free-look capture mode',async()=>withInput(async({input,element})=>{
   const error=vi.fn(),captureChanged=vi.fn();input.captureChanged=captureChanged;input.error=error;
   let reject;

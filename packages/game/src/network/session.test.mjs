@@ -1,6 +1,6 @@
 import {expect,test,vi} from 'vitest';
 import {LoopbackTransport} from '@woosh/meep-engine/src/engine/network/transport/LoopbackTransport.js';
-import {SharedSession} from './session.mjs';
+import {CharacterFrame,SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {armorIds} from '../content/equipment.mjs';
@@ -175,3 +175,24 @@ test('disconnecting prediction preserves the running local physics world for off
     expect(world.physics).toBe(physics);expect(world.tick).toBe(tick+60);expect(p.z).toBeGreaterThan(z+2);
   }finally{await world.stop();}
 });
+
+test('pitch crosses loopback into authoritative and predicted aim and defaults to zero when omitted',async()=>{
+  const sim=await new GameWorld().start({populate:false,navigation:false});
+  const host=await new SharedSession('host',0,{simulation:sim}).start(),client=await new SharedSession('client',1).start();
+  try{
+    const id='network-player';client.localNetworkId=host.addPlayer(1,id,'pilgrim');
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
+    const hostCharacter=()=>host.ecd.getComponent(host.characters.get(id),CharacterFrame);
+    expect(hostCharacter().intent.pitch).toBe(0);expect(host.sim.actor(id).intent.pitch).toBe(0);
+    for(const pitch of [.45,-.33,undefined]){
+      client.localInput={...client.localInput,yaw:.05,pitch};if(pitch===undefined)delete client.localInput.pitch;
+      frames(12);
+      expect(hostCharacter().intent.pitch).toBeCloseTo(pitch??0);
+      expect(host.sim.actor(id).intent.pitch).toBeCloseTo(pitch??0);
+      expect(client.localCharacter().intent.pitch).toBeCloseTo(pitch??0);
+      expect(client.localCharacter().actor.intent.pitch).toBeCloseTo(pitch??0);
+    }
+    expect(client.failure).toBeUndefined();
+  }finally{await client.stop();await host.stop();await sim.stop();}
+},30000);

@@ -13,17 +13,17 @@ import {armorIds} from '../content/equipment.mjs';
 import {charmIds} from '../content/charms.mjs';
 import {projectWorld,scopeInitialSnapshots} from './interest.mjs';
 
-// World 6 rebakes terrain and scenery; older clients cannot predict its collision.
-export const PROTOCOL_VERSION=9,NET_DT=1/30;
+// Camera pitch is part of ranged input; older clients use a different action layout.
+export const PROTOCOL_VERSION=10,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';recipient=0;snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;charm=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const InputAction=SimAction.extend({
-  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32',armor:'uint8',upgradeWeapon:'uint8',charm:'uint8'},
+  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32',armor:'uint8',upgradeWeapon:'uint8',charm:'uint8',pitch:'float32'},
   affects(executor){const e=executor.slot_table.entity_for(this.network_id);return e<0?[]:[[e,CharacterFrame]];},
   apply(world,executor){
     const e=executor.slot_table.entity_for(this.network_id);if(e<0)return;const c=world.getComponent(e,CharacterFrame);if(!c)return;
-    c.intent={x:this.x,z:this.z,yaw:this.yaw,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;c.armor=this.armor;c.upgradeWeapon=this.upgradeWeapon;c.charm=this.charm;
+    c.intent={x:this.x,z:this.z,yaw:this.yaw,pitch:this.pitch,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;c.armor=this.armor;c.upgradeWeapon=this.upgradeWeapon;c.charm=this.charm;
     if(world.oldCircle.role==='client')world.oldCircle.predict(c);
   },
 });
@@ -89,7 +89,7 @@ export class SharedSession {
     this.net.replicate(WorldFrame);this.net.replicate(CharacterFrame);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);this.net.defineAction(WorldPatchAction);
     if(this.role==='client')this.net.defineInputSampler(()=>{
       if(!this.localNetworkId||!this.localCharacter()?.actor)return [];
-      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence,i.armor??0,i.upgradeWeapon??0,i.charm??0)];
+      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence,i.armor??0,i.upgradeWeapon??0,i.charm??0,i.pitch??0)];
     });
     await this.net.start();
     if(this.role==='client')this.net.peer.onMalformedPacket.add((_peer,error)=>{this.failure=error;});

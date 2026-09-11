@@ -50,7 +50,7 @@ test('boss defeat clears casts immediately and the encounter stays active while 
   p.hp=0;w.checkEncounters();expect(b.hp).toBe(40);expect(w.projectiles.size).toBe(5);
   const joined=w.snapshot(),copy=await new GameWorld().start({populate:false,navigation:false});worlds.push(copy);copy.replaceSnapshot(joined);
   expect(copy.snapshot().projectiles.map(p=>p.key)).toEqual(joined.projectiles.map(p=>p.key));
-  late.hp=0;w.checkEncounters();expect(b.hp).toBe(b.healthMax);expect(w.projectiles.size).toBe(0);expect(b.attackId).toBe(0);
+  late.hp=0;w.checkEncounters();expect(b.returning).toBe(true);expect(b.hp).toBe(40);expect(w.projectiles.size).toBe(0);expect(b.attackId).toBeGreaterThan(0);
   late.hp=late.healthMax;w.syncActorCollider(late);castBossMove(w,b,'cinders');expect(w.projectiles.size).toBeGreaterThan(0);
   w.damage(late,b,10000,0);expect(w.projectiles.size).toBe(0);
 });

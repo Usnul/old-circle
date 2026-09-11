@@ -48,6 +48,78 @@
     "steps": 8
   },
   {
+    "file": "impact.wav",
+    "duration": 0.3492063492063492,
+    "prompt": "Procedural combat-impact cue with a low descending thump and short burst of filtered noise, mono-to-stereo duplicated, no music.",
+    "seed": 9040,
+    "model": "Node.js procedural synthesis (no AI model)",
+    "steps": 1,
+    "postprocess": {
+      "highPassHz": 40,
+      "highPassFilter": "one-pole DC blocker, coefficient exp(-2*pi*cutoff/sampleRate)",
+      "attackFadeMs": 3,
+      "tailFadeMs": 45,
+      "fadeCurve": "squared sine attack and squared cosine tail",
+      "peakDbFS": -4.0,
+      "sampleRate": 44100,
+      "encoding": "stereo signed 16-bit PCM; identical channels"
+    }
+  },
+  {
+    "file": "hurt.wav",
+    "duration": 0.5487528344671202,
+    "prompt": "Procedural nonverbal hurt cue with low growl and breathy grit, no music.",
+    "seed": 9041,
+    "model": "Node.js procedural synthesis (no AI model)",
+    "steps": 1,
+    "postprocess": {
+      "highPassHz": 60,
+      "highPassFilter": "one-pole DC blocker, coefficient exp(-2*pi*cutoff/sampleRate)",
+      "attackFadeMs": 6,
+      "tailFadeMs": 45,
+      "fadeCurve": "squared sine attack and squared cosine tail",
+      "peakDbFS": -6.0,
+      "sampleRate": 44100,
+      "encoding": "stereo signed 16-bit PCM; identical channels"
+    }
+  },
+  {
+    "file": "effort.wav",
+    "duration": 0.4988662131519274,
+    "prompt": "Procedural exertion cue for close combat effort, low formant-like pulse with short noise texture, no music.",
+    "seed": 9042,
+    "model": "Node.js procedural synthesis (no AI model)",
+    "steps": 1,
+    "postprocess": {
+      "highPassHz": 60,
+      "highPassFilter": "one-pole DC blocker, coefficient exp(-2*pi*cutoff/sampleRate)",
+      "attackFadeMs": 6,
+      "tailFadeMs": 45,
+      "fadeCurve": "squared sine attack and squared cosine tail",
+      "peakDbFS": -7.0,
+      "sampleRate": 44100,
+      "encoding": "stereo signed 16-bit PCM; identical channels"
+    }
+  },
+  {
+    "file": "potion.wav",
+    "duration": 0.5986394557823129,
+    "prompt": "Procedural healing potion cue with bright tonal chime and soft bubbling accents, no music.",
+    "seed": 9043,
+    "model": "Node.js procedural synthesis (no AI model)",
+    "steps": 1,
+    "postprocess": {
+      "highPassHz": 40,
+      "highPassFilter": "one-pole DC blocker, coefficient exp(-2*pi*cutoff/sampleRate)",
+      "attackFadeMs": 4,
+      "tailFadeMs": 65,
+      "fadeCurve": "squared sine attack and squared cosine tail",
+      "peakDbFS": -7.0,
+      "sampleRate": 44100,
+      "encoding": "stereo signed 16-bit PCM; identical channels"
+    }
+  },
+  {
     "file": "step-grass-0.wav",
     "duration": 0.55,
     "prompt": "Exactly one single leather boot footstep landing on soft damp meadow grass, a padded thud and blades brushing. Isolated close foley impact, silence before and after. No walking sequence, no second step, no music, no voices.",
