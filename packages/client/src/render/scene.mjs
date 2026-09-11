@@ -56,7 +56,7 @@ export class WorldView {
     this.engine.entityManager.getSystem(CameraSystem).update(0);
   }
   async start(progress=()=>{},position=[0,heightAt(0,23)+1,23]){
-    progress('Kindling the light…',.1);
+    progress('Loading game…',.1);
     this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
       engine.renderingEnabled=false;
@@ -128,8 +128,8 @@ export class WorldView {
     core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
     await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
     const layout=buildLayout();this.streaming=new WorldStream(this,layout,this.modelStore);
-    await this.streaming.start(position,p=>progress('Remembering the old road…',.15+p*.5));
-    await this.geometryCache.warm(p=>progress('Remembering the distant paths…',.65+p*.18));
+    await this.streaming.start(position,p=>progress('Loading nearby terrain…',.15+p*.5));
+    await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
     this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundMeshes);
     this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
@@ -147,8 +147,8 @@ export class WorldView {
       const low=new ParticipatingMedia();low.target_extinction=strength;low.fade_distance=7;
       const lt=new Transform64();lt.setTranslation(x,heightAt(x,z)+2,z);lt.setScale(w,9,d);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
     }
-    progress('Remembering the daylight…',.96);await this.sky.prepare();
-    progress('The circle opens.',1);return this;
+    progress('Loading sky…',.96);await this.sky.prepare();
+    progress('Ready',1);return this;
   }
   model(name,position=[0,0,0],scale=[1,1,1],yaw=0,material=null,up=null){
     const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
