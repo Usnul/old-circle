@@ -13,7 +13,8 @@ import {armorIds} from '../content/equipment.mjs';
 import {charmIds} from '../content/charms.mjs';
 import {projectWorld,scopeInitialSnapshots} from './interest.mjs';
 
-export const PROTOCOL_VERSION=8,NET_DT=1/30;
+// World 6 rebakes terrain and scenery; older clients cannot predict its collision.
+export const PROTOCOL_VERSION=9,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';recipient=0;snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;charm=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];

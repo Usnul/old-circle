@@ -7,11 +7,12 @@ import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleS
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {Quaternion} from '@woosh/meep-engine/src/core/geom/Quaternion.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {GameWorld,DT} from './world.mjs';
 import {actorJointPoses,actorRig,actorScale,rigs} from './animation.mjs';
 
 const quaternion=values=>{const q=new Quaternion();q.set(...values);return q;};
-const inverse=q=>quaternion([-q[0],-q[1],-q[2],q[3]]);
+const inverse=q=>quaternion(q).conjugate();
 const rotated=(p,q)=>new Vector3(...p).applyQuaternion(quaternion(q));
 const point=(origin,q,p)=>rotated(p,q).add(new Vector3(...origin));
 const localPoint=(p,origin,q)=>new Vector3(...p).sub(new Vector3(...origin)).applyQuaternion(inverse(q));
@@ -40,7 +41,7 @@ export class Ragdolls {
     const key=`${a.id}:${a.deathTick??0}`;if(this.seenDeaths.get(a.id)===key)return;this.seenDeaths.set(a.id,key);
     const active=[...this.records.values()].filter(r=>r.active);if(active.length>=this.maxActive)this.freeze(active[0]);
     const name=actorRig(a),data=rigs[name],scale=actorScale(a),pose=actorJointPoses({...a,hurtTime:0}),bodies=new Map(),constraints=[];
-    const velocity=(a.deathVelocity??[a.vx,a.vy,a.vz]).map(v=>Math.max(-8,Math.min(8,v||0)));
+    const velocity=(a.deathVelocity??[a.vx,a.vy,a.vz]).map(v=>clamp(v||0,-8,8));
     const locals=pose.map((p,i)=>{
       const parent=data.bones[i].parent;if(parent<0)return null;const q=pose[parent];
       return {position:Array.from(localPoint(p.position,q.position,q.rotation)),rotation:Array.from(product(inverse(q.rotation),p.rotation))};

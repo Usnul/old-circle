@@ -1,4 +1,8 @@
-const equal=(a,b)=>a===b||(typeof a==='object'&&typeof b==='object'&&JSON.stringify(a)===JSON.stringify(b));
+import {objectDeepEquals} from '@woosh/meep-engine/src/core/model/object/objectDeepEquals.js';
+
+// Meep's object-first comparison accepts array-shaped records; wire arrays and
+// records are distinct, so preserve that distinction at every nested level.
+const equal=(a,b)=>Array.isArray(a)===Array.isArray(b)&&objectDeepEquals(a,b,equal);
 
 function recordChanges(before,after){
   const old=new Map(before.map(a=>[a.id,a])),changes=[];

@@ -2,24 +2,28 @@ import { NavigationMesh } from '@woosh/meep-engine/src/engine/navigation/mesh/Na
 import { bt_mesh_from_indexed_geometry } from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/io/bt_mesh_from_indexed_geometry.js';
 import { bt_mesh_build_face_bvh } from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/query/bt_mesh_build_face_bvh.js';
 import { CapsuleShape3D } from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
+import {sh3_basis_at} from '@woosh/meep-engine/src/core/geom/3d/sphere/harmonics/sh3_basis_at.js';
+import {line2_compute_segment_point_distance_sqr} from '@woosh/meep-engine/src/core/geom/2d/line/line2_compute_segment_point_distance_sqr.js';
+import {line3_compute_segment_point_distance} from '@woosh/meep-engine/src/core/geom/3d/line/line3_compute_segment_point_distance.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {Actor} from '../simulation/components.mjs';
 import { heightAt,LANDMARKS,ROAD_PATHS,landmarkPosition,pathDistance } from './regions.mjs';
 import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 
 // Real SH, order 2 (three bands / nine coefficients), Y up. Coefficients encode
 // a directional distribution, not just an average which would cancel two-way traffic.
-export function sh9([x,y,z]){return [.2820947918,.4886025119*z,.4886025119*y,.4886025119*x,1.0925484306*x*z,1.0925484306*y*z,.3153915653*(3*y*y-1),1.0925484306*x*y,.5462742153*(x*x-z*z)];}
+// Meep's native basis uses Z up, so exchange the vertical and north axes.
+export function sh9([x,y,z]){const result=new Array(9);sh3_basis_at(x,z,y,result);return result;}
 export function travelSample(position){
   const coefficients=new Array(9).fill(0);let occupancy=0;
   for(const road of ROAD_PATHS){
     let closest=null,best=Infinity;
     for(let i=1;i<road.points.length;i++){
-      const p=road.points[i-1],q=road.points[i],dx=q[0]-p[0],dz=q[1]-p[1],t=Math.max(0,Math.min(1,((position[0]-p[0])*dx+(position[2]-p[1])*dz)/(dx*dx+dz*dz)));
-      const distance=Math.hypot(position[0]-p[0]-dx*t,position[2]-p[1]-dz*t);if(distance<best){best=distance;closest=[p,q];}
+      const p=road.points[i-1],q=road.points[i],distance=line2_compute_segment_point_distance_sqr(...p,...q,position[0],position[2]);
+      if(distance<best){best=distance;closest=[p,q];}
     }
     const [start,end]=closest.map(([x,z])=>[x,heightAt(x,z),z]),d=end.map((v,i)=>v-start[i]),length=Math.hypot(...d);
-    const t=Math.max(0,Math.min(1,position.reduce((sum,v,i)=>sum+(v-start[i])*d[i],0)/(length*length)));
-    const distance=Math.hypot(...position.map((v,i)=>v-start[i]-d[i]*t));
+    const distance=line3_compute_segment_point_distance(...start,...end,...position);
     const weight=Math.exp(-distance*distance/32);occupancy+=weight;
     const forward=sh9(d.map(v=>v/length)),backward=sh9(d.map(v=>-v/length));
     for(let i=0;i<9;i++)coefficients[i]+=weight*(forward[i]*.7+backward[i]*.3);
@@ -68,8 +72,8 @@ export class SpatialAtlas {
     const output=[],count=this.nav.find_path(output,...from,...to),points=[];
     for(let i=0;i<count;i++)points.push(output.slice(i*3,i*3+3));
     if(!count)return {reachable:false,reason:'No connected walkable surface',points:[]};
-    if(Math.hypot(...points[0].map((v,i)=>v-from[i]))>this.spacing*1.5||Math.hypot(...points.at(-1).map((v,i)=>v-to[i]))>this.spacing*1.5)return {reachable:false,reason:'Endpoint outside sampled walkable surface',points};
-    return {reachable:true,points,length:points.slice(1).reduce((sum,p,i)=>sum+Math.hypot(...p.map((v,j)=>v-points[i][j])),0),resolution:this.spacing};
+    if(v3_distance(...points[0],...from)>this.spacing*1.5||v3_distance(...points.at(-1),...to)>this.spacing*1.5)return {reachable:false,reason:'Endpoint outside sampled walkable surface',points};
+    return {reachable:true,points,length:points.slice(1).reduce((sum,p,i)=>sum+v3_distance(...p,...points[i]),0),resolution:this.spacing};
   }
   visibility(from,to,{eyeHeight=1.65,targetHeight=4,samples=9}={}){
     let visible=0;const rays=[];

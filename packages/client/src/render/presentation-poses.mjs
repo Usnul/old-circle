@@ -5,6 +5,8 @@ import { Transform64 } from '@woosh/meep-engine/src/engine/ecs/transform/Transfo
 import { BinaryBuffer } from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {RenderPlayout} from '@woosh/meep-engine/src/engine/network/time/RenderPlayout.js';
 import {AdaptiveRenderDelay} from '@woosh/meep-engine/src/engine/network/time/AdaptiveRenderDelay.js';
+import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
+import {lerp} from '@woosh/meep-engine/src/core/math/lerp.js';
 
 /** One Meep pose timeline drives bodies, weapons and the camera together. */
 export class PresentationPoses {
@@ -38,7 +40,7 @@ export class PresentationPoses {
     if(fixed){this.playout.window(time*1000);target=this.playout.playhead;}
     const stamp=f=>fixed?f.sourceFrame:f.time;let first=this.frames[0],second=first;
     for(const f of this.frames){second=f;if(stamp(f)>=target)break;first=f;}
-    const alpha=first===second?0:Math.max(0,Math.min(1,(target-stamp(first))/(stamp(second)-stamp(first))));
+    const alpha=first===second?0:clamp01((target-stamp(first))/(stamp(second)-stamp(first)));
     return {first,second,alpha};
   }
   pose(key,{first,second,alpha}){
@@ -64,12 +66,12 @@ export class PresentationPoses {
     if(a&&b){
       const state=alpha<1?a:b;
       for(const key of ['grounded','crouch','airTime','landingAge','landingStrength'])result[key]=state[key];
-      for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=a[key]+(b[key]-a[key])*alpha;
-      if(!a.grounded&&!b.grounded&&Number.isFinite(a.airTime)&&Number.isFinite(b.airTime))result.airTime=a.airTime+(b.airTime-a.airTime)*alpha;
-      if(a.landingAge>=0&&b.landingAge>=a.landingAge)result.landingAge=a.landingAge+(b.landingAge-a.landingAge)*alpha;
+      for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=lerp(a[key],b[key],alpha);
+      if(!a.grounded&&!b.grounded&&Number.isFinite(a.airTime)&&Number.isFinite(b.airTime))result.airTime=lerp(a.airTime,b.airTime,alpha);
+      if(a.landingAge>=0&&b.landingAge>=a.landingAge)result.landingAge=lerp(a.landingAge,b.landingAge,alpha);
       for(const key of ['attackKind','bossMove','attackId','attackAge','windup'])result[key]=state[key];
-      if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=a.attackAge+(b.attackAge-a.attackAge)*alpha;
-      if(a.bossMove===b.bossMove&&a.windup>0&&b.windup>0)result.windup=a.windup+(b.windup-a.windup)*alpha;
+      if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=lerp(a.attackAge,b.attackAge,alpha);
+      if(a.bossMove===b.bossMove&&a.windup>0&&b.windup>0)result.windup=lerp(a.windup,b.windup,alpha);
     }
     return result;
   }

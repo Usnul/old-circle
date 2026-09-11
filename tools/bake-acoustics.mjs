@@ -10,7 +10,7 @@ import {seededRandom} from '../packages/game/node_modules/@woosh/meep-engine/src
 // Place at playable listener heights: a volumetric world-hull grid would spend
 // most of its budget inside mountains or above their summits. Meep traces and
 // serializes every probe; acoustic pathing/visibility graphs are not baked.
-const {simulator,bodies}=createWorldAcoustics(),index=simulator.occluderIndex,field=new AcousticProbeField(),positions=new Set();
+const {simulator,bodies}=await createWorldAcoustics(),index=simulator.occluderIndex,field=new AcousticProbeField(),positions=new Set();
 const add=(x,y,z)=>{
   const key=[x,y,z].map(v=>Math.round(v*2)).join(':');if(positions.has(key)||index.signedDistanceAt(x,y,z,.35)<.2)return;
   positions.add(key);field.setProbePosition(field.size,x,y,z);

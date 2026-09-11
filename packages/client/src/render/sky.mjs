@@ -4,13 +4,15 @@ import {make_sky_hosek} from '@woosh/meep-engine/src/engine/graphics/sh3/path_tr
 import {octahedral_uv_to_direction} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_uv_to_direction.js';
 import {ShadeImage} from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
 import {ShadeTexture} from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
+import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
+import {lerp} from '@woosh/meep-engine/src/core/math/lerp.js';
+import {euclidean_modulo} from '@woosh/meep-engine/src/core/math/euclidean_modulo.js';
 
-const smooth=v=>{v=Math.max(0,Math.min(1,v));return v*v*(3-2*v);};
 const nightFill=[.10,.16,.24];
 function celestial(hour){
   const angle=(hour-6)/24*Math.PI*2,elevation=Math.sin(angle),day=Math.max(0,elevation),night=Math.max(0,-elevation),side=elevation>=0?1:-1;
-  const warm=smooth((elevation+.1)/.2),moon=[.40,.57,.86],sun=[1,.66+day*.23,.36+day*.41];
-  return {day,night,nightBlend:smooth((.18-elevation)/.36),direction:[Math.cos(angle)*side,Math.max(.06,Math.abs(elevation)),.35*side],color:moon.map((v,i)=>v+(sun[i]-v)*warm),intensity:(.12+day*3.6+night*.72)*smooth(Math.abs(elevation)/.08)};
+  const warm=smoothStep(0,1,(elevation+.1)/.2),moon=[.40,.57,.86],sun=[1,.66+day*.23,.36+day*.41];
+  return {day,night,nightBlend:smoothStep(0,1,(.18-elevation)/.36),direction:[Math.cos(angle)*side,Math.max(.06,Math.abs(elevation)),.35*side],color:moon.map((v,i)=>lerp(v,sun[i],warm)),intensity:(.12+day*3.6+night*.72)*smoothStep(0,1,Math.abs(elevation)/.08)};
 }
 
 /** Meep's Hosek atmosphere supplies the HDR background and environment light.
@@ -23,7 +25,7 @@ export class WorldSky {
     for(let level=0;level<64;level++){this.texture(level);if(level%4===3)await new Promise(resolve=>setTimeout(resolve,0));}
   }
   update(scene,hour){
-    const light=celestial(hour),level=((Math.round(hour/24*64)%64)+64)%64;
+    const light=celestial(hour),level=euclidean_modulo(Math.round(hour/24*64),64);
     if(level===this.last)return light;this.last=level;
     scene.lights.environment=this.texture(level);return light;
   }

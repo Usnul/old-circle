@@ -1,4 +1,4 @@
-import './ui/style.scss';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import { ORIGINS,WEAPONS,BOSSES,levelCost } from '@old-circle/game/content/catalog.mjs';
 import { LANDMARKS,HEARTHS,regionAt,heightAt } from '@old-circle/game/world/regions.mjs';
 import {restStatus} from '@old-circle/game/simulation/resting.mjs';
@@ -85,13 +85,19 @@ async function start(character){
     await view.start((text,p)=>{$('#loading-text').textContent=text;$('#loading-progress').style.width=`${p*100}%`;},character&&[character.x,character.y,character.z].every(Number.isFinite)?[character.x,character.y,character.z]:undefined);
     input=await new GameInput(view.engine,{
       action:name=>{if(!started||menu)return;if(['journal','map','escape'].includes(name)){name==='map'?map():journal();}else send({type:'equip',weapon:name});},
-      look:(x,y)=>{view.yaw-=x*.0025;view.pitch=Math.max(-.45,Math.min(.95,view.pitch+y*.002));},
+      look:(x,y)=>{view.yaw-=x*.0025;view.pitch=clamp(view.pitch+y*.002,-.45,.95);},
       captureChanged:locked=>{$('#capture-mouse').hidden=locked||menu||!started;},error:toast,inspect:inspecting
     }).start();
     $('#capture-mouse').onclick=()=>input.capture();
     worker=new Worker(new URL('./simulation.worker.mjs',import.meta.url),{type:'module'});
     worker.onerror=e=>showError(e.message);
     worker.onmessage=({data})=>{
+      // Module imports await baked assets. Wait for the Worker's handler before
+      // sending start; messages posted during top-level await can be lost.
+      if(data.type==='initialized'){
+        send({type:'start',origin:character?.origin??origin,saved:inspecting?null:character,playerId,inspect:inspecting,url:inspecting?null:`${location.protocol==='https:'?'wss':'ws'}://${location.host}/multiplayer`});
+        return;
+      }
       if(data.type==='foot-surfaces'){view.footsteps.accept(data);return;}
       inspector?.onMessage(data);
       if(data.type==='camera'){view.cameraLimit=data.distance;view.shelter=data.shelter;return;}
@@ -117,7 +123,6 @@ async function start(character){
       if(data.type==='ready')enterWorld().catch(e=>showError(e.stack??String(e)));
     };
     if(inspecting){const {installInspector}=await import('./inspector.mjs');inspector=installInspector({send,getView:()=>view,getSnapshot:()=>snapshot,playerId});}
-    send({type:'start',origin:character?.origin??origin,saved:inspecting?null:character,playerId,inspect:inspecting,url:inspecting?null:`${location.protocol==='https:'?'wss':'ws'}://${location.host}/multiplayer`});
     setInterval(()=>send({type:'save'}),8000);
   }catch(e){showError(e.stack??String(e));}
 }
@@ -211,7 +216,7 @@ function updateHud(){
   const boss=snapshot.actors.find(a=>a.boss&&a.hp>0&&Math.hypot(a.x-p.x,a.z-p.z)<25);$('#boss').hidden=!boss;if(boss){$('#boss-name').textContent=boss.name;updateMeter('boss-health',boss.hp,boss.healthMax);$('#boss-move').textContent=boss.windup>0?BOSS_MOVES[boss.bossMove]?.name??'':bossEnraged(boss)?'Enraged':'';}
 }
 function updateMeter(id,value,max){
-  const fill=$(`#${id}`),meter=fill.parentElement,current=Math.max(0,Math.min(max,value));
+  const fill=$(`#${id}`),meter=fill.parentElement,current=clamp(value,0,max);
   fill.style.width=`${max>0?current/max*100:0}%`;
   const valueLabel=$(`#${id}-value`);if(valueLabel)valueLabel.textContent=`${Math.floor(current)} / ${max}`;
   meter.setAttribute('aria-valuemax',String(max));meter.setAttribute('aria-valuenow',String(Math.round(current)));

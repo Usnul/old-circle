@@ -20,6 +20,16 @@ import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {actorJointPoses,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {Characters} from './characters.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
+import {ARMOR} from '@old-circle/game/content/equipment.mjs';
+
+test('the compiled catalogue retains every playable and keeper skin after a world rebake',async()=>{
+  const root=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',root),'utf8'));
+  const names=['pilgrim','briarHound','votiveBanner',...Object.values(ARMOR).filter(a=>a.appearance!=='pilgrim').map(a=>'armor_'+a.appearance),...Object.keys(BOSSES).map(id=>'boss_'+id)];
+  for(const name of names){
+    const chunks=manifest.models[name];expect(chunks,`Missing character skin: ${name}`).toBeDefined();expect(chunks.length).toBeGreaterThan(0);
+    for(const chunk of chunks)expect((await readFile(new URL(chunk.file,root))).byteLength).toBe(chunk.bytes);
+  }
+});
 import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';

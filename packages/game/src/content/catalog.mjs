@@ -1,3 +1,5 @@
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
+
 export const WEAPONS = {
   sword: { name: 'Pilgrim’s Longsword', style: 'melee', damage: 24, reach: 2.35, stamina: 19, cooldown: .72, active: [.18, .43], impulse: 260, icon: 'sword' },
   spear: { name: 'Bellkeeper’s Spear', style: 'melee', damage: 21, reach: 3.2, stamina: 23, cooldown: .85, active: [.24, .46], impulse: 220, icon: 'sword' },
@@ -29,7 +31,7 @@ export const BOSSES = {
 // Keeper weapon attacks and special moves retain their individual tuning.
 export function enemyDamage(actor){
   if(actor.boss)return BOSSES[actor.archetype].damage;
-  const level=Math.max(1,Math.min(35,Number.isFinite(actor.level)?actor.level:1));
+  const level=clamp(Number.isFinite(actor.level)?actor.level:1,1,35);
   const base=ENEMIES[actor.archetype]?.damage??WEAPONS[actor.weapon]?.damage??18;
   return base*(1+.035*(level-1));
 }

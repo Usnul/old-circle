@@ -141,6 +141,20 @@ test('older world saves retain progression above a raised terrain surface',async
   expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));expect(p.checkpoint[1]).toBeGreaterThan(heightAt(0,24));
 });
 
+test('content migrations discard mantle endpoints and navigation targets from the old terrain',async()=>{
+  const w=await setup(),p=w.addPlayer('migrating'),oldMantle={phase:'hang',t:.1,from:[0,-4,24],to:[0,-2,23]};
+  const character=w.exportCharacter(p.id);delete character.contentVersion;character.y=-3;character.motion.mantle=structuredClone(oldMantle);
+  p.path=[[0,-4,24]];p.patrolGoal=[0,-4,24];
+  w.importCharacter(p.id,character);
+  expect(p.mantle).toBeNull();expect(p.path).toBeNull();expect(p.patrolGoal).toBeNull();w.step();expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));
+  const saved=w.snapshot();delete saved.contentVersion;
+  Object.assign(saved.actors[0],{y:-3,mantle:structuredClone(oldMantle),path:[[0,-4,24]],patrolGoal:[0,-4,24]});
+  w.restoreWorld(saved);
+  expect(p.mantle).toBeNull();expect(p.path).toBeNull();expect(p.patrolGoal).toBeNull();w.step();expect(p.y).toBeGreaterThan(heightAt(p.x,p.z));
+  const current=w.exportCharacter(p.id);current.motion.mantle={phase:'hang',t:.1,from:[p.x,p.y,p.z],to:[p.x,p.y+1,p.z]};
+  w.importCharacter(p.id,current);expect(p.mantle).toEqual(current.motion.mantle);
+});
+
 test('saved NPCs regain authored homes without resurrecting enemies or changing health',async()=>{
   const w=await setup(),p=w.addPlayer('returning'),a=w.spawnActor('displaced',{},[160,heightAt(160,120)+1,120]),dead=w.spawnActor('fallen',{hp:0,deadTime:70},[180,heightAt(180,120)+1,120]);
   const home=[...a.home],saved=w.snapshot(),old=saved.actors.find(v=>v.id===a.id),fallen=saved.actors.find(v=>v.id===dead.id);

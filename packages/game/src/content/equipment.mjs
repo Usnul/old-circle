@@ -1,5 +1,6 @@
 import {WEAPONS,BOSSES} from './catalog.mjs';
 import {CHARMS,charmDamage} from './charms.mjs';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 
 // Fractions are reductions; regeneration values are resources per second.
 // Every set exchanges protection for mobility, quiet movement or focus.
@@ -29,7 +30,7 @@ export function migrateInventory(saved,weapon='sword',seals=[],relics=[]){
   const armor=Object.hasOwn(ARMOR,saved?.armor)?saved.armor:'mail';
   const weapons=[...new Set(['sword',weapon,...(saved?.weapons??[]).filter(w=>Object.hasOwn(WEAPONS,w))])];
   const armors=[...new Set(['mail',armor,...(Array.isArray(saved?.armors)?saved.armors.filter(id=>Object.hasOwn(ARMOR,id)):[]),...armorIds.filter(id=>seals.includes(ARMOR[id].seal))])];
-  const reinforcements=Object.fromEntries(weapons.map(id=>[id,Math.max(0,Math.min(6,Math.floor(Number(saved?.reinforcements?.[id])||0)))]));
+  const reinforcements=Object.fromEntries(weapons.map(id=>[id,clamp(Math.floor(Number(saved?.reinforcements?.[id])||0),0,6)]));
   const charm=CHARMS[saved?.charm]&&relics.includes(CHARMS[saved.charm].relic)?saved.charm:'none';
-  return {weapons,arrows:Math.max(0,Math.min(9999,Math.floor(Number(saved?.arrows??30)||0))),armor,armors,reinforcements,charm};
+  return {weapons,arrows:clamp(Math.floor(Number(saved?.arrows??30)||0),0,9999),armor,armors,reinforcements,charm};
 }

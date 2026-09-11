@@ -1,3 +1,5 @@
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
+
 export const SPRINT_DRAIN=18,SPRINT_RECOVERY=25;
 
 /** Exhaustion latches until the runner releases Shift with enough reserve.
@@ -7,7 +9,7 @@ export function updateStamina(actor,dt,{held,moving,regeneration=22}){
   const wants=held&&moving&&!actor.crouch&&!actor.mantle;
   if(wants&&actor.stamina<=0)actor.sprintExhausted=true;
   const sprinting=wants&&!actor.sprintExhausted&&actor.stamina>0;
-  actor.stamina=Math.max(0,Math.min(actor.staminaMax,actor.stamina+dt*(sprinting?-SPRINT_DRAIN:regeneration)));
+  actor.stamina=clamp(actor.stamina+dt*(sprinting?-SPRINT_DRAIN:regeneration),0,actor.staminaMax);
   if(sprinting&&actor.stamina===0)actor.sprintExhausted=true;
   return sprinting;
 }

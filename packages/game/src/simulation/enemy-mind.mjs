@@ -2,14 +2,17 @@ import {BranchBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavio
 import {ConditionBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavior/util/ConditionBehavior.js';
 import {ActionBehavior} from '@woosh/meep-engine/src/engine/intelligence/behavior/primitive/ActionBehavior.js';
 import {BehaviorStatus} from '@woosh/meep-engine/src/engine/intelligence/behavior/BehaviorStatus.js';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
+import {computeStringHash} from '@woosh/meep-engine/src/core/primitives/strings/computeStringHash.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {heightAt} from '../world/regions.mjs';
 import {WEAPONS,BOSSES} from '../content/catalog.mjs';
 import {armorFor} from '../content/equipment.mjs';
 import {BOSS_MOVES,nextBossMove} from '../content/boss-moves.mjs';
 import {castBossMove} from './boss-attacks.mjs';
 
-export const enemySeed=id=>Array.from(id).reduce((n,c)=>(Math.imul(n,31)+c.charCodeAt(0))>>>0,4171);
-const turn=(a,b,dt)=>a+Math.max(-dt*2.6,Math.min(dt*2.6,Math.atan2(Math.sin(b-a),Math.cos(b-a))));
+export const enemySeed=computeStringHash;
+const turn=(a,b,dt)=>a+clamp(Math.atan2(Math.sin(b-a),Math.cos(b-a)),-dt*2.6,dt*2.6);
 
 /** Meep behaviour tree, with replayable memory stored on the Actor component. */
 export class EnemyMind {
@@ -44,7 +47,7 @@ export class EnemyMind {
         const result=w.navigation?.tile(a.home).path(from,to);
         a.path=result?.reachable?result.points:[];a.pathTick=w.tick;
       }
-      while(a.path?.length&&Math.hypot(...a.path[0].map((v,i)=>v-from[i]))<.65)a.path.shift();
+      while(a.path?.length&&v3_distance(...a.path[0],...from)<.65)a.path.shift();
       next=a.path?.[0];
       if(!next){a.intent={x:0,z:0,yaw:a.yaw,buttons:0};return false;}
     }

@@ -14,12 +14,14 @@ import colliders from '../packages/game/src/content/colliders.json' with {type:'
 const root=resolve(import.meta.dirname,'..'),out=resolve(root,'packages/client/public/assets/map');await mkdir(out,{recursive:true});
 const require=createRequire(new URL('../packages/game/package.json',import.meta.url));
 const meep=path=>import(pathToFileURL(require.resolve('@woosh/meep-engine/src/'+path)));
+const {clamp}=await meep('core/math/clamp.js');
+const {convex_hull_monotone_2d}=await meep('core/geom/2d/convex-hull/convex_hull_monotone_2d.js');
 const {BinaryBuffer}=await meep('core/binary/BinaryBuffer.js'),{MeshletGeometry}=await meep('shade/renderer/geometry/MeshletGeometry.js'),{MeshletGeometrySerializationAdapter}=await meep('shade/renderer/geometry/MeshletGeometrySerializationAdapter.js');
 const layout=buildLayout(),[width,height]=MAP_SIZE,rgba=Buffer.alloc(width*height*4),adapter=new MeshletGeometrySerializationAdapter();
 const colors=REGIONS.map(r=>r.color.slice(1).match(/../g).map(c=>parseInt(c,16)));
 for(let py=0;py<height;py++)for(let px=0;px<width;px++){
   const x=px+WORLD_BOUNDS.minX,z=py+WORLD_BOUNDS.minZ,h=heightAt(x,z),dx=(heightAt(x+1,z)-heightAt(x-1,z))/2,dz=(heightAt(x,z+1)-heightAt(x,z-1))/2;
-  const lighting=Math.max(.32,Math.min(1.1,(1+dx*.6+dz*.7)/Math.hypot(dx,1,dz)));
+  const lighting=clamp((1+dx*.6+dz*.7)/Math.hypot(dx,1,dz),.32,1.1);
   const weights=REGIONS.map(r=>Math.exp(-Math.pow(Math.hypot(x-r.center[0],z-r.center[1])/r.radius,3))),sum=weights.reduce((a,b)=>a+b,0);
   const contour=Math.floor(h/5)!==Math.floor(heightAt(x+1,z+1)/5)?.85:1;
   for(let c=0;c<3;c++)rgba[(py*width+px)*4+c]=Math.round((colors.reduce((v,r,i)=>v+r[c]*weights[i],0)/sum*.58+[64,62,52][c])*(.6+lighting*.4)*contour);
@@ -36,11 +38,6 @@ for(const name of trees){
   for(const part of manifest.models[name]??[]){const bytes=await readFile(resolve(root,'packages/client/public/assets/geometry',part.file)),buffer=new BinaryBuffer(),g=new MeshletGeometry();buffer.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));adapter.deserialize(buffer,g);for(let i=0;i<3;i++){b[i]=Math.min(b[i],g.bounding_box[i]);b[i+3]=Math.max(b[i+3],g.bounding_box[i+3]);}}
   bounds.set(name,b);
 }
-function hull(points){
-  points.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]),lower=[],upper=[];
-  for(const p of points){while(lower.length>1&&cross(lower.at(-2),lower.at(-1),p)<=0)lower.pop();lower.push(p);}
-  for(const p of points.toReversed()){while(upper.length>1&&cross(upper.at(-2),upper.at(-1),p)<=0)upper.pop();upper.push(p);}return [...lower.slice(0,-1),...upper.slice(0,-1)];
-}
 const fmt=n=>n.toFixed(2),polygons=[],groves=[],water=[];
 for(const prop of layout.props){
   const [mx,my]=worldToMap(prop.position[0],prop.position[2]);
@@ -50,7 +47,7 @@ for(const prop of layout.props){
   }
   for(const part of colliders[prop.model]??[]){
     const points=[];for(let i=0;i<part.vertices.length;i+=3){const x=part.vertices[i]*prop.scale[0],z=part.vertices[i+2]*prop.scale[2];points.push(worldToMap(prop.position[0]+Math.cos(prop.yaw)*x+Math.sin(prop.yaw)*z,prop.position[2]-Math.sin(prop.yaw)*x+Math.cos(prop.yaw)*z));}
-    const footprint=hull(points);if(footprint.length<3)continue;
+    const footprint=convex_hull_monotone_2d(points.flat()).map(i=>points[i]);if(footprint.length<3)continue;
     const rock=/rock|sandstone|hollow|cave|mountain/i.test(prop.model),wood=/trunk/i.test(prop.model),isWater=/water/i.test(prop.model);
     const polygon=`<polygon points="${footprint.map(p=>p.map(fmt).join(',')).join(' ')}" fill="${isWater?'#568d9f':wood?'#4b392b':rock?'#747266':'#c1b798'}" stroke="${rock?'#55594b':'#4b493d'}" stroke-width=".35"/>`;
     (isWater?water:polygons).push(polygon);

@@ -6,6 +6,8 @@ import {Decal} from '@woosh/meep-engine/src/engine/graphics/ecs/decal/v2/Decal.j
 import {waveRadius} from '@old-circle/game/content/boss-moves.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 
+import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
+
 const colors={shockwave:[1,.55,.15],roots:[.72,.78,.24],stars:[.57,.71,1],frost:[.28,.75,1]};
 export const isBossHazard=p=>p.kind==='wave'||p.kind==='sigil';
 /** Warning and active boundary share the authoritative radius and terrain.
@@ -30,7 +32,7 @@ export class BossHazards {
       const age=p.age+Math.min(1/30,this.time-mark.changed),casting=age<p.delay;
       // A delayed wave gathers at its source before expanding; a trap stays fixed.
       const radius=p.kind==='wave'?Math.max(.3,waveRadius(p,age)):p.radius,progress=p.delay?Math.min(1,age/p.delay):1;
-      const fade=casting?1:Math.min(1,Math.max(0,(p.life-age)/.2));
+      const fade=casting?1:clamp01((p.life-age)/.2);
       mark.decal.color.setA((casting?.35+.5*progress:.92)*fade);
       mark.decal.emissive_intensity=(casting?.3+.7*progress:1.5)*fade;
       const [x,y,z]=p.position;

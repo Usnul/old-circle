@@ -135,3 +135,6 @@ self.onmessage=async({data})=>{
     }
   }catch(error){postMessage({type:'error',message:error.stack??String(error)});}
 };
+
+// Baked-asset imports have completed and the message handler is installed.
+postMessage({type:'initialized'});

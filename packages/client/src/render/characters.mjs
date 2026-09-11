@@ -19,6 +19,8 @@ import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 import {armorFor} from '@old-circle/game/content/equipment.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 
+import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
+
 const keeperColors={
   warden:{cloth:[.09,.12,.11],cloak:[.53,.66,.53],brass:[.34,.28,.15]},
   rootbound:{bark:[.12,.16,.10],bone:[.65,.65,.48]},
@@ -97,7 +99,7 @@ export class Characters {
   }
   viewAlpha(rig,alpha){
     if(rig.dead)return;
-    alpha=Math.max(0,Math.min(1,alpha));
+    alpha=clamp01(alpha);
     const {view}=this;
     // Each actor owns its fade materials. Keep the clones across wall contacts:
     // the shared outfit, remote pilgrims and pooled skins must stay opaque.
@@ -156,7 +158,7 @@ export class Characters {
     }
     // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
     for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
-    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],Math.max(0,Math.min(1,(45-state.age)/4)));
+    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],clamp01((45-state.age)/4));
     if(rig.weapon){
       const pose=rig.worldPoses[bones.findIndex(b=>b.name==='weapon')],grip=state.weapon==='sword'?.25:0;
       for(const {id,t} of rig.weapon){t.copy(pose);t.setTranslation(pose[12]+pose[4]*grip,pose[13]+pose[5]*grip,pose[14]+pose[6]*grip);t.updateMatrix();t64_announce_change(view.ecd,id);}

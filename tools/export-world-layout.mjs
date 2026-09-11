@@ -1,8 +1,16 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {heightAt,pathDistance,regionAt,WORLD_VERSION,REGIONS,ROAD_PATHS} from '../packages/game/src/world/regions.mjs';
+import {generateTerrain} from '../packages/game/src/world/terrain-authoring.mjs';
+import {encodeTerrain} from '../packages/game/src/world/terrain-data.mjs';
 import {CAVES} from '../packages/game/src/world/interiors.mjs';
 import {DUNGEONS,DUNGEON_MATERIALS,dungeonFloors} from '../packages/game/src/world/dungeons.mjs';
+
+// Publish the native terrain before importing runtime consumers, including
+// scatter authoring. A fresh checkout can rebuild without any prior bake.
+await writeFile(new URL('../packages/game/src/content/terrain.bin',import.meta.url),encodeTerrain(generateTerrain()));
+const {heightAt,pathDistance,regionAt,WORLD_VERSION,REGIONS,ROAD_PATHS}=await import('../packages/game/src/world/regions.mjs');
+const {generateLayout}=await import('../packages/game/src/world/layout-authoring.mjs');
+await writeFile(new URL('../packages/game/src/content/layout.json',import.meta.url),JSON.stringify({worldVersion:WORLD_VERSION,data:generateLayout()}));
 
 // Blender consumes sampled design data, never a second implementation of the map.
 const materials={meadow:'grass',wood:'leaf',desert:'sand',magic:'stoneDark',tundra:'snow',crown:'stone'};

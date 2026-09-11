@@ -14,7 +14,7 @@ import { PhysicsSurfacePoint } from '@woosh/meep-engine/src/engine/physics/queri
 import { Actor, Projectile } from './components.mjs';
 import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
-import {staticGeometry} from '../world/static-geometry.mjs';
+import {loadStaticScene} from '../world/static-scene-data.mjs';
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
 import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,WORLD_BOUNDS,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
@@ -29,12 +29,13 @@ import {BOSS_MOVES} from '../content/boss-moves.mjs';
 import {stepHazard,clearBossHazards} from './boss-attacks.mjs';
 import {knownRelics,flaskCapacity,nearbyRelic} from '../content/relics.mjs';
 import {CHARMS,ownsCharm,charmFor,focusCost,charmDamage} from '../content/charms.mjs';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
+import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
 
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
 const rotation=[0,0,0,1];
 const q=[0,0,0,1];
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
 const optionalMotion={airTime:0,fallSpeed:0,landingAge:-1,landingStrength:0};
 
@@ -49,14 +50,8 @@ export class GameWorld {
     this.authoredActors=new Map();this.dormantActors=new Map();this.scopedAuthority=false;
   }
   async start({populate=true,navigation=true}={}){
-    await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
-    this.layout.solids=[];
-    for(const body of staticGeometry(this.layout)){
-      const entity=this.body(body.position,body.shape,BodyKind.Static);
-      if(body.model==='terrain'){this.terrainEntity=entity;continue;}
-      this.contactSurfaces.set(entity,/trunk|tree|wood|plank/i.test(body.model)?'wood':body.model.startsWith('frostRock')?'snow':'stone');
-      this.layout.solids.push({position:body.position,size:body.size});
-    }
+    const scene=await loadStaticScene(this.ecd,{startSystems:()=>new Promise((resolve,reject)=>this.em.startup(resolve,reject))});
+    this.layout.solids=scene.solids;this.contactSurfaces=scene.contactSurfaces;this.terrainEntity=scene.terrainEntity;
     if(navigation)this.navigation=await loadNavigation();
     if(populate){this.populate();this.authoredActors=new Map([...this.actors.keys()].map(id=>this.actor(id)).filter(a=>a.kind==='enemy').map(a=>[a.id,structuredClone(a)]));}
     this.physics.optimizeBroadphase?.();return this;
@@ -202,7 +197,7 @@ export class GameWorld {
             if((pressed&BUTTON.JUMP)||((buttons&BUTTON.JUMP)&&mantle.t>.22)){mantle.phase='climb';mantle.t=0;this.event('mantle',a);}
           }
         }else{
-          const k=Math.min(1,mantle.t/.4),s=k*k*(3-2*k),p=mantle.from.map((v,i)=>v+(mantle.to[i]-v)*s);
+          const k=Math.min(1,mantle.t/.4),s=smoothStep(0,1,k),p=mantle.from.map((v,i)=>v+(mantle.to[i]-v)*s);
           this.physics.setPose(b,p,rotation);b.linearVelocity.fill(0);if(k===1)a.mantle=null;
         }
       }
@@ -411,6 +406,7 @@ export class GameWorld {
       Object.assign(a,{crouch:!!s.motion.crouch,grounded:!!s.motion.grounded,attackKind:s.motion.attackKind==='nova'?'nova':'weapon',hitIds:[...s.motion.hitIds],projectileReleased:!!s.motion.projectileReleased,mantle:structuredClone(s.motion.mantle??null),deathVelocity:[...s.motion.deathVelocity]});
       this.syncActorCollider(a,true);const b=this.ecd.getComponent(this.actors.get(id),RigidBody);b.linearVelocity.set([a.vx,a.vy,a.vz]);
     }
+    if(s.contentVersion!==WORLD_VERSION){a.mantle=null;a.path=null;a.patrolGoal=null;}
   }
   snapshot(){return {version:1,contentVersion:WORLD_VERSION,tick:this.tick,time:this.time,actors:[...this.actors.keys()].map(id=>structuredClone(this.actor(id))),projectiles:[...this.projectiles].map(e=>{const p=this.ecd.getComponent(e,Projectile),t=this.ecd.getComponent(e,Transform64);return {...structuredClone(p),id:e,position:[t.translation_x,t.translation_y,t.translation_z]};}),events:structuredClone(this.events)};}
   restoreWorld(snapshot){
@@ -433,6 +429,7 @@ export class GameWorld {
         if(a.hp>0&&(moved||outsideLeash)){this.teleport(a,home);a.path=null;a.patrolGoal=null;a.patrolWaitUntil=this.tick+120;a.intent={x:0,z:0,yaw:a.yaw,buttons:0};}
       }
       if(snapshot.contentVersion!==WORLD_VERSION){
+        a.mantle=null;a.path=null;a.patrolGoal=null;
         if(!a.dungeon)this.teleport(a,[a.x,Math.max(a.y,heightAt(a.x,a.z)+(a.boss?1.4:1)),a.z]);
         if(!home)a.home[1]=heightAt(a.home[0],a.home[2])+(a.boss?1.4:1);
         a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);

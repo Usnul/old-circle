@@ -1,7 +1,9 @@
 import {expect,test} from 'vitest';
 import {readFile} from 'node:fs/promises';
 import {ModelStore} from './model-store.mjs';
-import {WorldStream,propBounds,sceneryModel} from './world-stream.mjs';
+import {WorldStream,sceneryModel} from './world-stream.mjs';
+import {encodeScenery,propBounds} from './scenery-authoring.mjs';
+import {decodeScenery} from './scenery-data.mjs';
 import {WorldBanners} from './banners.mjs';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
 import {HEARTHS,heightAt} from '@old-circle/game/world/regions.mjs';
@@ -105,8 +107,9 @@ test('native model loading deduplicates requests, bounds I/O and releases only u
 
 test('an in-flight replacement never removes the existing surface and stale travel loads are reclaimed',async()=>{
   const prop={model:'terrain_0_0',position:[0,0,0],scale:[1,1,1],yaw:0},store=new ModelStore({manifest,materials,read});let id=0;const live=new Set();
-  const view={model:name=>{expect(store.models.has(name)).toBe(true);const part={id:++id};live.add(part);return [part];},remove:parts=>{for(const p of parts)live.delete(p);},ecd:{getComponent:()=>({node:{}})}};
-  const stream=new WorldStream(view,{props:[prop],lights:[]},store);await stream.start([0,10,0]);
+  const view={sceneryModel:name=>{expect(store.models.has(name)).toBe(true);const part={id:++id};live.add(part);return [part];},remove:parts=>{for(const p of parts)live.delete(p);},ecd:{getComponent:()=>({node:{}})}};
+  const layout={props:[prop],lights:[]},bytes=encodeScenery(layout,manifest),scenery=await decodeScenery(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),manifest);
+  const stream=new WorldStream(view,layout,store,scenery);await stream.start([0,10,0]);
   stream.update({x:400,y:20,z:400},.1);expect(live.size).toBe(1);expect(stream.records[0].model).toBe(prop.model);
   await Promise.all(stream.loading.values());stream.update({x:400,y:20,z:400},.1);expect(stream.records[0].model).toBe(manifest.lods[prop.model]);expect(live.size).toBe(1);
   for(let i=0;i<60;i++)stream.update({x:400,y:20,z:400},.1);

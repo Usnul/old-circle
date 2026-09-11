@@ -4,6 +4,7 @@ import { SampleAudioClip } from '@woosh/meep-engine/src/engine/sound/sopra/defin
 import { AnimationCurve } from '@woosh/meep-engine/src/engine/animation/curve/AnimationCurve.js';
 import { Keyframe } from '@woosh/meep-engine/src/engine/animation/curve/Keyframe.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import { SoundAssetLoader } from '@woosh/meep-engine/src/engine/asset/loaders/SoundAssetLoader.js';
 import { GameAssetType } from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
 import {EventInstanceState} from '@woosh/meep-engine/src/engine/sound/sopra/runtime/EventInstance.js';
@@ -26,13 +27,13 @@ export class WorldAudio {
       if(step){description.attenuation=AnimationCurve.from([Keyframe.from(0,1),Keyframe.from(3,.8),Keyframe.from(10,.3),Keyframe.from(22,0)]);description.maxInstances=3;}
       this.events[name]=description;
     }));
-    this.acoustics=new WorldAcoustics(this.sopra,this.layout);this.wind=this.sopra.playEvent(this.events.wind);
+    this.acoustics=await WorldAcoustics.create(this.sopra);this.wind=this.sopra.playEvent(this.events.wind);
     this.engine.sound.volume=.55;
   }
   spatial(description,position,{loop=false,sourceRadius=.2,maxLifetime=4}={}){
     for(const v of this.voices)if(v.state===EventInstanceState.Stopped)this.voices.delete(v);
     if(this.voices.size>=ACOUSTIC_VOICE_LIMIT)return null;
-    if(this.sopra.listenerPosition&&Math.hypot(...position.map((x,i)=>x-this.sopra.listenerPosition[i]))>=description.distanceMax)return null;
+    if(this.sopra.listenerPosition&&v3_distance(...position,...this.sopra.listenerPosition)>=description.distanceMax)return null;
     const options={position:new Vector3(...position),acoustic:true,pathing:false,sourceRadius,maxLifetime};
     const voice=loop?this.sopra.playEvent(description,options):this.sopra.playOneShot(description,options);
     if(voice){this.voices.add(voice);voice.onEnded.addOne(()=>{this.voices.delete(voice);this.acoustics.simulator.forget(voice);});}return voice;
@@ -54,7 +55,7 @@ export class WorldAudio {
     if(this.bellTime>42){this.play('bell',[-7,heightAt(-7,-64)+8,-64]);this.bellTime=0;}
     this.ambientTime+=dt;
     if(this.ambientTime>.25){
-      this.ambientTime=0;const nearby=this.layout.lights.map((p,i)=>({p,i,d:Math.hypot(...p.map((x,j)=>x-listener[j]))})).filter(p=>p.d<32).sort((a,b)=>a.d-b.d).slice(0,3),wanted=new Set(nearby.map(p=>p.i));
+      this.ambientTime=0;const nearby=this.layout.lights.map((p,i)=>({p,i,d:v3_distance(...p,...listener)})).filter(p=>p.d<32).sort((a,b)=>a.d-b.d).slice(0,3),wanted=new Set(nearby.map(p=>p.i));
       for(const [id,voice] of this.fires)if(!wanted.has(id)){voice.fadeOutAndStop(.25);this.fires.delete(id);}
       for(const {p,i} of nearby)if(!this.fires.has(i)||this.fires.get(i).state===EventInstanceState.Stopped){const v=this.spatial(this.events.fire,p,{loop:true,sourceRadius:.25});if(v)this.fires.set(i,v);}
       const gain=-23-this.acoustics.stats.cover*12;if(gain!==this.windGain){this.wind.fadeToGainDb(gain,.6);this.windGain=gain;}

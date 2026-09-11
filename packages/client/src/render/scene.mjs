@@ -41,6 +41,7 @@ import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundLi
 import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
 import {ModelStore} from './model-store.mjs';
 import {WorldStream} from './world-stream.mjs';
+import {loadScenery,attachScenery} from './scenery-data.mjs';
 import {GeometryCache} from './geometry-cache.mjs';
 import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
 import {CombatTrails} from './combat-trails.mjs';
@@ -127,7 +128,7 @@ export class WorldView {
     const core=Object.keys(manifest.models).filter(name=>name==='pilgrim'||name==='briarHound'||name==='votiveBanner'||name.startsWith('armor_')||name.startsWith('boss_'));
     core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
     await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
-    const layout=buildLayout();this.streaming=new WorldStream(this,layout,this.modelStore);
+    const layout=buildLayout(),scenery=await loadScenery(manifest);this.streaming=new WorldStream(this,layout,this.modelStore,scenery);
     await this.streaming.start(position,p=>progress('Loading nearby terrain…',.15+p*.5));
     await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
@@ -154,6 +155,10 @@ export class WorldView {
     const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
     const rotation=up?quat._lookRotation(Math.sin(yaw),-(up[0]*Math.sin(yaw)+up[2]*Math.cos(yaw))/up[1],Math.cos(yaw),...up):[0,Math.sin(yaw/2),0,Math.cos(yaw/2)];
     const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(...rotation);t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,material??c.material)).build(this.ecd);result.push({id,t});}return result;
+  }
+  sceneryModel(name,transform){
+    const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
+    return attachScenery(this.ecd,chunks,transform);
   }
   pose(parts,p,scale=1,yaw=0,pitch=0,roll=0){
     quat.fromEulerAnglesYXZ(pitch,yaw,roll);

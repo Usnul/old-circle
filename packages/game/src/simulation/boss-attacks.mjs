@@ -1,6 +1,7 @@
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {SphereShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/SphereShape3D.js';
 import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {Actor,Projectile} from './components.mjs';
 import {actorFeet} from './animation.mjs';
 import {BOSSES,WEAPONS} from '../content/catalog.mjs';
@@ -26,7 +27,7 @@ export function castBossMove(world,a,move){
       const aim=Math.atan2(a.x-target.x,a.z-target.z),count=strong?7:5;
       for(let i=0;i<count;i++){
         const {p,t}=world.spawnProjectile({...a,weapon:'staff'},WEAPONS.staff),angle=aim+(i-(count-1)/2)*.16;
-        const distance=Math.max(1,Math.hypot(target.x-a.x,target.z-a.z)),rise=Math.max(-.5,Math.min(.5,(target.y-a.y-.3)/distance));
+        const distance=Math.max(1,Math.hypot(target.x-a.x,target.z-a.z)),rise=clamp((target.y-a.y-.3)/distance,-.5,.5);
         p.key=`${a.id}:cinder:${a.attackId}:${i}`;p.velocity=[-Math.sin(angle)*16,rise*16,-Math.cos(angle)*16];p.damage=damage*.7;p.effect='cinder';p.life=2;
         t.setTranslation(a.x-Math.sin(angle)*1.2,a.y+.3,a.z-Math.cos(angle)*1.2);
       }

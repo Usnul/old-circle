@@ -2,14 +2,16 @@ import {AcousticProbeField} from '@woosh/meep-engine/src/engine/sound/simulation
 import {ProbeReverbRenderer} from '@woosh/meep-engine/src/engine/sound/simulation/render/ProbeReverbRenderer.js';
 import {EventInstanceState} from '@woosh/meep-engine/src/engine/sound/sopra/runtime/EventInstance.js';
 import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {createWorldAcoustics} from '@old-circle/game/world/acoustics.mjs';
 import probes from '@old-circle/game/content/acoustic-probes.json';
 
 export const ACOUSTIC_VOICE_LIMIT=24;
 const SKY_DIRECTIONS=[[0,1,0],[.6,.8,0],[-.6,.8,0],[0,.8,.6],[0,.8,-.6]];
 export class WorldAcoustics {
-  constructor(sopra,layout){
-    const {simulator,bodies}=createWorldAcoustics(layout);this.simulator=simulator;
+  static async create(sopra){return new WorldAcoustics(sopra,await createWorldAcoustics());}
+  constructor(sopra,{simulator,bodies}){
+    this.simulator=simulator;
     this.field=new AcousticProbeField();this.field.fromJSON(probes.field);
     // A post-effects send returns through master gain; broad wind stays dry.
     this.reverb=new ProbeReverbRenderer(sopra.audioContext,sopra.busGraph.getInput('master'));
@@ -20,8 +22,8 @@ export class WorldAcoustics {
   }
   update(listener,voices,dt){
     this.elapsed+=dt;this.probeElapsed+=dt;if(this.elapsed<.05)return;this.elapsed=0;const started=performance.now();
-    const live=[...voices].filter(v=>v.acoustic&&v.position&&v.state===EventInstanceState.Playing&&Math.hypot(...v.position.map((x,i)=>x-listener[i]))<v.description.distanceMax);
-    live.sort((a,b)=>Math.hypot(...a.position.map((x,i)=>x-listener[i]))-Math.hypot(...b.position.map((x,i)=>x-listener[i])));
+    const live=[...voices].filter(v=>v.acoustic&&v.position&&v.state===EventInstanceState.Playing&&v3_distance(...v.position,...listener)<v.description.distanceMax);
+    live.sort((a,b)=>v3_distance(...a.position,...listener)-v3_distance(...b.position,...listener));
     live.length=Math.min(live.length,ACOUSTIC_VOICE_LIMIT);this.simulator.apply(live,listener);this.stats.voices=live.length;
     if(this.probeElapsed>=.2){
       this.probeElapsed=0;const index=this.simulator.occluderIndex,probe=this.field.nearestVisibleIndex(...listener,index);this.stats.probe=probe;

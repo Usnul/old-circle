@@ -2,6 +2,7 @@ import {MAP_SIZE,worldToMap} from '@old-circle/game/world/map.mjs';
 import {REGIONS,LANDMARKS,HEARTHS} from '@old-circle/game/world/regions.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {RELICS} from '@old-circle/game/content/relics.mjs';
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 
 const PLAYER_ZOOM=2.5;
 // Keep the explored view when the map is rebuilt during this journey.
@@ -34,7 +35,7 @@ export function installMapControls(getPlayer){
   };
   const update=()=>{
     const {w,h,scale}=viewport();
-    center=center.map((value,i)=>{const size=[w,h][i],extent=MAP_SIZE[i];return size>=extent?extent/2:Math.max(size/2,Math.min(extent-size/2,value));});
+    center=center.map((value,i)=>{const size=[w,h][i],extent=MAP_SIZE[i];return size>=extent?extent/2:clamp(value,size/2,extent-size/2);});
     savedView={zoom,center};
     svg.setAttribute('viewBox',`${center[0]-w/2} ${center[1]-h/2} ${w} ${h}`);
     svg.style.setProperty('--map-label',`${12/scale}px`);svg.classList.toggle('map-close',zoom>1.5);

@@ -13,3 +13,19 @@ test('world actions preserve precise changes, arrivals, departures and effect ex
   // Applying an action must not leave its payload aliased to the live world.
   result.actors[0].x=20;expect(corrected.actors[0].x).toBe(2);expect(patch.actors.changes[1].create.x).toBe(4);
 });
+
+test('world changes compare nested snapshot values independent of object field order',()=>{
+  const before={tick:1,time:12,actors:[{id:'player',inventory:{weapons:['sword','bow'],reinforcements:{sword:2,bow:1}}}],events:[{key:'hit',position:[1,2,3]}]};
+  const reordered={tick:2,time:12,actors:[{id:'player',inventory:{reinforcements:{bow:1,sword:2},weapons:['sword','bow']}}],events:[{position:[1,2,3],key:'hit'}]};
+  const unchanged=worldPatch(before,reordered);
+  expect(unchanged.actors.changes).toEqual([]);expect(unchanged.events).toBeUndefined();
+  const after=structuredClone(reordered);after.actors[0].inventory.reinforcements.sword=3;after.actors[0].inventory.weapons.reverse();after.events[0].position[1]=4;
+  const patch=worldPatch(before,after),result=structuredClone(before);applyWorldPatch(result,patch);
+  expect(result.actors).toEqual(after.actors);expect(result.events).toEqual(after.events);
+});
+
+test.each([[{},[]],[[],{}],[{'0':'sword'},['sword']],[['sword'],{'0':'sword'}]])('world changes preserve nested wire array and record types (%j to %j)',(prior,next)=>{
+  const before={tick:1,time:12,actors:[{id:'player',inventory:{value:prior}}],events:[]},after={tick:2,time:12,actors:[{id:'player',inventory:{value:next}}],events:[]};
+  const patch=worldPatch(before,after);expect(patch.actors.changes).toHaveLength(1);
+  const result=structuredClone(before);applyWorldPatch(result,patch);expect(result.actors).toEqual(after.actors);
+});

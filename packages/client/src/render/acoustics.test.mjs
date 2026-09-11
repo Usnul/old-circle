@@ -8,12 +8,12 @@ import {buildLayout} from '@old-circle/game/world/layout.mjs';
 import {WorldAudio} from './audio.mjs';
 import {WorldAcoustics} from './acoustics.mjs';
 
-test('Sopra spatial voices use band transmission, bounded reverb and a dry wind bus with no pathing',()=>{
+test('Sopra spatial voices use band transmission, bounded reverb and a dry wind bus with no pathing',async()=>{
   const context=new MockAudioContext(),nodes=[];
   for(const name of ['createGain','createPanner','createBiquadFilter','createConvolver']){const create=context[name].bind(context);context[name]=()=>{const node=create();nodes.push(node);return node;};}
   const buffer=context.createBuffer(1,context.sampleRate,context.sampleRate),provider={get:async()=>buffer,tryGet:()=>buffer};
   const sopra=new SopraEngine(context,context.destination,provider),layout=buildLayout(),audio=new WorldAudio({},layout);
-  audio.sopra=sopra;audio.acoustics=new WorldAcoustics(sopra,layout);
+  audio.sopra=sopra;audio.acoustics=await WorldAcoustics.create(sopra);
   const description=new EventDescription();description.is3D=true;description.distanceMax=45;description.maxInstances=64;description.rootClip=SampleAudioClip.from('test.wav');
   const listener=new Vector3(35,5.8,-53);sopra.listenerPosition=listener;
   const voice=audio.spatial(description,[28,5.8,-53]);expect(voice.acoustic).toBe(true);

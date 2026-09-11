@@ -1,3 +1,6 @@
+import {line3_compute_segment_closest_point_t} from '@woosh/meep-engine/src/core/geom/3d/line/line3_compute_segment_closest_point_t.js';
+import {lerp} from '@woosh/meep-engine/src/core/math/lerp.js';
+
 // Sections describe an above-ground rock vault in world metres: X, Z, clear
 // half-width, clear height. Blender samples the shared terrain beneath it.
 export const CAVES=[{
@@ -10,7 +13,7 @@ export const CAVES=[{
 
 export function inCaveFootprint(x,z,margin=0){
   return CAVES.some(cave=>cave.sections.slice(1).some((b,i)=>{
-    const a=cave.sections[i],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz)));
-    return Math.hypot(x-a[0]-dx*t,z-a[1]-dz*t)<a[2]+(b[2]-a[2])*t+margin;
+    const a=cave.sections[i],t=line3_compute_segment_closest_point_t(a[0],0,a[1],b[0],0,b[1],x,0,z);
+    return Math.hypot(x-lerp(a[0],b[0],t),z-lerp(a[1],b[1],t))<lerp(a[2],b[2],t)+margin;
   }));
 }

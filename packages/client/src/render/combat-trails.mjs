@@ -3,12 +3,12 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import Trail3D from '@woosh/meep-engine/src/engine/graphics/ecs/trail3d/Trail3D.js';
 import {Trail3DFlags} from '@woosh/meep-engine/src/engine/graphics/ecs/trail3d/Trail3DFlags.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {WEAPONS} from '@old-circle/game/content/catalog.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 import {isBossHazard} from './boss-hazards.mjs';
 
 const MAX_TRAILS=24,RANGE=48;
-const distance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
 export class CombatTrails {
   constructor(view){this.view=view;this.entries=new Map();this.epoch=null;}
   clear(){for(const e of this.entries.values())this.view.ecd.removeEntity(e.id);this.entries.clear();}
@@ -19,11 +19,11 @@ export class CombatTrails {
     for(const a of actors){
       const weapon=WEAPONS[a.weapon];
       if(a.hp<=0||a.archetype==='hound'||weapon?.style!=='melee'||a.attackKind!=='weapon'||a.attackAge<weapon.active[0]||a.attackAge>weapon.active[1])continue;
-      const pose=weaponPose(a),d=distance(pose.end,focus);if(d>RANGE)continue;
+      const pose=weaponPose(a),d=v3_distance(...pose.end,...focus);if(d>RANGE)continue;
       candidates.push({key:`blade:${a.id}:${a.attackId}`,position:pose.end,age:a.attackAge,distance:a.id===player.id?-1:d,width:(a.boss?.085:.045)*pose.scale,life:.14,color:a.boss?[1,.66,.34,.45]:[.79,.89,.94,.42]});
     }
     for(const p of projectiles){
-      if(isBossHazard(p))continue;const d=distance(p.position,focus);if(d>RANGE)continue;
+      if(isBossHazard(p))continue;const d=v3_distance(...p.position,...focus);if(d>RANGE)continue;
       const arrow=p.weapon==='bow';candidates.push({key:`missile:${p.key??p.id}`,position:p.position,age:p.age,distance:d,width:arrow?.025:p.effect==='cinder'?.14:.09,life:arrow?.09:.22,color:arrow?[.70,.73,.68,.23]:p.effect==='cinder'?[1,.38,.10,.68]:[.28,.70,1,.62]});
     }
     candidates.sort((a,b)=>a.distance-b.distance);const selected=candidates.slice(0,MAX_TRAILS),wanted=new Set(selected.map(c=>c.key)),live=new Set();
@@ -37,7 +37,7 @@ export class CombatTrails {
       }else{
         // Reconciliation or a relocation must never draw a bridge through the
         // world. Native clear reseeds every knot at the next displayed head.
-        if(e.fading||source.age<e.age-.04||distance(source.position,e.last)>3)e.trail.clear();
+        if(e.fading||source.age<e.age-.04||v3_distance(...source.position,...e.last)>3)e.trail.clear();
         e.trail.setFlag(Trail3DFlags.Spawning);e.t.setTranslation(...source.position);e.t.updateMatrix();t64_announce_change(this.view.ecd,e.id);
       }
       e.last=source.position;e.age=source.age;e.fading=0;

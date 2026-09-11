@@ -1,9 +1,10 @@
 import {snapshotter_emit} from '@woosh/meep-engine/src/engine/network/sim/Snapshotter.js';
+import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 
 export const INTEREST=Object.freeze({enter:96,leave:112,actors:96,projectiles:128,events:128,players:8,maximumPlayers:16});
 export const PRIVATE_AI_FIELDS=['path','pathTick','patrolGoal','patrolWaitUntil','patrolDeadline','memory'];
-const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
-const positionDistance=(p,a)=>Math.hypot(p[0]-a.x,p[1]-a.y,p[2]-a.z);
+const distance=(a,b)=>v3_distance(a.x,a.y,a.z,b.x,b.y,b.z);
+const positionDistance=(p,a)=>v3_distance(...p,a.x,a.y,a.z);
 
 /** A recipient gets a bounded nearby world. Hysteresis prevents repeated arrivals
  * and removals while an actor moves along the edge of the visible region. */

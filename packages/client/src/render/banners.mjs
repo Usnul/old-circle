@@ -5,6 +5,8 @@ import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.j
 import {AnimationClip} from '@woosh/meep-engine/src/engine/ecs/animation/AnimationClip.js';
 import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 
+import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
+
 export class WorldBanners {
   constructor(view,placements){
     this.view=view;this.wind=[0,0,0];
@@ -33,7 +35,7 @@ export class WorldBanners {
       // Blender's +Y cloth deflection is local -Z in the engine. A reverse clip
       // handles wind on the opposite face while the mast remains immovable.
       const normal=-this.wind[0]*Math.sin(b.yaw)-this.wind[2]*Math.cos(b.yaw);
-      b.strength+=(Math.max(-1,Math.min(1,normal/2))-b.strength)*(1-Math.exp(-dt*2));
+      b.strength+=(clamp(normal/2,-1,1)-b.strength)*(1-Math.exp(-dt*2));
       b.time=(b.time+dt*(.55+Math.min(1.2,Math.hypot(...this.wind)*.3)))%3.6;
       b.clips[0].weight.set(1-Math.abs(b.strength));b.clips[1].weight.set(Math.max(0,b.strength));b.clips[2].weight.set(Math.max(0,-b.strength));
       for(const playback of this.view.animations.playbacks_of(b.id)){playback.elapsed=b.time;playback.finished=false;}
