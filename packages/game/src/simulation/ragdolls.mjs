@@ -77,7 +77,7 @@ export class Ragdolls {
     const weapon=a.archetype==='hound'?null:a.weapon,bounds=WEAPON_BOUNDS[weapon];let weaponBody=null,weaponPose=null;
     if(bounds){
       const socket=pose[data.bones.findIndex(b=>b.name==='weapon')],grip=weapon==='sword'?.25:0;
-      weaponPose={position:Array.from(point(socket.position,socket.rotation,[0,grip*scale,0])),rotation:[...socket.rotation]};
+      weaponPose={position:point(socket.position,socket.rotation,[0,grip*scale,0]),rotation:[...socket.rotation]};
       const offset=bounds.center.map(v=>v*scale),half=bounds.half.map(v=>v*scale),mass=2*scale**3;
       const inertia=half.map((_,i)=>3/(mass*(half[(i+1)%3]**2+half[(i+2)%3]**2)));
       // Lowered blades can start below ground; capsule contacts recover that overlap.
@@ -101,7 +101,7 @@ export class Ragdolls {
   readPose(record){
     if(record.weaponBody){
       const {t,offset}=record.weaponBody;
-      record.weaponPose={position:Array.from(point(t.translation,t.rotation,offset.map(v=>-v))),rotation:Array.from(t.rotation)};
+      record.weaponPose={position:point(t.translation,t.rotation,offset.map(v=>-v)),rotation:Array.from(t.rotation)};
     }
     for(let i=0;i<record.pose.length;i++){
       const body=record.bodies.get(i),p=record.pose[i];
