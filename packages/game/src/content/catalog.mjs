@@ -24,6 +24,15 @@ export const BOSSES = {
   frostbound: { name: 'Veyr, Keeper of Winter', health: 1550, damage: 49, reward: 3000, scale: 2.3, seal: 'Frost', landmark: 'pilgrims', level: 27 },
   'last-king': { name: 'The King Who Remains', health: 2200, damage: 58, reward: 5000, scale: 2.5, seal: 'Circle', landmark: 'halo', level: 34 },
 };
+// Encounters keep their authored level when players return or arrive in co-op.
+// Ordinary blows grow by 3.5% of base damage per level through the Last Crown.
+// Keeper weapon attacks and special moves retain their individual tuning.
+export function enemyDamage(actor){
+  if(actor.boss)return BOSSES[actor.archetype].damage;
+  const level=Math.max(1,Math.min(35,Number.isFinite(actor.level)?actor.level:1));
+  const base=ENEMIES[actor.archetype]?.damage??WEAPONS[actor.weapon]?.damage??18;
+  return base*(1+.035*(level-1));
+}
 // A first clear funds the next region's lower level range without respawn farming.
 export const levelCost = level => Math.floor(120 + 3 * Math.pow(level, 1.6));
 export const maxHealth = stats => 70 + stats.vigor * 5;

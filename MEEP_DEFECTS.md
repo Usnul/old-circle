@@ -38,7 +38,7 @@ Game workaround: a subclass of Meep's adapter copies the requested byte range be
 
 Verification: `packages/client/src/render/characters.test.mjs` drives the real Meep mesh/animation systems and software GPU device through eight spawn/death/teardown cycles using the pilgrim and hound rigs and one shipped geometry chunk per rig. Matrix and previous-position high-water marks stay at one simultaneous pair; occupied meshlet bytes return to the source-only baseline after each teardown. A second case verifies pooled respawns restore materials, joint authority and animation while keeping the BLAS buffer capacity flat.
 
-The [upstream response](https://claude.ai/code/artifact/792fafe9-6a00-466c-9e24-cc9d8d766052) recommends retiring the pool. Old Circle retains it because the published package still accumulates per-instance BLAS node data on full teardown; see MEEP-009. The original matrix defect is closed, but the entire respawn allocation lifecycle is not yet bounded without pooling.
+The [upstream response](https://claude.ai/code/artifact/792fafe9-6a00-466c-9e24-cc9d8d766052) recommends retiring the pool. Old Circle retains it because the published package still accumulates per-instance BLAS node data on full teardown; see MEEP-012. The original matrix defect is closed, but the entire respawn allocation lifecycle is not yet bounded without pooling.
 
 ## MEEP-006 — simplex-noise module emits invalid pure-annotation warnings
 
@@ -60,10 +60,40 @@ Game workaround: Meep LZ4 blocks in the gameplay binary adapters, preserving exa
 
 Game workaround: the host excludes the new recipient from action scope until the client acknowledges the initial frame it installed through a Meep reliable command. That acknowledgement also sets the recipient's replication baseline. The loopback regression warms the host for 90 ticks before connecting and verifies that no frame is applied before initial sync. Suggested engine change: order initial snapshot delivery before history flushing and gate dependent action application until that snapshot is installed, including when a transport reorders messages.
 
-## MEEP-009 — despawned geometry clones retain BLAS node data
+## MEEP-009 — convex contact direction assumes the body origin lies inside its hull
+
+**Reproduced and source verified.** A Blender ramp exported with world-space vertices under a body at the origin raycasts correctly, but pushes a walking capsule beneath its top. Translating the same vertices into a body centred on their bounds fixes the traversal without changing the world geometry. `narrowphase/narrowphase_step.js:1307–1318` flips EPA's contact direction using the vector between body transforms. Its comment assumes each origin is inside the geometry; `ConvexHullShape3D.from` documents convexity and outward winding but does not state that origin requirement.
+
+Reproduction: the reliquary entrance prism spans X 36–40, Z −38 to −48, top Y 2.91159 to 4.3, with a .30 m thickness. Place its hull under a static body at `(0,0,0)`, settle a capsule at `(38,3.78659,−38)` and walk north. In the observed run the character was expelled west and stalled beneath the ramp near `(36.55,3.19,−44.16)`. Re-centering the hull and translating its body preserves every world-space vertex and permits the complete route. The retained dungeon motor test covers the game's adapter.
+
+Game workaround: centre every authored static convex body on its own bounds. Suggested engine change: derive direction validation from transformed geometric interior points, or make the shape-origin constraint explicit and validate it.
+
+## MEEP-010 — some reachable folded navigation queries return no path
+
+**Reproduced on the reliquary's baked surface.** The mesh passes `bt_mesh_validate` and `bt_mesh_is_manifold`; `bt_mesh_split_pinched_vertices` reports zero repairs. `NavigationMesh.find_path` nevertheless returns zero from `(38,4.3,−61)` to `(38,9.1,−66)`. Starting one metre north or south succeeds. Both endpoints are connected: native paths composed through the burial room, ascent and gallery succeed, and the physical character traverses those legs. The precise Polyanya failure has not been isolated to a smaller mesh.
+
+Game workaround: a failed long query is split at authored room connections, selected by Meep's graph search. Each resulting leg still uses the native navmesh. The actual enemy-pursuit regression starts with a player directly above an enemy and requires the enemy to walk the connecting rooms and reach that player. Suggested engine investigation: reproduce with `content/dungeon-navigation.bin` and inspect the interval search around the lower chapter's west exit.
+
+## MEEP-011 — initial synchronization bypasses the configured action scope
+
+**Source verified and covered by a two-peer integration test.** `NetworkSession.#send_initial_sync_to` passes every entry in its entity-listener map to `snapshotter_emit`; it does not consult the configured scope filter. The filter only excludes subsequent actions. A host-only rollback frame or another recipient's world projection therefore reaches every new peer if the game relies on action scope alone.
+
+Game workaround: adapt the public `NetworkPeer.send_initial_sync` hook, invoking the native snapshot emitter with exactly the recipient's WorldFrame and owned CharacterFrame. Native framing, acknowledgement and initial application remain unchanged. A regression verifies that two distant clients do not receive the host-only world ID, each other's character rows or distant actors, then verifies arrivals and removals when they meet. Suggested engine change: expose an initial entity-scope predicate distinct from owner-aware action filtering; clients still need their own entity's authoritative initial state even when their predicted actions are excluded from the echo stream.
+
+## MEEP-012 — removed geometry retains append-only BVH arena space
+
+**Source verified in the published package.** `GPUGeometryManager.remove` releases meshlets and unregisters the BLAS record, but its comment explicitly leaves the BLAS data region uncompactable until a future buffer rebuild. `GPUGeometryBVHManager.update` always places a newly registered tree at `#buffer_data_end`, advances that cursor, and increases capacity. Its public lifecycle offers no compaction operation. Geometry metadata IDs also advance on every re-registration. Removing and reloading the same scenery repeatedly can therefore grow these arenas even when the visible working set stays constant.
+
+Game workaround: stream scene instances and fetch detail on demand, but preserve one registered geometry identity per visited authored model. Leaving an area drops its active scene users; returning reuses the cached object without another fetch or registration. The cache is bounded by the versioned finite asset catalogue, and the workshop reports active bytes, visited bytes and native GPU geometry allocation separately. Banner skins use the same parked-instance lifecycle as characters (MEEP-005). This preserves traversal stability but does not provide full reclamation of GPU geometry for departed regions. Suggested engine change: reclaim or compact BLAS node/topology allocations and geometry metadata rows through a supported residency API, preserving live mesh references.
 
 **Confirmed against the published 3.22.0 package.** `GPUGeometryManager.remove_clone` releases meshlet allocations and calls `geometry/bvh/GPUGeometryBVHManager.js:remove`. The latter removes the owner record and lookup target but leaves its node bytes in an append-only GPU arena. `#upload_pending_nodes` appends each replacement clone's tree at `#buffer_data_end`; growing the buffer preserves the abandoned bytes. This residual scales with geometry size, beyond the small unrecycled geometry-id metadata rows acknowledged in the MEEP-005 response.
 
 Reproduction: run the teardown case in `packages/client/src/render/characters.test.mjs`. With `pilgrim-0.meep` and `briarHound-0.meep`, the reported BLAS arena end advances by 79,808 bytes per subsequent cycle, from 159,648 after the first pair to 718,304 after the eighth. After each teardown there are no character entities or scene instances and occupied meshlet bytes are back at the source baseline. The paired pool case keeps BLAS buffer capacity flat.
 
 Game workaround: retain the existing registered character pool, parked offstage, restoring materials, animation and joint authority on reuse. Suggested engine change: recycle per-clone BLAS node ranges, or compact and republish their addresses; ordinary buffer growth alone does not reclaim them.
+
+## MEEP-013 — acoustic rays cannot query native heightfields
+
+**Reproduced and source verified in the published package.** `AcousticOccluderIndex.closestHit` calls `body.shape.raycast`. `HeightMapShape3D` inherits `AbstractShape3D.raycast`, which throws `Not Implemented`; physics uses its own heightfield query dispatch. Registering the game's terrain with `AcousticSimulator.addOccluder` therefore succeeds, but the first downward reflection ray aborts `bakeReverbBands`.
+
+Game workaround: `AcousticTerrain` retains the native heightfield's volume and signed-distance queries and delegates rays to a native `MeshShape3D` surface built from the canonical 2 m terrain vertices and matching triangle diagonals. This surface is used only for ray queries; it needs no tetrahedral interior. Native mesh BVH construction and intersection remain unchanged. Regression rays verify its world-space height against `heightAt`, and the full probe bake exercises reflection queries. Physics continues using its original heightfield. Suggested engine change: implement the shape's public raycast contract by reusing the native heightfield traversal, or support heightfields explicitly in the acoustic query index.

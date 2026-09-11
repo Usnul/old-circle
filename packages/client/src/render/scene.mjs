@@ -15,11 +15,10 @@ import { LightSystem } from '@woosh/meep-engine/src/engine/graphics3/LightSystem
 import { Light } from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import { ParticipatingMediaSystem } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMediaSystem.js';
 import { ParticipatingMedia } from '@woosh/meep-engine/src/engine/graphics3/ParticipatingMedia.js';
-import { MeshletGeometry } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
-import { MeshletGeometrySerializationAdapter } from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
+import {VolumetricsParticleSpec} from '@woosh/meep-engine/src/shade/renderer/volumetrics/ParticipatingMediaVolume.js';
+import {MIE_PARTICLES_STANDARD_PRECOMPUTED} from '@woosh/meep-engine/src/core/math/physics/mie/MIE_PARTICLES_STANDARD_PRECOMPUTED.js';
 import { StandardShadeMaterial } from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
-import { BinaryBuffer } from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import { ShadeImage } from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
 import { ColorSpace } from '@woosh/meep-engine/src/shade/renderer/texture/ColorSpace.js';
@@ -27,6 +26,7 @@ import { WorldAudio } from './audio.mjs';
 import { WorldSky } from './sky.mjs';
 import { buildLayout } from '@old-circle/game/world/layout.mjs';
 import { heightAt } from '@old-circle/game/world/regions.mjs';
+import {DUNGEON_MATERIALS} from '@old-circle/game/world/dungeons.mjs';
 import { effect } from './effects.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
@@ -34,13 +34,23 @@ import {Characters} from './characters.mjs';
 import {WorldWind} from './wind.mjs';
 import {WorldAmbient} from './ambient.mjs';
 import {WorldBanners} from './banners.mjs';
+import {WorldFootsteps} from './footsteps.mjs';
+import {BossHazards,isBossHazard} from './boss-hazards.mjs';
+import {DecalSystem} from '@woosh/meep-engine/src/engine/graphics3/DecalSystem.js';
+import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundListenerSystem.js';
+import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
+import {ModelStore} from './model-store.mjs';
+import {WorldStream} from './world-stream.mjs';
+import {GeometryCache} from './geometry-cache.mjs';
+import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
+import {CombatTrails} from './combat-trails.mjs';
 
-const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59]};
+const PALETTE={stone:[.36,.37,.30],stoneLight:[.52,.50,.39],stoneDark:[.20,.24,.22],grass:[.22,.31,.12],grassLight:[.39,.43,.19],bark:[.14,.12,.085],leaf:[.10,.21,.12],leafLight:[.20,.29,.13],brass:[.48,.31,.12],iron:[.20,.23,.24],cloth:[.065,.095,.10],leather:[.12,.07,.035],ember:[1,.37,.06],magic:[.20,.57,.76],bone:[.63,.60,.48],sand:[.48,.32,.19],snow:[.61,.70,.73],ice:[.34,.52,.59],skin:[.34,.22,.15],lining:[.018,.022,.02]};
 const quat=new Quaternion();
 export class WorldView {
   constructor(){this.models=new Map();this.characters=new Map();this.corpses=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
-  async start(progress=()=>{}){
+  async start(progress=()=>{},position=[0,heightAt(0,23)+1,23]){
     progress('Kindling the light…',.1);
     this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
@@ -51,6 +61,9 @@ export class WorldView {
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
+      config.addSystem(new DecalSystem(engine.graphics,engine.assetManager));
+      this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
+      config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
     }});
     this.ecd=this.engine.entityManager.dataset;
@@ -64,7 +77,8 @@ export class WorldView {
     renderer.pixel_ratio=Math.min(devicePixelRatio,1.4);
     const camera=new Camera();camera.fov.set(57);camera.clip_near=.12;camera.clip_far=1100;
     this.cameraTransform=new Transform64();this.cameraEntity=new Entity().add(camera).add(this.cameraTransform).build(this.ecd);
-    this.materials={};for(const [key,color] of Object.entries(PALETTE)){
+    this.listenerTransform=new Transform64();this.listenerEntity=new Entity().add(new SoundListener()).add(this.listenerTransform).build(this.ecd);
+    this.materials={};for(const [key,color] of Object.entries({...PALETTE,...Object.fromEntries(Object.entries(DUNGEON_MATERIALS).map(([name,spec])=>[name,spec.color]))})){
       const m=new StandardShadeMaterial();m.diffuse_color.set(...color);m.roughness_factor=key==='iron'?.43:key==='brass'?.38:.92;m.metallic_factor=key==='iron'?.7:key==='brass'?.78:0;
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
       this.materials[key]=m;
@@ -87,39 +101,42 @@ export class WorldView {
     this.materials.bark.texture_albedo=textures.bark;
     for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_normal=textures['stone-normal'];
     this.materials.landscape.texture_normal=textures['ground-normal'];this.materials.bark.texture_normal=textures['bark-normal'];
-    for(const name of ['iron','brass','leather','cloth','cloak','limestone']){
+    for(const name of ['iron','brass','leather','cloth','cloak','limestone',...Object.keys(DUNGEON_MATERIALS)]){
       const material=this.materials[name];material.roughness_factor=1;material.metallic_factor=name==='iron'||name==='brass'?1:0;
       for(const [suffix,channel] of [['','albedo'],['-normal','normal'],['-orm','orm']]){
-        const response=await fetch(`/assets/textures/${name}${suffix}.png`);if(!response.ok)throw new Error(`Missing material ${name}${suffix}`);
-        const image=ShadeImage.fromImageBitmap(await createImageBitmap(await response.blob()));image.color_space=suffix?ColorSpace.None:ColorSpace.SRGB;
-        material[`texture_${channel}`]=ShadeTexture.from(image);
+        const texture=(DUNGEON_MATERIALS[name]?.texture??name)+suffix;
+        if(!textures[texture]){
+          const response=await fetch(`/assets/textures/${texture}.png`);if(!response.ok)throw new Error(`Missing material ${texture}`);
+          const image=ShadeImage.fromImageBitmap(await createImageBitmap(await response.blob()));image.color_space=suffix?ColorSpace.None:ColorSpace.SRGB;
+          textures[texture]=ShadeTexture.from(image);
+        }
+        material[`texture_${channel}`]=textures[texture];
       }
     }
-    const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json()),adapter=new MeshletGeometrySerializationAdapter();
-    const entries=Object.entries(manifest.models);let complete=0;
-    // Limited fetch concurrency avoids monopolizing browser networking during startup.
-    for(let start=0;start<entries.length;start+=8){
-      await Promise.all(entries.slice(start,start+8).map(async([name,chunks])=>{
-        this.models.set(name,await Promise.all(chunks.map(async c=>{
-          const response=await fetch(`/assets/geometry/${c.file}`);if(!response.ok)throw new Error(`Missing asset ${c.file}`);
-          const buffer=new BinaryBuffer();buffer.fromArrayBuffer(await response.arrayBuffer());const geometry=new MeshletGeometry();adapter.deserialize(buffer,geometry);
-          return {geometry,material:this.materials[c.material]};
-        })));complete++;progress('Remembering the old road…',.15+complete/entries.length*.65);
-      }));
-    }
-    const layout=buildLayout(),groundMeshes=[];for(const p of layout.props){const parts=this.model(p.model,p.position,p.scale,p.yaw,null,p.up);if(p.model.startsWith('terrain_'))for(const part of parts)groundMeshes.push(this.ecd.getComponent(part.id,ShadedGeometry).node);}
+    const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json());
+    const gpuGeometry=renderer.scenes.obtain(this.scene).geometries;
+    this.gpuGeometry=gpuGeometry;
+    this.geometryCache=new GeometryCache(manifest);
+    this.modelStore=new ModelStore({manifest,materials:this.materials,models:this.models,read:file=>this.geometryCache.read(file),residentCache:true,dispose:geometry=>gpuGeometry.remove(geometry)});
+    const core=Object.keys(manifest.models).filter(name=>name==='pilgrim'||name==='briarHound'||name==='votiveBanner'||name.startsWith('armor_')||name.startsWith('boss_'));
+    core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
+    await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
+    const layout=buildLayout();this.streaming=new WorldStream(this,layout,this.modelStore);
+    await this.streaming.start(position,p=>progress('Remembering the old road…',.15+p*.5));
+    await this.geometryCache.warm(p=>progress('Remembering the distant paths…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,groundMeshes);
-    this.audio=new WorldAudio(this.engine);await this.audio.start();
+    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundMeshes);
+    this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
+    this.footsteps=new WorldFootsteps(this);
+    this.bossHazards=new BossHazards(this);
+    this.combatTrails=new CombatTrails(this);
     this.sun=this.light([30,70,20],[1,.95,.83],2.8,Light.Type.DIRECTION,true);
     t64_look_rotation(this.sun.t,-.6,-.7,-.45,0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
-    for(let i=0;i<layout.lights.length;i++){
-      const p=layout.lights[i];this.light(p,[1,.48,.13],42,Light.Type.POINT,i%5===0,8);
-      this.emitter('embers',p,22);
-    }
     this.ambient=new WorldAmbient(this);
-    const fog=new ParticipatingMedia();fog.target_extinction=.0006;fog.fade_distance=30;
-    const ft=new Transform64();ft.setTranslation(0,24,-120);ft.setScale(650,140,800);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
+    // Atmospheric perspective reaches over the backdrop summits as well as
+    // the road; a shallow box left distant peaks as crisp as the foreground.
+    const fog=new ParticipatingMedia();fog.particle_spec=VolumetricsParticleSpec.fromMeep(MIE_PARTICLES_STANDARD_PRECOMPUTED.CONTINENTAL_HAZE_SMALL);fog.target_extinction=.00035;fog.fade_distance=45;
+    const ft=new Transform64();ft.setTranslation(0,110,-150);ft.setScale(1100,400,1150);ft.updateMatrix();new Entity().add(fog).add(ft).build(this.ecd);
     for(const [x,z,w,d,strength] of [[-85,-55,65,90,.012],[35,-185,38,70,.014],[-112,-210,90,80,.009],[95,-248,85,80,.004],[0,-78,42,22,.009]]){
       const low=new ParticipatingMedia();low.target_extinction=strength;low.fade_distance=7;
       const lt=new Transform64();lt.setTranslation(x,heightAt(x,z)+2,z);lt.setScale(w,9,d);lt.updateMatrix();new Entity().add(low).add(lt).build(this.ecd);
@@ -154,34 +171,39 @@ export class WorldView {
   }
   update(snapshot,playerId,dt){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
-    const present=new Set();
+    const present=new Set(),presented=[];
     const renderTime=performance.now()/1000;
     for(const state of snapshot.actors){
       const a=this.poses.sample(state,renderTime);
+      presented.push(a);
       if(a.hp<=0){continue;}present.add(a.id);
-      let rig=this.characters.get(a.id);if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
+      let rig=this.characters.get(a.id);
+      if(rig&&rig.url!==this.characterRenderer.appearance(a)){this.characterRenderer.remove(rig);rig=null;}
+      if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
       if(a.windup>0&&a.attackKind==='nova'){
         rig.telegraph??=this.model('dangerRing');this.pose(rig.telegraph,[a.x,heightAt(a.x,a.z)+.13,a.z],8);
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
       this.characterRenderer.update(rig,a);
+      if(a.id!==playerId&&rig.viewFaded)this.characterRenderer.viewAlpha(rig,1);
     }
     const dead=new Set();
     for(const state of snapshot.ragdolls??[]){
       dead.add(state.key);let rig=this.corpses.get(state.key);
       if(!rig){
         rig=!present.has(state.actorId)&&this.characters.get(state.actorId);if(rig)this.characters.delete(state.actorId);
-        else rig=this.characterRenderer.create({archetype:state.name==='briarHound'?'hound':state.appearance,kind:state.appearance==='player'?'player':'enemy',weapon:state.weapon??'sword'});
+        else rig=this.characterRenderer.create({archetype:state.name==='briarHound'?'hound':state.appearance,kind:state.appearance==='player'?'player':'enemy',weapon:state.weapon??'sword',inventory:{armor:state.armor}});
         this.corpses.set(state.key,rig);
       }
       this.characterRenderer.corpse(rig,this.poses.corpse(state,renderTime));
     }
     for(const [key,rig] of this.corpses)if(!dead.has(key)){this.characterRenderer.remove(rig);this.corpses.delete(key);}
     for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
-    const liveProjectiles=new Set();for(const p of snapshot.projectiles){liveProjectiles.add(p.id);let m=this.missiles.get(p.id);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell');this.missiles.set(p.id,m);}const v=p.velocity;this.pose(m,p.position,1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
+    const liveProjectiles=new Set();for(const p of snapshot.projectiles){if(isBossHazard(p))continue;const key=p.key??p.id;liveProjectiles.add(key);let m=this.missiles.get(key);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell',[0,0,0],[1,1,1],0,p.effect==='cinder'?this.materials.ember:null);this.missiles.set(key,m);}const v=p.velocity;this.pose(m,p.position,p.effect==='cinder'?1.7:1,Math.atan2(-v[0],-v[2]),-Math.PI/2);}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
+      this.streaming.update(player,dt);
       const pitch=this.pitch,dist=this.distance,target=[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);
@@ -189,13 +211,18 @@ export class WorldView {
       const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
       this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
+      const playerRig=this.characters.get(playerId);if(playerRig)this.characterRenderer.viewAlpha(playerRig,(this.cameraDistance-1)/1.2);
       this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...target.map((v,i)=>v-this.cameraPosition[i]),0,1,0);this.cameraTransform.updateMatrix();
+      this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
       this.ambient.update(player,snapshot.time,dt);
-      this.banners.update(dt);
+      this.banners.update(dt,player);
     }
     const sky=this.sky.update(this.scene,snapshot.time);
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);
     t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
+    this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
+    this.bossHazards.update(snapshot.projectiles,player,this.poses.epoch,dt);
+    this.combatTrails.update(presented,snapshot.projectiles,player,this.poses.epoch,dt);
   }
 }

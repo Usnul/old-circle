@@ -10,14 +10,17 @@ from mathutils import Vector, Matrix, Quaternion
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from equipment_materials import build_equipment_materials,apply_equipment_materials
+from garments import build_garments
 build_equipment_materials(ROOT)
 OUT=ROOT/'.local/blender';OUT.mkdir(parents=True,exist_ok=True)
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 C=Matrix(((1,0,0,0),(0,0,1,0),(0,-1,0,0),(0,0,0,1)))
 TAU=math.tau
 MATERIALS={}
-for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'cloak':(1,1,1),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06)}.items():
+for name,color in {'iron':(.20,.23,.24),'brass':(.48,.31,.12),'cloth':(.065,.095,.10),'cloak':(1,1,1),'leather':(.12,.07,.035),'bone':(.63,.60,.48),'bark':(.14,.12,.085),'ember':(1,.37,.06),'skin':(.34,.22,.15),'lining':(.018,.022,.02)}.items():
     mat=bpy.data.materials.new(name);mat.diffuse_color=(*color,1);MATERIALS[name]=mat
+    if name in ['skin','lining']:
+        mat.use_nodes=True;shader=mat.node_tree.nodes.get('Principled BSDF');shader.inputs['Base Color'].default_value=(*color,1);shader.inputs['Roughness'].default_value=.92
 apply_equipment_materials(MATERIALS,ROOT)
 GEOMETRY={};RIGS={};objects=[]
 
@@ -92,43 +95,33 @@ def make_rig(name,definitions):
     for b in rig.pose.bones:b.rotation_mode='QUATERNION'
     return rig
 
-def human_mesh():
-    ellipsoid((0,0,1.16),(.245,.155,.29),'spine','cloth')
-    ellipsoid((0,-.01,1.33),(.245,.175,.205),'chest')
-    # Overlapping faulds, a narrow waist, articulated pauldrons and greaves.
-    for i in range(4):
-        ellipsoid((0,0,1.06-i*.055),(.235+i*.008,.155,.053),'hips','iron')
-    plate((0,-.174,1.33),(.035,.022,.27),'chest','brass',.008)
-    plate((0,0,1.03),(.50,.35,.055),'hips','leather')
-    plate((.08,-.181,1.03),(.065,.018,.065),'hips','brass',.006)
-    for side,suffix in [(-1,'L'),(1,'R')]:
-        ellipsoid((side*.30,0,1.44),(.145,.17,.105),'upperArm'+suffix)
-        for row in range(3):
-            plate((side*.315,0,1.425-row*.047),(.16,.32,.04),'upperArm'+suffix,'iron',.018)
-        limb((side*.33,0,1.38),(side*.445,0,1.17),.079,.062,'upperArm'+suffix,'cloth')
-        ellipsoid((side*.46,0,1.15),(.085,.077,.08),'forearm'+suffix,'iron')
-        limb((side*.46,0,1.12),(side*.50,-.03,.925),.072,.05,'forearm'+suffix)
-        ellipsoid((side*.5,-.06,.885),(.058,.066,.067),'hand'+suffix,'leather')
-        for finger in range(3):plate((side*.5+(finger-1)*.025,-.105,.859),(.018,.06,.035),'hand'+suffix,'iron',.007)
-        limb((side*.14,0,.91),(side*.14,-.02,.56),.112,.08,'thigh'+suffix,'cloth')
-        ellipsoid((side*.14,-.068,.73),(.10,.075,.19),'thigh'+suffix)
-        ellipsoid((side*.14,-.07,.52),(.088,.083,.092),'calf'+suffix)
-        limb((side*.14,-.02,.48),(side*.14,0,.13),.077,.052,'calf'+suffix)
-        plate((side*.14,-.09,.072),(.15,.29,.13),'foot'+suffix,'leather',.035)
-        plate((side*.14,-.17,.102),(.155,.16,.065),'foot'+suffix,'iron',.02)
-    ellipsoid((0,0,1.62),(.116,.114,.12),'head','cloth')
-    ellipsoid((0,0,1.685),(.137,.133,.162),'head')
-    plate((0,-.125,1.69),(.23,.034,.036),'head','cloth',.008)
-    plate((0,-.15,1.646),(.025,.025,.085),'head','brass',.006)
+def human_mesh(variant='pilgrim'):
+    heavy=variant=='sentinel'
+    build_garments(variant,bind,ellipsoid,plate,limb)
+    plate((0,-.20,1.33),(.026,.022,.24),'chest','brass',.008)
     for side in [-1,1]:
-        plate((side*.098,-.099,1.625),(.055,.064,.091),'head','iron',.017)
-        for j in range(3):ellipsoid((side*(.07+j*.045),-.165,1.40),(.011,.01,.011),'chest','brass',1)
+        for j in range(3):ellipsoid((side*(.07+j*.045),-.179,1.40),(.011,.01,.011),'chest','brass',1)
+    if heavy:
+        # Lamellar collar, a split crown crest and a heavy lower breastplate.
+        for side in [-1,1]:
+            plate((side*.15,.01,1.5),(.09,.26,.17),'chest','brass',.015)
+            for j in range(3):plate((side*(.04+j*.04),.015,1.82+j*.025),(.025,.14,.13),'head','brass',.006)
+        plate((0,-.18,1.22),(.35,.035,.12),'spine','brass',.02)
+    if variant=='winter':
+        for j in range(13):
+            angle=j/12*math.pi
+            ellipsoid((math.cos(angle)*.29,.015+math.sin(angle)*.13,1.49),(.10,.09,.10),'chest','bone',2)
+    if variant=='keeper':
+        for j in range(7):ellipsoid(((j-3)*.047,-.208,1.23-abs(j-3)*.017),(.018,.014,.022),'chest','brass',1)
+    if variant=='wayfarer':
+        plate((.23,-.09,1.02),(.13,.13,.20),'hips','leather',.035)
+        plate((-.22,.10,1.04),(.15,.13,.14),'hips','leather',.03)
     # Cloth spans several joints, with a frayed silhouette and a centre split.
     verts=[];faces=[]
     for row in range(17):
         t=row/16
         for col in range(13):
-            s=col/12;z=1.43-t*1.17
+            s=col/12;z=1.43-t*(.78 if variant=='wayfarer' else 1.17)
             if row==16:z+=.04*math.sin(col*2.7)+(.12 if col==6 else 0)
             verts.append(((s-.5)*(.48+t*.28),.19+t*.19+math.sin(s*TAU*3)*.025,z))
     for row in range(16):
@@ -159,6 +152,11 @@ def human_pose(kind,time,duration,weapon):
     if kind=='jump':lean=.12*math.sin(math.pi*phase);root.z-=.05*math.sin(math.pi*phase)
     if kind=='mantle':root.y-=.14*math.sin(math.pi*phase);root.z-=.25*(1-smooth(phase))
     if kind=='sword':chest_yaw=keypose([(0,(0,0,.0)),(.18,(0,0,-.50)),(.43,(0,0,.60)),(.72,(0,0,0))],time).z
+    ritual={'bell_slam':1.2,'root_call':1.05,'cinder_volley':.95,'mirror_prayer':1.1,'winter_sweep':1.15,'king_judgment':1.45}.get(kind)
+    if ritual:
+        impact=max(0,1-abs(time-ritual-.12)/.4)
+        if kind in ['bell_slam','root_call','king_judgment']:root.z-=.15*impact;lean+=.17*impact
+        if kind=='winter_sweep':chest_yaw=.5*math.sin(math.pi*time/duration)
     rot=Matrix.Rotation(chest_yaw,4,'Z')@Matrix.Rotation(lean,4,'X')
     def body(p):return root+rot.to_3x3()@v(p)
     spine=body((0,0,.18));chest=body((0,0,.4));neck=body((0,0,.57));head=body((.012*math.sin(cycle),-.015,.85))
@@ -198,6 +196,22 @@ def human_pose(kind,time,duration,weapon):
         right=body((.13,-.50,.43));left=body(keypose([(0,(-.17,-.32,.38)),(.36,(-.21,-.01,.45)),(.50,(-.22,.08,.45)),(.8,(-.25,-.22,.26))],time));direction=v((0,0,1))
     elif kind in ['staff','nova']:
         lift=math.sin(math.pi*phase);right=body((.32,-.27,.15+.42*lift));left=body((-.30,-.25,.15+.36*lift));direction=v((.06,-.35,1)).normalized()
+    elif ritual:
+        raise_amount=smooth(time/ritual);settle=1-smooth((time-ritual)/max(.01,duration-ritual))
+        if kind=='bell_slam':
+            hands=keypose([(0,(.25,-.16,.20)),(ritual*.8,(.12,.04,1.00)),(ritual,(.10,-.43,-.18)),(duration,(.34,-.18,.14))],time)
+            right=body(hands);left=body((-hands.x,hands.y,hands.z));direction=v((0,-.25,-1)).normalized()
+        elif kind=='root_call':
+            spread=math.sin(math.pi*time/duration);right=body((.36+.25*spread,-.12,.18+.40*raise_amount*settle));left=body((-.36-.25*spread,-.12,.18+.40*raise_amount*settle));direction=v((0,-.6,-.8))
+        elif kind=='cinder_volley':
+            right=body((.20,-.53,.34+.22*raise_amount*settle));left=body((-.30,-.31,.25));direction=v((0,-1,.10)).normalized()
+        elif kind=='mirror_prayer':
+            spread=smooth((time-ritual*.7)/.3)*settle;right=body((.08+.43*spread,-.32,.50));left=body((-.08-.43*spread,-.32,.50));direction=v((0,0,1))
+        elif kind=='winter_sweep':
+            sweep=keypose([(0,(.38,-.1,.2)),(ritual*.8,(-.20,-.35,.50)),(ritual+.2,(.52,-.35,.19)),(duration,(.34,-.18,.14))],time)
+            right=body(sweep);left=body((-.24,-.34,.22));direction=v((.5*math.sin(time*3),-1,.1)).normalized()
+        else:
+            right=body((.34,-.12,.20+.62*raise_amount*settle));left=body((-.40,-.30,.25+.25*raise_amount*settle));direction=v((0,0,1))
     elif kind in ['hang','mantle']:
         amount=1 if kind=='hang' else 1-smooth(phase)
         right=body((.31,-.23,.14+.66*amount));left=body((-.31,-.23,.14+.66*amount));direction=v((0,0,-1))
@@ -327,7 +341,17 @@ for weapon in ['sword','spear','bow','staff']:
         for direction in ['forward_right','right','back_right','back','back_left','left','forward_left']:
             name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
+for name,windup,recovery in [('bell_slam',1.2,1.45),('root_call',1.05,1.4),('cinder_volley',.95,1.1),('mirror_prayer',1.1,1.3),('winter_sweep',1.15,1.5),('king_judgment',1.45,1.7)]:clips.append((name,name,windup+recovery,'spear'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
+for variant in ['wayfarer','keeper','sentinel','winter']:
+    export('armor_'+variant,HUMAN,lambda variant=variant:human_mesh(variant),human_pose,[])
+    # These skins share the pilgrim's joint order, bind pose and complete Actions.
+    # Retain their editable armatures in the blend, without duplicate runtime rigs.
+    del RIGS['armor_'+variant]
+from bosses import build_boss
+for keeper in ['warden','rootbound','cantor','mirror','frostbound','last-king']:
+    export('boss_'+keeper,HUMAN,lambda keeper=keeper:build_boss(keeper,human_mesh,ellipsoid,plate,limb,bind),human_pose,[])
+    del RIGS['boss_'+keeper]
 export('briarHound',HOUND,hound_mesh,hound_pose,[(kind,kind,duration,'sword') for kind,duration in [('idle',3.4),('walk',.9),('run',.55),('sword',.72),('hurt',.3),('jump',.6)]])
 from banner import build_banner
 build_banner(export,MATERIALS,lambda:objects)

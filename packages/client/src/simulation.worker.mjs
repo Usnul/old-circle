@@ -2,6 +2,8 @@ import { GameWorld, DT } from '@old-circle/game/simulation/world.mjs';
 import { SharedSession, NET_DT, PROTOCOL_VERSION } from '@old-circle/game/network/session.mjs';
 import { GameSocketTransport as WebSocketTransport } from '@old-circle/game/network/socket-transport.mjs';
 import { WEAPONS } from '@old-circle/game/content/catalog.mjs';
+import {armorIds,reinforcement} from '@old-circle/game/content/equipment.mjs';
+import {charmIds} from '@old-circle/game/content/charms.mjs';
 import { SpatialAtlas } from '@old-circle/game/world/spatial-atlas.mjs';
 import { landmarkPosition,HEARTHS } from '@old-circle/game/world/regions.mjs';
 import {hearthArrival} from '@old-circle/game/simulation/resting.mjs';
@@ -11,7 +13,7 @@ import {Ragdolls} from '@old-circle/game/simulation/ragdolls.mjs';
 // warm while NetworkSession predicts and reconciles the connected character.
 let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false;
 let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,lastEventTick=-1,connectedAt=0;
-let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,sequence:0},pendingLevel;
+let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,armor:0,upgradeWeapon:0,charm:0,sequence:0},pendingLevel,pendingEquipment;
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const seenEvents=new Set();
 let presentationEpoch=0,presentationMode,presentationFrame=-1;
@@ -21,13 +23,17 @@ function stamp(snapshot,mode){
   presentationFrame=frame;return {...snapshot,presentationFrame:frame,presentationEpoch};
 }
 function levelResult(ok){const mode=remote?'online':'offline';postMessage({type:'level-result',ok,snapshot:stamp({...world.snapshot(),events:[],ragdolls:ragdolls.snapshot()},mode),mode});}
+function equipmentResult(ok){const mode=remote?'online':'offline';postMessage({type:'equipment-result',ok,snapshot:stamp({...world.snapshot(),events:[],ragdolls:ragdolls.snapshot()},mode),mode});}
+function finishEquipment(){if(!pendingEquipment)return;const p=world.actor(playerId),r=pendingEquipment;equipmentResult(r.type==='armor'?p.inventory.armor===r.item:r.type==='charm'?p.inventory.charm===r.item:reinforcement(p,r.item)>r.rank);pendingEquipment=null;}
 function disconnect(reason='Connection closed'){
   seenEvents.clear();
   postMessage({type:'network-status',message:reason});
   const old=remote;remote=null;connecting=false;retryAt=performance.now()+5000;accumulator=0;lastEventTick=-1;
+  if(old)world.resumeLocalWorld(playerId);
   const ws=socket;socket=null;try{ws?.close();}catch{}
   old?.stop().catch(e=>console.warn('Session cleanup',e));
   if(pendingLevel){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
+  finishEquipment();
 }
 function connect(){
   if(connecting||remote||!url)return;connecting=true;
@@ -62,6 +68,7 @@ function update(){
         events.push(...state.events);
         world.replaceSnapshot(state);mode='online';
         if(pendingLevel&&remote.localCharacter()?.appliedSequence===pendingLevel.sequence){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
+        if(pendingEquipment&&remote.localCharacter()?.appliedSequence===pendingEquipment.sequence)finishEquipment();
       }else{world.input(playerId,intent);if(!paused)world.step(DT);}
       if(now-connectedAt>5000&&now-lastServerAt>1000)disconnect(`No authoritative updates; continuing locally from tick ${lastServerTick}`);
     }else if(!paused){
@@ -89,8 +96,16 @@ self.onmessage=async({data})=>{
     if(data.type==='equip'){world.equip(playerId,data.weapon);settings.weapon=weaponIds.indexOf(data.weapon);}
     if(data.type==='pvp'){world.actor(playerId).pvp=data.enabled;settings.pvp=Number(data.enabled);}
     if(data.type==='level'){
-      if(remote){settings.levelStat=stats.indexOf(data.stat)+1;settings.sequence++;pendingLevel={sequence:settings.sequence,level:world.actor(playerId).level};}
+      if(pendingLevel||pendingEquipment)return;
+      if(remote){settings.armor=0;settings.upgradeWeapon=0;settings.charm=0;settings.levelStat=stats.indexOf(data.stat)+1;settings.sequence++;pendingLevel={sequence:settings.sequence,level:world.actor(playerId).level};}
       else levelResult(world.levelUp(playerId,data.stat));
+    }
+    if(data.type==='armor'||data.type==='reinforce'||data.type==='charm'){
+      if(pendingLevel||pendingEquipment)return;
+      if(remote){
+        settings.levelStat=0;settings.armor=data.type==='armor'?armorIds.indexOf(data.item)+1:0;settings.upgradeWeapon=data.type==='reinforce'?weaponIds.indexOf(data.item)+1:0;settings.charm=data.type==='charm'?charmIds.indexOf(data.item)+1:0;settings.sequence++;
+        pendingEquipment={type:data.type,item:data.item,sequence:settings.sequence,rank:reinforcement(world.actor(playerId),data.item)};
+      }else equipmentResult(data.type==='armor'?world.equipArmor(playerId,data.item):data.type==='charm'?world.equipCharm(playerId,data.item):world.reinforce(playerId,data.item));
     }
     if(data.type==='save')postMessage({type:'save',character:world.exportCharacter(playerId)});
     if(data.type==='pause'){paused=data.paused;if(paused)intent={...intent,x:0,z:0,buttons:0};}
@@ -101,6 +116,10 @@ self.onmessage=async({data})=>{
       presentationEpoch++;postMessage({type:'snapshot',snapshot:stamp({...world.snapshot(),ragdolls:ragdolls.snapshot()},'offline'),mode:'offline'});
     }
     if(inspect&&data.type==='atlas'){const atlas=new SpatialAtlas(world).build();postMessage({type:'atlas',faces:atlas.faceCount,samples:atlas.samples});}
+    if(data.type==='foot-surfaces'){
+      if(data.epoch!==presentationEpoch)return;
+      postMessage({type:'foot-surfaces',id:data.id,epoch:data.epoch,hits:data.feet.slice(0,64).map(f=>world.footSurface(f.position,f.scale))});
+    }
     if(data.type==='camera'){
       const p=world.actor(playerId),from=data.from??[p.x,p.y+.7,p.z],to=data.position,d=to.map((v,i)=>v-from[i]),length=Math.hypot(...d);
       if(length<.001)return;

@@ -1,29 +1,27 @@
 import {createServer} from 'node:http';
 import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';
-import {resolve,extname,sep} from 'node:path';
+import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {WebSocketServer} from 'ws';
 import {GameSocketTransport as WebSocketTransport} from '@old-circle/game/network/socket-transport.mjs';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {SharedSession,PROTOCOL_VERSION,NET_DT} from '@old-circle/game/network/session.mjs';
+import {INTEREST} from '@old-circle/game/network/interest.mjs';
+import {staticAssets} from './static-assets.mjs';
 
 const root=resolve(import.meta.dirname,'../../..');
 // Disk saves are independent of network framing. Protocol upgrades must not
 // invalidate the persistent world's existing Meep binary envelope.
 const WORLD_SAVE_VERSION=1;
-const contentTypes={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.wav':'audio/wav','.svg':'image/svg+xml'};
-export async function startServer({port=Number(process.env.PORT??8787),address=process.env.HOST??'127.0.0.1',dataDir=process.env.OLD_CIRCLE_DATA_DIR??resolve(root,'.local/server')}={}){
+export async function startServer({port=Number(process.env.PORT??8787),address=process.env.HOST??'127.0.0.1',dataDir=process.env.OLD_CIRCLE_DATA_DIR??resolve(root,'.local/server'),maxPlayers=Number(process.env.OLD_CIRCLE_MAX_PLAYERS??INTEREST.players)}={}){
+  if(!Number.isInteger(maxPlayers)||maxPlayers<1||maxPlayers>INTEREST.maximumPlayers)throw new Error(`Player capacity must be 1–${INTEREST.maximumPlayers}`);
   const storage=resolve(dataDir),savePath=resolve(storage,'world.meep'),clientRoot=resolve(root,'packages/client/dist');
   await mkdir(storage,{recursive:true});let saved;
   try{const bytes=await readFile(savePath),b=new BinaryBuffer();b.fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(b.readUint32()!==WORLD_SAVE_VERSION)throw new Error('Unsupported world save');saved=JSON.parse(b.readUTF8String());saved.actors=saved.actors.filter(a=>a.kind!=='player');}catch(e){if(e.code!=='ENOENT')throw e;}
-  const host=await new SharedSession('host').start(saved),sockets=new Map(),reservedPeers=new Set();
+  const host=await new SharedSession('host').start(saved),sockets=new Map(),joins=new Map(),reservedPeers=new Set(),serve=staticAssets(clientRoot);
   const http=createServer(async(req,res)=>{
-    if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size}));return;}
-    try{
-      const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname),file=resolve(clientRoot,'.'+(pathname==='/'?'/index.html':pathname));
-      if(!file.startsWith(clientRoot+sep)){res.writeHead(403);res.end();return;}
-      const data=await readFile(file);res.writeHead(200,{'Content-Type':contentTypes[extname(file)]??'application/octet-stream','Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder-Policy':'require-corp'});res.end(data);
-    }catch{res.writeHead(404);res.end('Build the client with pnpm build, or use the development server on port 5188.');}
+    if(req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({title:'Old Circle',protocol:PROTOCOL_VERSION,tick:host.sim.tick,players:sockets.size,capacity:maxPlayers}));return;}
+    await serve(req,res);
   });
   const wss=new WebSocketServer({server:http,path:'/multiplayer',maxPayload:2*1024*1024});
   wss.on('connection',socket=>{
@@ -31,21 +29,26 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
     const timeout=setTimeout(()=>socket.close(1008,'Join timed out'),5000);
     socket.on('close',()=>{
       if(closed)return;closed=true;clearTimeout(timeout);clearTimeout(readyTimeout);sockets.delete(socket);
-      if(info){host.removePlayer(info.peerId,info.playerId);queueMicrotask(()=>{host.net.drop_peer(info.peerId,'Socket closed');reservedPeers.delete(info.peerId);});}
+      if(info){if(joins.get(info.playerId)?.socket===socket)joins.delete(info.playerId);host.removePlayer(info.peerId,info.playerId);queueMicrotask(()=>{host.net.drop_peer(info.peerId,'Socket closed');reservedPeers.delete(info.peerId);});}
     });
     socket.once('message',(bytes,isBinary)=>{
       clearTimeout(timeout);
       try{
         if(isBinary)throw new Error('Expected join');const hello=JSON.parse(bytes.toString());
         if(hello.protocol!==PROTOCOL_VERSION||typeof hello.playerId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(hello.playerId))throw new Error('Incompatible join');
+        const prior=joins.get(hello.playerId);
+        if(joins.size>=maxPlayers&&!prior)throw new Error('World is full');
         let peerId=1;while(reservedPeers.has(peerId)&&peerId<=253)peerId++;if(peerId>253)throw new Error('World is full');reservedPeers.add(peerId);
-        for(const [old,prior] of sockets)if(prior.playerId===hello.playerId)old.close(1000,'Character reconnected');
         info={peerId,playerId:hello.playerId};
+        // Loading clients already own a reservation. Replace them as well as
+        // ready peers, and prevent their delayed ready packet importing a save.
+        joins.set(hello.playerId,{socket,info});prior?.socket.close(1000,'Character reconnected');
         const networkId=host.addPlayer(peerId,hello.playerId,hello.origin,hello.character);
         socket.send(JSON.stringify({type:'welcome',protocol:PROTOCOL_VERSION,peerId,networkId}));
         readyTimeout=setTimeout(()=>socket.close(1008,'Client initialization timed out'),15000);
         socket.once('message',(data,isBinary)=>{
           clearTimeout(readyTimeout);
+          if(closed||joins.get(info.playerId)?.socket!==socket)return;
           try{
             if(isBinary)throw new Error('Expected ready');const ready=JSON.parse(data.toString());if(ready.type!=='ready')throw new Error('Expected ready');
             if(ready.character)host.importReturningCharacter(hello.playerId,ready.character);

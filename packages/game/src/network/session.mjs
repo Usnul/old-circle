@@ -5,22 +5,24 @@ import { NetworkIdentity } from '@woosh/meep-engine/src/engine/network/ecs/compo
 import { BinarySerializationRegistry } from '@woosh/meep-engine/src/engine/ecs/storage/binary/BinarySerializationRegistry.js';
 import { SimAction } from '@woosh/meep-engine/src/engine/network/sim/SimAction.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
-import {OwnerAwareScope} from '@woosh/meep-engine/src/engine/network/replication/ScopeFilter.js';
 import {FrameAdapter} from './frame-adapter.mjs';
 import {worldPatch,applyWorldPatch} from './world-patch.mjs';
 import { GameWorld,DT } from '../simulation/world.mjs';
 import { WEAPONS } from '../content/catalog.mjs';
+import {armorIds} from '../content/equipment.mjs';
+import {charmIds} from '../content/charms.mjs';
+import {projectWorld,scopeInitialSnapshots} from './interest.mjs';
 
-export const PROTOCOL_VERSION=2,NET_DT=1/30;
-export class WorldFrame {static typeName='OldCircleWorldFrame';snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
-export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;appliedSequence=0;}
+export const PROTOCOL_VERSION=8,NET_DT=1/30;
+export class WorldFrame {static typeName='OldCircleWorldFrame';recipient=0;snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
+export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;charm=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
 const InputAction=SimAction.extend({
-  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32'},
+  type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32',armor:'uint8',upgradeWeapon:'uint8',charm:'uint8'},
   affects(executor){const e=executor.slot_table.entity_for(this.network_id);return e<0?[]:[[e,CharacterFrame]];},
   apply(world,executor){
     const e=executor.slot_table.entity_for(this.network_id);if(e<0)return;const c=world.getComponent(e,CharacterFrame);if(!c)return;
-    c.intent={x:this.x,z:this.z,yaw:this.yaw,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;
+    c.intent={x:this.x,z:this.z,yaw:this.yaw,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;c.armor=this.armor;c.upgradeWeapon=this.upgradeWeapon;c.charm=this.charm;
     if(world.oldCircle.role==='client')world.oldCircle.predict(c);
   },
 });
@@ -45,24 +47,36 @@ class PresenceAction extends SimAction {
 const patchAdapter=new FrameAdapter(Object);
 class WorldPatchAction extends SimAction {
   static action_type_name='OldCircleWorldPatch';
-  constructor(patch=null){super();this.patch=patch;}
-  affected_components(callback,executor){const e=executor.slot_table.entity_for(0);if(e>=0)callback(e,WorldFrame);}
-  apply(world,executor){const e=executor.slot_table.entity_for(0);if(e>=0)applyWorldPatch(world.getComponent(e,WorldFrame).snapshot,this.patch);}
-  serialize(buffer){patchAdapter.serialize(buffer,this.patch);}
-  deserialize(buffer){this.patch={};patchAdapter.deserialize(buffer,this.patch);}
-  reset(){this.patch=null;}
+  constructor(patch=null,networkId=0){super();this.patch=patch;this.networkId=networkId;}
+  affected_components(callback,executor){const e=executor.slot_table.entity_for(this.networkId);if(e>=0)callback(e,WorldFrame);}
+  apply(world,executor){
+    const e=executor.slot_table.entity_for(this.networkId);if(e<0)return;
+    if(world.oldCircle.failure)return;
+    try{applyWorldPatch(world.getComponent(e,WorldFrame).snapshot,this.patch);}
+    catch(error){
+      // Meep signals report handler exceptions but keep dispatching. Stop this
+      // client before it can present a partially applied world as authoritative.
+      const session=world.oldCircle;
+      if(session.role==='client')session.failure=new Error(`Peer ${session.peerId}, world ${this.networkId}: ${error.message}`,{cause:error});
+      throw session.failure??error;
+    }
+  }
+  serialize(buffer){buffer.writeUintVar(this.networkId);patchAdapter.serialize(buffer,this.patch);}
+  deserialize(buffer){this.networkId=buffer.readUintVar();this.patch={};patchAdapter.deserialize(buffer,this.patch);}
+  reset(){this.patch=null;this.networkId=0;}
 }
 
 /** NetworkSession owns packets, fragmentation, action logs, prediction and replay.
  * The replication dataset is a wire projection; gameplay remains in GameWorld's Meep ECS.
- * WorldFrame is a correctness-first baseline. Split it into scoped per-actor records before scaling.
+ * A host-only WorldFrame preserves rollback; recipient frames contain bounded
+ * nearby actors, projectiles and events and have independent replay baselines.
  */
 export class SharedSession {
   constructor(role,peerId=0,{simulation}={}){
     this.role=role;this.peerId=peerId;this.em=new EntityManager();this.ecd=new EntityComponentDataset();
     this.ecd.setComponentTypeMap([NetworkIdentity,WorldFrame,CharacterFrame]);this.em.attachDataset(this.ecd);this.ecd.oldCircle=this;
     this.characters=new Map();this.localInput={x:0,z:0,yaw:0,buttons:0,weapon:0,pvp:0,levelStat:0,sequence:0};this.localNetworkId=0;this.playerId='';
-    this.nextNetworkId=1000;this.retired=[];this.syncedPeers=new Set();this.connections=new Map();
+    this.nextNetworkId=1000;this.retired=[];this.syncedPeers=new Set();this.connections=new Map();this.views=new Map();
     this.sim=simulation;this.ownsSimulation=!simulation;
   }
   async start(savedWorld){
@@ -74,7 +88,7 @@ export class SharedSession {
     this.net.replicate(WorldFrame);this.net.replicate(CharacterFrame);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);this.net.defineAction(WorldPatchAction);
     if(this.role==='client')this.net.defineInputSampler(()=>{
       if(!this.localNetworkId||!this.localCharacter()?.actor)return [];
-      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence)];
+      const i=this.localInput;return [new InputAction(this.localNetworkId,i.x,i.z,i.yaw,i.buttons,i.weapon,i.pvp,i.levelStat,i.sequence,i.armor??0,i.upgradeWeapon??0,i.charm??0)];
     });
     await this.net.start();
     if(this.role==='client')this.net.peer.onMalformedPacket.add((_peer,error)=>{this.failure=error;});
@@ -82,8 +96,13 @@ export class SharedSession {
       const b=new BinaryBuffer();b.writeUint8(1);b.writeUint32(frame);this.net.peer.send_reliable_command(peer,b.raw_bytes,b.position);
     });
     if(this.role==='host'){
-      const scope=new OwnerAwareScope({world:this.ecd,slot_table:this.net.peer.slot_table,identity_class:NetworkIdentity});
-      this.net.peer.replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.syncedPeers.has(peer)&&scope.is_entity_in_scope(peer,id)};
+      const replicator=this.net.peer.replicator,pack=replicator.pack_for_peer.bind(replicator);
+      // Entity scope does not gate global actions or records whose entity was
+      // retired. Their packet ACK would credit withheld world deltas as well.
+      // Write no action stream until the initial snapshot is acknowledged.
+      replicator.pack_for_peer=(peer,from,to,buffer,budget)=>this.syncedPeers.has(peer)?pack(peer,from,to,buffer,budget):from-1;
+      replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.views.get(peer)?.networkId===id};
+      scopeInitialSnapshots(this.net,peer=>{const view=this.views.get(peer),character=view&&this.characters.get(view.playerId);return view&&character!==undefined?[view.entity,character]:[];});
       this.net.peer.onReliableCommand.add((peer,buffer,offset,length)=>{
         if(length!==5)return;buffer.position=offset;if(buffer.readUint8()!==1)return;const frame=buffer.readUint32();
         if(frame>this.net.current_frame)return;
@@ -101,9 +120,11 @@ export class SharedSession {
   addPlayer(peerId,playerId,origin,saved){
     // Reconnect accepts only the returning character. The authoritative world is never imported.
     let actor=this.sim.actor(playerId);if(!actor)actor=this.sim.addPlayer(playerId,origin,saved);else if(saved)this.sim.importCharacter(playerId,saved);
-    const prior=this.characters.get(playerId);if(prior!==undefined)this.retire(prior);
+    const prior=this.characters.get(playerId);if(prior!==undefined){this.retireView(this.ecd.getComponent(prior,NetworkIdentity)?.owner_peer_id);this.retire(prior);}
     const c=new CharacterFrame();c.actor=structuredClone(actor);c.weapon=weaponIds.indexOf(actor.weapon);c.pvp=Number(actor.pvp);
     const networkId=this.nextNetworkId++,e=this.spawn(networkId,peerId,c);this.characters.set(playerId,e);
+    const f=new WorldFrame();f.recipient=peerId;f.snapshot=projectWorld(this.sim.snapshot(),playerId);
+    const viewId=this.nextNetworkId++;this.views.set(peerId,{playerId,networkId:viewId,entity:this.spawn(viewId,0,f)});
     this.net.send(new PresenceAction(playerId,structuredClone(actor)));
     return networkId;
   }
@@ -117,14 +138,21 @@ export class SharedSession {
     // first fresh frame after that replay carries a complete corrected world;
     // deltas against rewritten history would otherwise leave stale HP/items.
     const replace=this.worldRewound&&frame>this.net.current_frame;
-    this.net.send(new WorldPatchAction(worldPatch(f.snapshot,snapshot,{replace})));if(replace)this.worldRewound=false;
+    this.net.send(new WorldPatchAction(worldPatch(f.snapshot,snapshot,{replace})));
+    for(const view of this.views.values()){
+      const prior=this.ecd.getComponent(view.entity,WorldFrame).snapshot,next=projectWorld(snapshot,view.playerId,prior);
+      this.net.send(new WorldPatchAction(worldPatch(prior,next,{replace}),view.networkId));
+    }
+    if(replace)this.worldRewound=false;
     for(const [id,e] of this.characters){const old=this.ecd.getComponent(e,CharacterFrame),actor=this.sim.actor(id);if(!old||!actor)continue;const next={...old,effects:[],actor:structuredClone(actor),appliedSequence:old.sequence};this.ecd.sendEvent(e,'net_mutate_component',{component_type:CharacterFrame,new_state:next});}
   }
   removePlayer(peerId,id){
     const e=this.characters.get(id);if(e===undefined||this.ecd.getComponent(e,NetworkIdentity)?.owner_peer_id!==peerId)return;
     this.retire(e);this.characters.delete(id);
+    this.retireView(peerId);
     this.net.send(new PresenceAction(id));
   }
+  retireView(peer){const view=this.views.get(peer);if(view){this.retire(view.entity);this.views.delete(peer);}this.syncedPeers.delete(peer);}
   retire(e){
     // Prior-byte history references local ECS IDs. Keep the old row until that
     // history expires, otherwise a rewind can restore it into a new character.
@@ -138,9 +166,14 @@ export class SharedSession {
   }
   applyIntent(c,id){
     this.sim.input(id,c.intent);this.sim.equip(id,weaponIds[c.weapon]??'sword');this.sim.actor(id).pvp=!!c.pvp;
-    if(c.levelStat>0&&c.sequence!==c.appliedSequence)this.sim.levelUp(id,stats[c.levelStat-1]);
+    if(c.sequence!==c.appliedSequence){
+      if(c.levelStat>0)this.sim.levelUp(id,stats[c.levelStat-1]);
+      else if(c.armor>0)this.sim.equipArmor(id,armorIds[c.armor-1]);
+      else if(c.upgradeWeapon>0)this.sim.reinforce(id,weaponIds[c.upgradeWeapon-1]);
+      else if(c.charm>0)this.sim.equipCharm(id,charmIds[c.charm-1]);
+    }
   }
-  worldFrame(){let f;this.ecd.traverseEntities([WorldFrame],value=>f=value);return f;}
+  worldFrame(){if(this.role==='host')return this.ecd.getComponent(this.worldEntity,WorldFrame);let f;this.ecd.traverseEntities([WorldFrame],value=>{if(value.recipient===this.peerId)f=value;});return f;}
   localCharacter(){let c;this.ecd.traverseEntities([CharacterFrame,NetworkIdentity],(value,n)=>{if(n.owner_peer_id===this.peerId)c=value;});return c;}
   predict(c){
     const f=this.worldFrame();if(!c.actor||!f||!f.snapshot.actors.length)return;
@@ -151,7 +184,7 @@ export class SharedSession {
     c.actor=structuredClone(this.sim.actor(c.actor.id));c.appliedSequence=c.sequence;
   }
   tick(){if(this.failure)throw this.failure;this.net.normalize_if_dirty();this.net.tick(NET_DT);while(this.retired.length&&this.net.current_frame-this.retired[0].frame>66)this.ecd.removeEntity(this.retired.shift().e);}
-  presentation(){const f=this.worldFrame();if(!f)return null;const snapshot=structuredClone(f.snapshot),local=this.localCharacter();if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
+  presentation(){if(this.failure)throw this.failure;const f=this.worldFrame(),local=this.localCharacter();if(!f||this.role==='client'&&!local?.actor)return null;const snapshot=structuredClone(f.snapshot);if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
   connect(peer,transport){
     this.syncedPeers.delete(peer);
     this.net.connect(peer,transport);

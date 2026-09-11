@@ -6,10 +6,54 @@ import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.j
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {SpatialAtlas} from '../world/spatial-atlas.mjs';
+import {ARMOR,weaponDamage,reinforcementLimit} from '../content/equipment.mjs';
+import {BOSSES,ENEMIES,WEAPONS,enemyDamage} from '../content/catalog.mjs';
 const worlds=[];
 async function setup(){const w=await new GameWorld().start({populate:false});worlds.push(w);return w;}
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
 const run=(w,n)=>{for(let i=0;i<n;i++)w.step();};
+
+test('native foot rays ignore characters and identify the contacted floor and its normal',async()=>{
+  const w=await setup(),p=w.addPlayer('feet');run(w,30);
+  const hit=w.footSurface([p.x,p.y-.845,p.z]);expect(hit).not.toBeNull();expect(hit.normal[1]).toBeGreaterThan(.65);
+  const y=heightAt(180,50),floor=w.body([180,y+1,50],BoxShape3D.from(3,.2,3),BodyKind.Static);w.contactSurfaces.set(floor,'wood');
+  const plank=w.footSurface([180,y+1.2,50]);expect(plank.surface).toBe('wood');expect(plank.position[1]).toBeCloseTo(y+1.2,3);
+  expect(w.footSurface([180,y+5,50])).toBeNull();
+});
+test('armor protects differently against physical blows and magic and reduces knockback',async()=>{
+  const w=await setup(),p=w.addPlayer('armored'),enemy=w.spawnActor('attacker',{},[p.x+3,p.y,p.z]);
+  p.inventory.armor='sentinel';const hp=p.hp;
+  w.damage(enemy,p,40,100);expect(hp-p.hp).toBeCloseTo(40*(1-ARMOR.sentinel.physical));expect(p.hurtTime).toBeCloseTo(.21);
+  const physicalHp=p.hp;w.damage(enemy,p,40,0,'magic');expect(physicalHp-p.hp).toBeCloseTo(40*(1-ARMOR.sentinel.magic));
+  p.inventory.armor='keeper';const spellHp=p.hp;w.damage(enemy,p,40,0,'magic');expect(spellHp-p.hp).toBeCloseTo(40*(1-ARMOR.keeper.magic));
+});
+test('hearth reinforcement spends once, respects seal rank and ownership, and survives legacy saves',async()=>{
+  const w=await setup(),p=w.addPlayer('smith');p.embers=2000;
+  expect(w.reinforce(p.id,'staff')).toBe(false);expect(p.embers).toBe(2000);
+  const base=weaponDamage(p);expect(w.reinforce(p.id,'sword')).toBe(true);expect(weaponDamage(p)).toBeCloseTo(base*1.18);expect(p.embers).toBe(1840);
+  expect(w.reinforce(p.id,'sword')).toBe(false);p.seals.push('Dawn');expect(reinforcementLimit(p)).toBe(2);
+  expect(w.reinforce(p.id,'sword')).toBe(true);expect(p.embers).toBe(1560);
+  const save=w.exportCharacter(p.id);w.importCharacter(p.id,save);expect(p.inventory.reinforcements.sword).toBe(2);
+  delete save.inventory.reinforcements;delete save.inventory.armors;save.inventory.armor='road-worn mail';w.importCharacter(p.id,save);
+  expect(p.inventory.armor).toBe('mail');expect(p.inventory.armors).toContain('keeper');expect(p.inventory.reinforcements.sword).toBe(0);
+  w.teleport(p,[60,heightAt(60,30)+1,30]);expect(w.reinforce(p.id,'sword')).toBe(false);
+});
+test('origins supply different owned armor and only safe hearths can change it or supply arrows',async()=>{
+  const w=await setup(),p=w.addPlayer('ranger','wayfarer');expect(p.inventory.armor).toBe('wayfarer');
+  expect(w.equipArmor(p.id,'sentinel')).toBe(false);expect(w.equipArmor(p.id,'mail')).toBe(true);
+  p.inventory.arrows=0;expect(w.rest(p)).toBe(true);expect(p.inventory.arrows).toBe(30);
+  p.inventory.arrows=47;w.rest(p);expect(p.inventory.arrows).toBe(47);
+  const enemy=w.spawnActor('nearby',{},[p.x+8,p.y,p.z]);expect(w.equipArmor(p.id,'wayfarer')).toBe(false);enemy.hp=0;
+  expect(w.equipArmor(p.id,'wayfarer')).toBe(true);
+});
+test('late co-op participants receive armor and a personal ending, while PvP creates no loot',async()=>{
+  const w=await setup(),p=w.addPlayer('host'),late=w.addPlayer('late'),seals=Object.values(BOSSES).map(b=>b.seal).filter(s=>s!=='Circle');
+  p.seals=[...seals];late.seals=[...seals];const boss=w.spawnActor('king',{archetype:'last-king',boss:true,hp:1,weapon:'spear'},[p.x+4,p.y,p.z]);
+  w.damage(p,boss,10,0);expect(p.seals).toContain('Circle');expect(late.seals).toContain('Circle');
+  expect(late.inventory.armors).toContain('winter');expect(w.events.filter(e=>e.type==='circle-completed').map(e=>e.id)).toEqual(['host','late']);
+  p.pvp=late.pvp=true;late.hp=1;const embers=p.embers,arrows=p.inventory.arrows;w.damage(p,late,10,0);
+  expect(p.embers).toBe(embers);expect(p.inventory.arrows).toBe(arrows);
+});
 test('authored navigation stays unchanged when a player occupies the road',async()=>{
   const w=await setup(),options={bounds:[-5,18,5,34],spacing:1};
   const empty=new SpatialAtlas(w,options).build();w.addPlayer('walker');const occupied=new SpatialAtlas(w,options).build();
@@ -108,7 +152,7 @@ test('saved NPCs regain authored homes without resurrecting enemies or changing 
 test('PvP requires both participants to opt in; collisions apply knockback',async()=>{
   const w=await setup(),a=w.addPlayer('attacker'),b=w.addPlayer('victim');w.teleport(b,[2,a.y,a.z]);const hp=b.hp;
   expect(w.damage(a,b,20,300)).toBe(false);a.pvp=true;expect(w.damage(a,b,20,300)).toBe(false);b.pvp=true;
-  expect(w.damage(a,b,20,300)).toBe(true);expect(b.hp).toBe(hp-20);w.step();expect(b.vx).toBeGreaterThan(0);
+  expect(w.damage(a,b,20,300)).toBe(true);expect(b.hp).toBeCloseTo(hp-17.6);w.step();expect(b.vx).toBeGreaterThan(0);
 });
 
 test('death removes the standing collision capsule and respawn restores it',async()=>{
@@ -127,7 +171,27 @@ test('a visible melee swing connects once with each victim',async()=>{
   const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,heightAt(100,30)+1,30]);
   const b=w.spawnActor('victim',{hp:200,healthMax:200},[100,a.y,28.5]);a.yaw=0;w.attack(a);
   for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
-  expect(b.hp).toBeCloseTo(200-(24+12*.55));expect(a.hitIds).toContain(b.id);
+  expect(b.hp).toBeCloseTo(167);expect(a.hitIds).toContain(b.id);
+});
+
+test('native enemy blade hits use encounter level once, with armor applied after scaling',async()=>{
+  const w=await setup(),p=w.addPlayer('target'),a=w.spawnActor('roadbound',{archetype:'hollow',level:1,weapon:'sword'},[100,15,30]);
+  w.teleport(p,[100,15,28.5]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='sentinel';
+  for(const level of [1,28]){
+    a.level=level;a.stamina=a.staminaMax;p.hp=p.healthMax;const hp=p.hp;w.attack(a);
+    for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
+    expect(hp-p.hp).toBeCloseTo(enemyDamage(a)*(1-ARMOR.sentinel.physical));
+    expect(a.hitIds).toEqual([p.id]);
+  }
+});
+
+test.each(['archer','mage'])('%s projectiles preserve level damage through snapshot restore and native impact',async archetype=>{
+  const w=await setup(),p=w.addPlayer('target'),weapon=ENEMIES[archetype].weapon,a=w.spawnActor('ranged',{archetype,level:32,weapon},[100,15,30]);
+  w.teleport(p,[100,15,25]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='keeper';const hp=p.hp;
+  w.attack(a);w.advanceAttack(a,WEAPONS[weapon].release);const saved=w.snapshot();expect(saved.projectiles[0].damage).toBe(enemyDamage(a));
+  w.replaceSnapshot(saved);for(let i=0;i<25;i++)w.stepProjectiles(1/60);
+  expect(w.projectiles.size).toBe(0);
+  expect(hp-w.actor(p.id).hp).toBeCloseTo(enemyDamage(a)*(1-ARMOR.keeper[weapon==='staff'?'magic':'physical']));
 });
 test('sword damage cannot reach beyond the visible blade tip',async()=>{
   const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,15,30]);
@@ -150,8 +214,8 @@ test('reconnect imports the character and replaces every world-owned state',asyn
 test('character handoff preserves velocity, crouch and action phase without restarting locomotion',async()=>{
   const local=await setup(),server=await setup(),p=local.addPlayer('moving');server.addPlayer(p.id);
   local.setCrouch(p,true);local.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});run(local,45);local.attack(p);local.advanceAttack(p,.2);
-  const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
-  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId'])expect(returning[key],key).toBe(p[key]);
+  p.sprintExhausted=true;const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
+  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId','sprintExhausted'])expect(returning[key],key).toBe(p[key]);
   server.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});server.step();expect(returning.vx).toBeGreaterThan(1);expect(returning.attackAge).toBeGreaterThan(.2);
 });
 test('a fast arrow hits a thin wall before the actor behind it',async()=>{

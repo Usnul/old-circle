@@ -72,7 +72,7 @@ def build_equipment_materials(root):
     rgb*=1-dirt[:,:,None]
     write_set(out,'cloak',rgb,weave*.24+thread*.65,.96-thread*.15,0,False)
 
-def apply_equipment_materials(materials,root,kinds=KINDS):
+def apply_equipment_materials(materials,root,kinds=KINDS,texture_names=None):
     """Keep the saved Blender source reviewable with the same texture channels."""
     out=root/'packages/client/public/assets/textures'
     for name in kinds:
@@ -83,7 +83,8 @@ def apply_equipment_materials(materials,root,kinds=KINDS):
         shader=nodes.new('ShaderNodeBsdfPrincipled');shader.location=(280,0);links.new(shader.outputs['BSDF'],output.inputs['Surface'])
         textures={}
         for i,suffix in enumerate(['','-normal','-orm']):
-            image=bpy.data.images.load(str(out/(name+suffix+'.png')),check_existing=True)
+            texture=(texture_names or {}).get(name,name)
+            image=bpy.data.images.load(str(out/(texture+suffix+'.png')),check_existing=True)
             if suffix:image.colorspace_settings.name='Non-Color'
             image.pack();node=nodes.new('ShaderNodeTexImage');node.image=image;node.location=(-660,-i*300);textures[suffix]=node
         multiply=nodes.new('ShaderNodeMixRGB');multiply.blend_type='MULTIPLY';multiply.inputs[0].default_value=1;multiply.inputs[2].default_value=mat.diffuse_color;multiply.location=(-220,120)

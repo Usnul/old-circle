@@ -22,5 +22,35 @@
     "prompt": "Dark fantasy RPG inventory icon, a single small antique amber glass healing flask with brass stopper and leather wrap. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
     "seed": 8113,
     "steps": 16
+  },
+  "charm-briar": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a small tangled knot of ancient thorny roots tied with faded green thread, a carved wooden talisman. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8114,
+    "steps": 16
+  },
+  "charm-ash": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single smoked amber lens in a weathered brass ring, held by a short dark leather cord. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8115,
+    "steps": 16
+  },
+  "charm-glass": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single crescent shard of pale blue opalescent glass suspended in a delicate silver talisman cage. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8116,
+    "steps": 16
+  },
+  "charm-frost": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a small anatomically shaped heart carved from milky white ice, frost crystals along its edges, a silver loop at the top. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8117,
+    "steps": 16
+  },
+  "charm-crown": {
+    "model": "FLUX.1-dev",
+    "prompt": "Dark fantasy RPG inventory icon, a single broken crown-shaped brass brand, blackened and cracked, suspended from a short antique chain. One isolated object centered on an almost black green background. Hand-painted oil illustration, realistic worn materials, restrained gold rim lighting, clear elegant silhouette, consistent antique art direction, square composition, generous padding, no text, no letters, no frame, no extra objects.",
+    "seed": 8118,
+    "steps": 16
   }
 }
