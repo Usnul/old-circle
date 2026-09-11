@@ -8,27 +8,28 @@ import { SpatialAtlas } from '@old-circle/game/world/spatial-atlas.mjs';
 import { landmarkPosition,HEARTHS } from '@old-circle/game/world/regions.mjs';
 import {hearthArrival} from '@old-circle/game/simulation/resting.mjs';
 import {Ragdolls} from '@old-circle/game/simulation/ragdolls.mjs';
+import {PresentationEvents} from './presentation-events.mjs';
 
 // Rendering never owns authority. This Worker keeps the same Meep simulation
 // warm while NetworkSession predicts and reconciles the connected character.
-let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false;
-let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,lastEventTick=-1,connectedAt=0;
+let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false,entered=false;
+let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,connectedAt=0;
 let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,armor:0,upgradeWeapon:0,charm:0,sequence:0},pendingLevel,pendingEquipment;
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
-const seenEvents=new Set();
+const liveEvents=new PresentationEvents();
 let presentationEpoch=0,presentationMode,presentationFrame=-1;
 function stamp(snapshot,mode){
   const kind=mode==='online'&&remote?'online':'offline',frame=kind==='online'?remote.net.current_frame*2:world.tick;
   if(kind!==presentationMode||frame<presentationFrame){presentationEpoch++;presentationMode=kind;}
-  presentationFrame=frame;return {...snapshot,presentationFrame:frame,presentationEpoch};
+  presentationFrame=frame;const result={...snapshot,presentationFrame:frame,presentationEpoch};
+  result.events=liveEvents.read(result);return result;
 }
 function levelResult(ok){const mode=remote?'online':'offline';postMessage({type:'level-result',ok,snapshot:stamp({...world.snapshot(),events:[],ragdolls:ragdolls.snapshot()},mode),mode});}
 function equipmentResult(ok){const mode=remote?'online':'offline';postMessage({type:'equipment-result',ok,snapshot:stamp({...world.snapshot(),events:[],ragdolls:ragdolls.snapshot()},mode),mode});}
 function finishEquipment(){if(!pendingEquipment)return;const p=world.actor(playerId),r=pendingEquipment;equipmentResult(r.type==='armor'?p.inventory.armor===r.item:r.type==='charm'?p.inventory.charm===r.item:reinforcement(p,r.item)>r.rank);pendingEquipment=null;}
 function disconnect(reason='Connection closed'){
-  seenEvents.clear();
   postMessage({type:'network-status',message:reason});
-  const old=remote;remote=null;connecting=false;retryAt=performance.now()+5000;accumulator=0;lastEventTick=-1;
+  const old=remote;remote=null;connecting=false;retryAt=performance.now()+5000;accumulator=0;
   if(old)world.resumeLocalWorld(playerId);
   const ws=socket;socket=null;try{ws?.close();}catch{}
   old?.stop().catch(e=>console.warn('Session cleanup',e));
@@ -51,11 +52,12 @@ function connect(){
       candidate.localNetworkId=data.networkId;candidate.playerId=playerId;
       const transport=new WebSocketTransport({socket:ws});candidate.connect(0,transport);
       ws.send(JSON.stringify({type:'ready',character:world.exportCharacter(playerId)}));
-      remote=candidate;seenEvents.clear();connecting=false;clearTimeout(timeout);connectedAt=lastServerAt=performance.now();lastServerTick=-1;lastEventTick=-1;accumulator=0;
+      remote=candidate;connecting=false;clearTimeout(timeout);connectedAt=lastServerAt=performance.now();lastServerTick=-1;accumulator=0;
     }catch(error){console.warn('Shared world unavailable',error);if(socket===ws)disconnect(error.stack??String(error));}
   });
 }
 function update(){
+  if(!entered){last=performance.now();return;}
   const now=performance.now(),frameDt=Math.min(.1,(now-last)/1000);accumulator+=frameDt;last=now;
   if(!remote&&!connecting&&now>=retryAt)connect();
   const events=[];let steps=0,mode='offline';
@@ -78,13 +80,14 @@ function update(){
     if(!paused||remote)ragdolls.update(frameDt,[...world.actors.keys()].map(id=>world.actor(id)));
     if(steps){
       const snapshot=world.snapshot();snapshot.ragdolls=ragdolls.snapshot();
-      snapshot.events=events.filter(e=>{const key=e.key??`${e.tick}:${e.id}:${e.type}`;if(seenEvents.has(key))return false;seenEvents.add(key);return true;});while(seenEvents.size>2048)seenEvents.delete(seenEvents.values().next().value);postMessage({type:'snapshot',snapshot:stamp(snapshot,mode),mode});
+      snapshot.events=events;postMessage({type:'snapshot',snapshot:stamp(snapshot,mode),mode});
     }
   }catch(error){if(remote){console.warn('Connection interrupted',error);disconnect(error.stack??String(error));}else postMessage({type:'error',message:error.stack??String(error)});}
 }
 self.onmessage=async({data})=>{
   try{
     if(data.type==='start'){
+      entered=false;paused=true;presentationMode=undefined;accumulator=0;
       if(timer)clearInterval(timer);disconnect();if(world)await world.stop();if(ragdolls)await ragdolls.stop();
       world=await new GameWorld().start();playerId=data.playerId;url=data.url;origin=data.origin;inspect=!!data.inspect;
       ragdolls=await new Ragdolls().start();corpseMode='offline';
@@ -92,6 +95,7 @@ self.onmessage=async({data})=>{
       last=performance.now();retryAt=0;timer=setInterval(update,16);postMessage({type:'ready',snapshot:stamp(world.snapshot(),'offline'),mode:'offline'});
     }
     if(!world)return;
+    if(data.type==='enter-world'){entered=true;paused=!!data.paused;last=performance.now();accumulator=0;}
     if(data.type==='input')intent=data.intent;
     if(data.type==='equip'){world.equip(playerId,data.weapon);settings.weapon=weaponIds.indexOf(data.weapon);}
     if(data.type==='pvp'){world.actor(playerId).pvp=data.enabled;settings.pvp=Number(data.enabled);}

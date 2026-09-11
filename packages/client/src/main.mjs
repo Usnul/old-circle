@@ -133,7 +133,7 @@ async function enterWorld(){
   view.queryFootSurfaces=send;view.prepareToRender(snapshot,playerId);
   $('#hud').hidden=false;updateHud();previous=performance.now();frameId=requestAnimationFrame(frame);
   if(!await loading.reveal(view.engine))return;
-  started=true;input.suspend(menu);$('#capture-mouse').hidden=inspecting||menu;
+  started=true;send({type:'enter-world',paused:menu});input.suspend(menu);$('#capture-mouse').hidden=inspecting||menu;
   if(!menu)view.engine.viewStack.el.focus();
 }
 function showError(message){started=false;cancelAnimationFrame(frameId);if(view?.engine)view.engine.renderingEnabled=false;loading.show();modal(`<div class="panel-top"><h2>Unable to load game</h2></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Reload game</span><span>⟶</span></button>`,{dismissible:false});$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}

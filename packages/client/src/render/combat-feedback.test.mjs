@@ -2,6 +2,7 @@ import {expect,test,vi} from 'vitest';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {CombatFeedback} from './combat-feedback.mjs';
+import {PresentationEvents} from '../presentation-events.mjs';
 
 test('healing glows follow actors, damage feedback stays local, repeated events do not restart, and transients expire',()=>{
   const ecd=new EntityComponentDataset();ecd.registerComponentType(Transform64);
@@ -19,4 +20,18 @@ test('healing glows follow actors, damage feedback stays local, repeated events 
   expect(overlay.style.opacity).toBe('0');expect(Math.abs(feedback.cameraKick().pitch)).toBe(0);expect(Math.abs(feedback.cameraKick().roll)).toBe(0);expect(ecd.entityExists(light.id)).toBe(false);
   feedback.update({presentationEpoch:1,events:[{type:'hit',id:'enemy',key:'hit:2',damage:90}]},actors,'self',.016);expect(overlay.style.opacity).toBe('0');
   feedback.update({...snapshot,presentationEpoch:2},actors,'self',.016);expect(view.particles.burst).toHaveBeenCalledTimes(2);
+});
+
+test('loading 114/140 HP and receiving historical hits stays quiet; a new incoming hit triggers feedback',()=>{
+  const overlay={style:{}},feedback=new CombatFeedback({},overlay),events=new PresentationEvents();
+  const actor={id:'self',hp:114,healthMax:140,hurtTime:.3},oldHit={type:'hit',id:'self',key:'old-hit',tick:98,damage:26};
+  const present=(tick,history,epoch=1)=>{
+    const snapshot={tick,events:history,presentationEpoch:epoch};snapshot.events=events.read(snapshot);
+    feedback.update(snapshot,[actor],'self',.016);
+  };
+  present(100,[oldHit]);expect(overlay.style.opacity).toBe('0');expect(feedback.cameraKick().pitch).toBe(0);
+  present(101,[oldHit]);expect(overlay.style.opacity).toBe('0');
+  actor.hp=108;present(102,[]);expect(overlay.style.opacity).toBe('0');
+  present(103,[{...oldHit,key:'new-hit',tick:103,damage:6}]);expect(Number(overlay.style.opacity)).toBeGreaterThan(0);expect(Math.abs(feedback.cameraKick().pitch)).toBeGreaterThan(0);
+  present(300,[{...oldHit,tick:299}],2);expect(overlay.style.opacity).toBe('0');expect(feedback.cameraKick().pitch).toBe(0);
 });
