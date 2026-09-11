@@ -10,10 +10,10 @@ import {effect,FOOTSTEP_EFFECTS} from './effects.mjs';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
 
 const surfaces={
-  // Flattened grass exposes warm soil; the rim and depression carry the shape.
-  grass:{color:[.34,.24,.12,.86],life:7,imprint:true},gravel:{color:[.20,.17,.12,.65],life:10,imprint:true},
-  sand:{color:[.36,.25,.13,.72],life:14,imprint:true},snow:{color:[.24,.32,.37,.78],life:18,imprint:true},
-  stone:{color:[.18,.16,.12,.28],life:3},wood:{color:[.16,.11,.06,.24],life:3},
+  // Broken blades leave the terrain visible between flattened strands.
+  grass:{color:[.57,.58,.28,.72],life:7,imprint:true,texture:'grass',priority:0},gravel:{color:[.20,.17,.12,.65],life:10,imprint:true,priority:1},
+  sand:{color:[.36,.25,.13,.72],life:14,imprint:true,priority:2},snow:{color:[.24,.32,.37,.78],life:18,imprint:true,priority:3},
+  stone:{color:[.18,.16,.12,.28],life:3,priority:4},wood:{color:[.16,.11,.06,.24],life:3,priority:5},
 };
 // Fraction of the viewport, independent of resolution. A normal actor reaches
 // this threshold at about 28 m with the game's lens; a keeper at about 52 m.
@@ -40,17 +40,22 @@ function contactHeading(actor,foot,normal){
 /** Presentation-only contacts: one outstanding worker query, at most 16 actors. */
 export class WorldFootsteps {
   constructor(view){
-    this.view=view;this.contacts=new FootContacts();this.pool=[];this.sequence=0;this.lastQuery=-1;this.current=new Map();
+    this.view=view;this.contacts=new FootContacts();this.pool=[];this.sequence=0;this.stampSequence=0;this.lastQuery=-1;this.current=new Map();
     // Short bursts cannot wait for their first texture fetch and decode.
     const assets=view.engine?.assetManager;
-    if(assets)for(const name of ['step-dust','step-grit','step-leaf',...['boot','paw'].flatMap(shape=>[shape+'-print',shape+'-imprint',shape+'-imprint-normal'])])assets.promise(`/assets/vfx/${name}.png`,GameAssetType.Image).catch(error=>console.warn(`Footstep image ${name} could not be loaded`,error));
+    if(assets)for(const name of ['step-dust','step-grit','step-leaf',...['boot','paw'].flatMap(shape=>['print','imprint','imprint-normal','grass','grass-normal'].map(texture=>shape+'-'+texture))])assets.promise(`/assets/vfx/${name}.png`,GameAssetType.Image).catch(error=>console.warn(`Footstep image ${name} could not be loaded`,error));
   }
   update(actors,playerId,epoch,now,dt){
     if(epoch!==this.contacts.epoch){this.contacts.reset(epoch);this.pending=null;}
     this.current=new Map(actors.map(a=>[a.id,a]));this.playerId=playerId;
     for(const mark of this.pool){if(!mark.active)continue;mark.age+=dt;const fade=Math.max(0,Math.min(1,(mark.life-mark.age)/2));mark.decal.color.setA(mark.alpha*fade);if(mark.age>=mark.life){mark.active=false;mark.decal.color.setA(0);this.view.ecd.removeComponentFromEntity(mark.id,Decal);}}
     // Leave spare projectors while the oldest prints fade under crowd pressure.
-    for(const hound of [false,true]){const active=this.pool.filter(m=>m.active&&m.hound===hound).sort((a,b)=>b.age-a.age);for(const mark of active.slice(0,Math.max(0,active.length-44)))mark.life=Math.min(mark.life,mark.age+.6);}
+    for(const hound of [false,true]){
+      const active=this.pool.filter(m=>m.active&&m.hound===hound).sort((a,b)=>b.age-a.age);
+      const fading=new Set(active.slice(0,Math.max(0,active.length-44)).map(m=>m.stamp));
+      // Both layers of a blended contact must fade together under crowd pressure.
+      for(const mark of active)if(fading.has(mark.stamp))mark.life=Math.min(mark.life,mark.age+.6);
+    }
     this.contacts.prune(now);
     if(this.pending&&now-this.pending.time>.15)this.pending=null;
     if(this.pending||now-this.lastQuery<1/30||!this.view.queryFootSurfaces)return;
@@ -78,24 +83,38 @@ export class WorldFootsteps {
     });
   }
   contact(actor,foot,hit,now){
-    const {view}=this,material=hit.surface==='terrain'?view.ground.surfaceAt(hit.position[0],hit.position[2]):hit.surface;
-    const surface=Object.hasOwn(surfaces,material)?material:'stone',profile=surfaces[surface],local=actor.id===this.playerId;
-    view.audio.footstep(actor,foot,hit.position,surface,now,local);
+    const {view}=this,mix=hit.surface==='terrain'?view.ground.surfaceMixAt(hit.position[0],hit.position[2]):[{surface:Object.hasOwn(surfaces,hit.surface)?hit.surface:'stone',weight:1}];
+    const local=actor.id===this.playerId;
+    view.audio.footstep(actor,foot,hit.position,mix[0].surface,now,local);
     if(!local&&!footstepScreenArea(actor,view.engine?.graphics.camera.camera))return;
-    const n=hit.normal,heading=contactHeading(actor,foot,n),step=FOOTSTEP_EFFECTS['step-'+surface];
-    if(view.transients.filter(t=>t.footstep).length<(local?32:28)){
-      const t=new Transform64();t64_look_rotation(t,...heading,...n);t.setTranslation(...hit.position.map((v,i)=>v+n[i]*.045*foot.scale));t.updateMatrix();
-      const c=effect('step-'+surface,0,foot.scale),id=new Entity().add(c).add(t).build(view.ecd);
-      view.transients.push({id,c,life:step.life+.15,age:0,footstep:true});
-      view.particles.burst(id,Math.max(1,Math.round(step.count*(actor.crouch?.5:foot.hound?.7:1))));
+    const n=hit.normal,heading=contactHeading(actor,foot,n);
+    // Four overlapping player contacts may each need two material emitters.
+    if(view.transients.filter(t=>t.footstep).length+mix.length<=(local?32:24)){
+      const counts=mix.map(({surface,weight})=>FOOTSTEP_EFFECTS['step-'+surface].count*weight*(actor.crouch?.5:foot.hound?.7:1));
+      const total=Math.max(mix.length,Math.round(counts.reduce((sum,count)=>sum+count,0)));
+      counts[0]=Math.max(1,Math.min(total-mix.length+1,Math.round(counts[0])));
+      if(mix.length===2)counts[1]=total-counts[0];
+      for(const [i,{surface}] of mix.entries()){
+        const step=FOOTSTEP_EFFECTS['step-'+surface],t=new Transform64();t64_look_rotation(t,...heading,...n);t.setTranslation(...hit.position.map((v,i)=>v+n[i]*.045*foot.scale));t.updateMatrix();
+        const c=effect('step-'+surface,0,foot.scale),id=new Entity().add(c).add(t).build(view.ecd);
+        view.transients.push({id,c,life:step.life+.15,age:0,footstep:true});
+        view.particles.burst(id,counts[i]);
+      }
     }
     // Leave room for the player's next contacts while crowded NPC prints fade.
-    if(!local&&this.pool.filter(m=>m.active&&m.hound===foot.hound).length>=56)return;
+    if(this.pool.filter(m=>m.active&&m.hound===foot.hound).length+mix.length>(local?64:56))return;
+    const stamp=++this.stampSequence,life=mix.reduce((sum,{surface,weight})=>sum+surfaces[surface].life*weight,0);
+    for(const {surface,weight} of mix)this.stamp(foot,hit,heading,surfaces[surface],weight,life,stamp);
+  }
+  stamp(foot,hit,heading,profile,weight,life,stamp){
+    const {view}=this,n=hit.normal;
     let mark=this.pool.find(m=>!m.active&&m.hound===foot.hound);
     if(!mark){if(this.pool.filter(m=>m.hound===foot.hound).length>=64)return;const decal=new Decal(),t=new Transform64();decal.color.setA(0);const id=new Entity().add(t).build(view.ecd);mark={decal,t,id,hound:foot.hound};this.pool.push(mark);}
     const {t,decal,id}=mark;
-    const texture=`/assets/vfx/${foot.hound?'paw':'boot'}-${profile.imprint?'imprint':'print'}`;
+    const texture=`/assets/vfx/${foot.hound?'paw':'boot'}-${profile.texture??(profile.imprint?'imprint':'print')}`;
     decal.uri_albedo=texture+'.png';
+    // Source-over order stays fixed when the dominant splat changes at 50/50.
+    decal.priority=profile.priority;
     // Hard floors receive a surface scuff, without the soft ground depression.
     // Reset on reuse so a snowy footprint cannot carve the next wooden floor.
     decal.uri_normal=profile.imprint?texture+'-normal.png':'';
@@ -104,7 +123,8 @@ export class WorldFootsteps {
     t64_look_rotation(t,...n.map(v=>-v),...heading.map(v=>-v));t.setTranslation(...hit.position.map((v,i)=>v+n[i]*.018));
     // The mask includes transparent margins; size the sole, not just the quad.
     t.setScale((foot.hound?.22:.29)*foot.scale,(foot.hound?.26:.44)*foot.scale,.16*foot.scale);t.updateMatrix();t64_announce_change(view.ecd,id);
-    decal.color.set(...profile.color);Object.assign(mark,{active:true,age:0,life:profile.life,alpha:profile.color[3]});
+    const alpha=profile.color[3]*weight;
+    decal.color.set(...profile.color);decal.color.setA(alpha);Object.assign(mark,{active:true,age:0,life,alpha,stamp});
     view.ecd.addComponentToEntity(id,decal);
   }
 }

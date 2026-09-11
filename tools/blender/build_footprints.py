@@ -108,5 +108,47 @@ for name,width,length in [('boot',.29,.44),('paw',.22,.26)]:
     image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
     publish_image(image,out/(name+'-imprint-normal.png'));image.use_fake_user=True;image.pack()
 
+    # Grass keeps the living ground visible between flattened blades. No filled
+    # sole, border or dirt wash: the foot shape only limits individual fragments.
+    grass_rng=np.random.default_rng(925 if name=='boot' else 1841)
+    blade_alpha=np.zeros((n,n));blade_grey=np.zeros((n,n));blade_depth=np.zeros((n,n))
+    interior=smooth(.12,.85,blur(shape,1.5))
+    for blade in range(112 if name=='boot' else 82):
+        while True:
+            px,py=grass_rng.uniform(-.82,.82,2)
+            ix,iy=np.clip(((np.array([px,py])+1)*(n-1)/2).astype(int),0,n-1)
+            if shape[iy,ix]>.5:break
+        angle=grass_rng.normal(.16,.27);direction=np.array([np.sin(angle),np.cos(angle)])
+        half_length=grass_rng.uniform(.09,.21);half_width=grass_rng.uniform(.009,.016)
+        dx,dy=x-px,y-py
+        along=(dx*direction[0]+dy*direction[1])/half_length
+        across=dx*direction[1]-dy*direction[0]
+        curve=grass_rng.uniform(-.024,.024)*(1-along*along)
+        taper=np.maximum(0,1-along*along)**.65
+        coverage=smooth(-.0035,.0035,half_width*taper-np.abs(across-curve))
+        coverage*=1-smooth(.91,1,np.abs(along))
+        coverage*=interior*grass_rng.uniform(.55,.85)
+        # Broad along-blade value changes survive mipmaps without pixel grain.
+        grey=np.clip(grass_rng.uniform(.50,.79)+along*.055+across/half_width*.035,.40,.86)
+        blade_grey=blade_grey*(1-coverage)+grey*coverage
+        blade_alpha=1-(1-blade_alpha)*(1-coverage)
+        blade_depth=np.maximum(blade_depth,coverage*grass_rng.uniform(.00035,.0007))
+    grey=np.divide(blade_grey,blade_alpha,out=np.full_like(blade_grey,.64),where=blade_alpha>0)
+    pixels=np.ones((n,n,4),dtype=np.float32);pixels[:,:,:3]=grey[:,:,None];pixels[:,:,3]=blade_alpha
+    image=bpy.data.images.new(name+'-grass',width=n,height=n,alpha=True)
+    image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
+    publish_image(image,out/(name+'-grass.png'));image.use_fake_user=True;image.pack()
+
+    # Compression follows the sparse blades, never the outline of the sole.
+    height=-blur(blade_depth,1.05)
+    dh_dy,dh_dx=np.gradient(height,length/(n-1),width/(n-1))
+    normal=np.stack((-dh_dx,-dh_dy,np.ones_like(height)),axis=2)
+    normal/=np.linalg.norm(normal,axis=2)[:,:,None]
+    pixels=np.ones((n,n,4),dtype=np.float32);pixels[:,:,:3]=normal*.5+.5
+    image=bpy.data.images.new(name+'-grass-normal',width=n,height=n,alpha=True)
+    image.colorspace_settings.name='Non-Color'
+    image.pixels.foreach_set(np.ascontiguousarray(pixels[::-1]).ravel())
+    publish_image(image,out/(name+'-grass-normal.png'));image.use_fake_user=True;image.pack()
+
 bpy.context.preferences.filepaths.save_version=0
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets/blender/footprints.blend'))

@@ -4,6 +4,8 @@ import {pack_terrain_row_table} from '@woosh/meep-engine/src/engine/graphics3/te
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {WORLD_BOUNDS} from '@old-circle/game/world/regions.mjs';
 
+const surfaceLayers={meadow:'grass',wood:'grass',desert:'sand',magic:'stone',tundra:'snow',crown:'stone',road:'gravel'};
+
 async function pixels(url){
   const response=await fetch(url);if(!response.ok)throw new Error(`Missing terrain image: ${url}`);
   const bitmap=await createImageBitmap(await response.blob()),canvas=new OffscreenCanvas(bitmap.width,bitmap.height),context=canvas.getContext('2d');
@@ -29,11 +31,22 @@ export class WorldGround {
       overlay:Sampler2D.uint8(4,1,1),sprite:Sampler2D.uint8(4,1,1)};
     this.extension=graphics.add_extension(new TerrainExtension(this));
   }
-  surfaceAt(x,z){
+  surfaceMixAt(x,z){
     const m=this.manifest,b=WORLD_BOUNDS,u=Math.max(0,Math.min(m.width-1,(x-b.minX)/b.width*m.width-.5)),v=Math.max(0,Math.min(m.height-1,(z-b.minZ)/b.depth*m.height-.5));
-    let best=-1,layer=0;for(let i=0;i<this.weightSamplers.length;i++){const w=this.weightSamplers[i].sampleChannelBilinear(u,v,0);if(w>best){best=w;layer=i;}}
-    return {meadow:'grass',wood:'grass',desert:'sand',magic:'stone',tundra:'snow',crown:'stone',road:'gravel'}[m.layers[layer]];
+    const weights=new Map();let total=0;
+    for(let i=0;i<this.weightSamplers.length;i++){
+      const layer=m.layers[i];if(!Object.hasOwn(surfaceLayers,layer))continue;
+      const weight=this.weightSamplers[i].sampleChannelBilinear(u,v,0);if(!Number.isFinite(weight)||weight<=0)continue;
+      const surface=surfaceLayers[layer];weights.set(surface,(weights.get(surface)??0)+weight);total+=weight;
+    }
+    if(!total)return [{surface:'stone',weight:1}];
+    // Merge biome aliases before ranking; equal shares use a fixed material order.
+    const ranked=[...weights].map(([surface,weight])=>({surface,weight})).sort((a,b)=>b.weight-a.weight||(a.surface<b.surface?-1:a.surface>b.surface?1:0));
+    if(ranked[0].weight/total>.66)return [{surface:ranked[0].surface,weight:1}];
+    const selected=ranked.slice(0,2),sum=selected.reduce((value,entry)=>value+entry.weight,0);
+    return selected.map(({surface,weight})=>({surface,weight:weight/sum}));
   }
+  surfaceAt(x,z){return this.surfaceMixAt(x,z)[0].surface;}
   record(frame){
     const packed=pack_terrain_row_table({meshes:this.meshes,scene:frame.view.scene,table:this.rows});this.rows=packed.table;
     if(packed.size)this.pass.graph_draw({...this.data,frame,rows:this.rows,row_count:packed.size});
