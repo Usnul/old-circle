@@ -131,7 +131,7 @@ async function enterWorld(){
   input.suspend(true);
   // Install the first snapshot and player camera before allowing any draw.
   view.queryFootSurfaces=send;view.prepareToRender(snapshot,playerId);
-  $('#hud').hidden=false;updateHud();previous=performance.now();frameId=requestAnimationFrame(frame);
+  $('#hud').hidden=false;updateHud();previous=undefined;frameId=requestAnimationFrame(frame);
   if(!await loading.reveal(view.engine))return;
   started=true;send({type:'enter-world',paused:menu});input.suspend(menu);$('#capture-mouse').hidden=inspecting||menu;
   if(!menu)view.engine.viewStack.el.focus();
@@ -178,9 +178,11 @@ function map(){
   equipmentOpen=false;modal(worldMapMarkup(p),{shortcut:'m',layout:'map'});menuCleanup=installMapControls(()=>snapshot.actors.find(a=>a.id===playerId));
 }
 for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');$('#nova').onclick=()=>input?.pulse('nova');
-let previous=performance.now(),frameId;
+let previous,frameId;
 function frame(now){
-  const dt=Math.min(.1,(now-previous)/1000);previous=now;
+  // Use only animation-frame timestamps: the first callback's timestamp can
+  // predate performance.now() sampled during the expensive world setup.
+  const dt=previous===undefined?0:clamp((now-previous)/1000,0,.1);previous=now;
   if(view.streaming.error){toast('Part of the road could not load. Retrying…');console.warn(view.streaming.error);view.streaming.error=null;}
   if(started&&!menu){
     input.update(dt);

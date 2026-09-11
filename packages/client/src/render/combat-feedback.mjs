@@ -5,6 +5,8 @@ import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t
 export class CombatFeedback {
   constructor(view,overlay){this.view=view;this.overlay=overlay;this.healing=new Map();this.seen=new Set();this.hit=0;this.time=0;}
   update(snapshot,actors,playerId,dt){
+    // Rewinding an effect's decay must never create or amplify an impact.
+    dt=Math.max(0,dt);
     const view=this.view;
     if(this.epoch!==snapshot.presentationEpoch){
       this.epoch=snapshot.presentationEpoch;this.seen.clear();this.hit=0;

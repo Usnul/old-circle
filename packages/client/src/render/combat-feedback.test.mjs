@@ -4,6 +4,26 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import {CombatFeedback} from './combat-feedback.mjs';
 import {PresentationEvents} from '../presentation-events.mjs';
 
+test.each([[165,165],[114,140]])('negative startup time cannot create damage feedback at %i/%i HP', (hp,healthMax)=>{
+  const overlay={style:{}},feedback=new CombatFeedback({},overlay),actor={id:'self',hp,healthMax};
+  const snapshot={presentationEpoch:1,events:[]};
+  feedback.update(snapshot,[actor],'self',0);
+  for(const dt of [-3.5,.016,.1]){
+    feedback.update(snapshot,[actor],'self',dt);
+    expect(overlay.style.opacity).toBe('0');
+    const kick=feedback.cameraKick();
+    expect(Math.abs(kick.pitch)).toBe(0);expect(Math.abs(kick.roll)).toBe(0);
+  }
+  const hit={...snapshot,events:[{type:'hit',id:'self',key:'fresh-hit',damage:20}]};
+  feedback.update(hit,[actor],'self',.016);
+  expect(Number(overlay.style.opacity)).toBeGreaterThan(0);
+  const opacity=overlay.style.opacity,kick=feedback.cameraKick();
+  feedback.update(hit,[actor],'self',-.5);
+  expect(overlay.style.opacity).toBe(opacity);expect(feedback.cameraKick()).toEqual(kick);
+  feedback.update(hit,[actor],'self',.1);
+  expect(Number(overlay.style.opacity)).toBeLessThan(Number(opacity));
+});
+
 test('healing glows follow actors, damage feedback stays local, repeated events do not restart, and transients expire',()=>{
   const ecd=new EntityComponentDataset();ecd.registerComponentType(Transform64);
   const overlay={style:{}},view={ecd,emitter:vi.fn(()=>({id:200})),particles:{burst:vi.fn()},light(position){
