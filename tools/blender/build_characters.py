@@ -51,9 +51,21 @@ def limb(a,b,r1,r2,bone,material='iron'):
 def v(p):return Vector(p)
 def mix(a,b,t):return v(a).lerp(v(b),max(0,min(1,t)))
 def smooth(t):t=max(0,min(1,t));return t*t*(3-2*t)
-def keypose(keys,t):
-    for (ta,a),(tb,b) in zip(keys,keys[1:]):
-        if t<=tb:return mix(a,b,smooth((t-ta)/(tb-ta)))
+def keypose(keys,t,flow=False):
+    def tangent(index,axis):
+        if index==0 or index==len(keys)-1:return 0
+        before,at,after=keys[index-1:index+2];h0=at[0]-before[0];h1=after[0]-at[0]
+        d0=(at[1][axis]-before[1][axis])/h0;d1=(after[1][axis]-at[1][axis])/h1
+        if d0*d1<=0:return 0
+        w0=2*h1+h0;w1=h1+2*h0
+        return (w0+w1)/(w0/d0+w1/d1)
+    for i,((ta,a),(tb,b)) in enumerate(zip(keys,keys[1:])):
+        if t<=tb:
+            u=max(0,min(1,(t-ta)/(tb-ta)))
+            if not flow:return mix(a,b,smooth(u))
+            # Monotone cubic tangents carry velocity through intermediate keys,
+            # with no overshoot or artificial stop at each point of the cut.
+            return v([(2*u**3-3*u*u+1)*a[j]+(u**3-2*u*u+u)*(tb-ta)*tangent(i,j)+(-2*u**3+3*u*u)*b[j]+(u**3-u*u)*(tb-ta)*tangent(i+1,j) for j in range(3)])
     return v(keys[-1][1])
 
 def elbow(a,b,l1,l2,pole):
@@ -170,10 +182,10 @@ def human_pose(kind,time,duration,weapon):
     if kind=='sword':
         # Load the back leg, lead with the pelvis, then let the chest and blade
         # catch up. The low follow-through decelerates before returning to guard.
-        hip_yaw=keypose([(0,(0,0,0)),(.13,(0,0,.22)),(.30,(0,0,-.28)),(.47,(0,0,-.22)),(.72,(0,0,0))],time).z
-        chest_yaw=keypose([(0,(0,0,0)),(.17,(0,0,.48)),(.39,(0,0,-.64)),(.49,(0,0,-.55)),(.72,(0,0,0))],time).z
-        offset=keypose([(0,(0,0,0)),(.14,(.035,.045,-.035)),(.33,(-.035,-.13,-.075)),(.48,(-.025,-.12,-.055)),(.72,(0,0,0))],time)
-        lean+=keypose([(0,(0,0,0)),(.14,(-.07,0,0)),(.34,(.20,0,0)),(.49,(.14,0,0)),(.72,(0,0,0))],time).x
+        hip_yaw=keypose([(0,(0,0,0)),(.13,(0,0,.22)),(.30,(0,0,-.28)),(.47,(0,0,-.22)),(.72,(0,0,0))],time,flow=True).z
+        chest_yaw=keypose([(0,(0,0,0)),(.17,(0,0,.48)),(.39,(0,0,-.64)),(.49,(0,0,-.55)),(.72,(0,0,0))],time,flow=True).z
+        offset=keypose([(0,(0,0,0)),(.14,(.035,.045,-.035)),(.33,(-.035,-.13,-.075)),(.48,(-.025,-.12,-.055)),(.72,(0,0,0))],time,flow=True)
+        lean+=keypose([(0,(0,0,0)),(.14,(-.07,0,0)),(.34,(.20,0,0)),(.49,(.14,0,0)),(.72,(0,0,0))],time,flow=True).x
         drive=smooth((time-.08)/.17)*(1-smooth((time-.49)/.23))
     elif kind=='spear':
         drive=smooth((time-.18)/.18)*(1-smooth((time-.50)/.35))
@@ -213,27 +225,31 @@ def human_pose(kind,time,duration,weapon):
         if kind in ['sword','spear']:
             if suffix=='L':
                 foot+=v((-.045*drive,-(.24 if kind=='spear' else .20)*drive,0))
-                lift=.045*math.sin(math.pi*max(0,min(1,(time-.08)/.17))) if time<.25 else .025*math.sin(math.pi*max(0,min(1,(time-(duration-.23))/.23)))
+                step_start,step_end=(.18,.36) if kind=='spear' else (.08,.25)
+                lift=.045*math.sin(math.pi*max(0,min(1,(time-step_start)/(step_end-step_start)))) if time<step_end else .025*math.sin(math.pi*max(0,min(1,(time-(duration-.23))/.23)))
                 foot.z+=lift
-            else:foot+=v((.025*drive,.055*drive,.035*drive))
+            else:foot.z+=.035*drive
         if kind in ['jump','hang','mantle']:
             foot=body((side*.18,-.1 if suffix=='L' else .05,-.63 if kind=='hang' else -.69))
             if kind=='jump':
                 tuck=math.sin(math.pi*phase)**2;foot=body((side*.17,-.06-(.19 if suffix=='L' else .10)*tuck,-.83+.22*tuck))
             if kind=='mantle' and suffix=='L':foot=body((side*.18,-.38,-.26))
         knee=elbow(hip,foot,.43,.41,(0,-1,.1));toe=foot+v((0,-.21,.015 if lift>.01 else -.03))
+        if kind in ['sword','spear'] and suffix=='R':toe.z-=.035*drive
         poses['thigh'+suffix]=(hip,knee);poses['calf'+suffix]=(knee,foot);poses['foot'+suffix]=(foot,toe)
     shoulderR=body((.29,0,.49));shoulderL=body((-.29,0,.49))
-    swing=(.22 if run else .14)*math.sin(cycle-.15) if walk else .012*math.sin(cycle)
-    right=body((.34,-.23-swing*.28,.25+.018*math.sin(cycle-.35)));left=body((-.36,-.10+swing,.16 if run else .08))
+    swing=(.16 if run else .14)*math.sin(cycle-.15) if walk else .012*math.sin(cycle)
+    # The running free arm stays bent in front of the ribs. Letting the wrist
+    # cross behind the shoulder made the elbow swivel on every fast stride.
+    right=body((.34,-.23-swing*.28,.25+.018*math.sin(cycle-.35)));left=body((-.36,(-.20 if run else -.10)+swing,.20 if run else .08))
     direction=v((.18+.025*math.sin(cycle-.4),-.50,.85)).normalized()
     if weapon=='spear':right=body((.34,-.18,.14));left=body((-.15,-.49,.20));direction=v((0,-.9,.44)).normalized()
     if weapon=='staff':right=body((.38,-.17,.13));direction=v((.08,-.12,1)).normalized()
     if weapon=='bow':right=body((.33,-.21,.22));left=body((-.25,-.22,.26));direction=v((0,0,1))
     if kind=='sword':
-        right=body(keypose([(0,(.34,-.23,.25)),(.16,(.42,.04,.61)),(.23,(.44,-.17,.54)),(.32,(.17,-.43,.40)),(.43,(-.12,-.42,.26)),(.51,(-.10,-.26,.22)),(.72,(.34,-.23,.25))],time))
-        direction=keypose([(0,(.18,-.50,.85)),(.18,(.55,.10,.83)),(.27,(.68,-.70,.22)),(.36,(-.18,-.97,-.08)),(.45,(-.82,-.55,-.17)),(.56,(-.60,-.30,.74)),(.72,(.18,-.50,.85))],time).normalized()
-        left=body(keypose([(0,(-.36,-.10,.08)),(.16,(-.31,-.24,.26)),(.37,(-.42,.05,.22)),(.51,(-.38,-.03,.16)),(.72,(-.36,-.10,.08))],time))
+        right=body(keypose([(0,(.34,-.23,.25)),(.09,(.59,-.16,.49)),(.16,(.50,.04,.73)),(.23,(.49,-.25,.57)),(.32,(.17,-.43,.40)),(.43,(-.12,-.42,.26)),(.51,(-.10,-.26,.22)),(.72,(.34,-.23,.25))],time,flow=True))
+        direction=keypose([(0,(.18,-.50,.85)),(.18,(.55,.10,.83)),(.27,(.68,-.70,.22)),(.36,(-.18,-.97,-.08)),(.45,(-.82,-.55,-.17)),(.56,(-.60,-.30,.74)),(.72,(.18,-.50,.85))],time,flow=True).normalized()
+        left=body(keypose([(0,(-.36,-.10,.08)),(.16,(-.31,-.24,.26)),(.37,(-.42,.05,.22)),(.51,(-.38,-.03,.16)),(.72,(-.36,-.10,.08))],time,flow=True))
     elif kind=='spear':
         thrust=keypose([(0,(0,0,0)),(.23,(0,.18,0)),(.38,(0,-.32,.08)),(.48,(0,-.32,.08)),(.85,(0,0,0))],time)
         right=body(v((.29,-.13,.22))+thrust);direction=v((0,-1,-.02)).normalized();left=right+direction*.42+v((-.18,0,0))
@@ -265,7 +281,10 @@ def human_pose(kind,time,duration,weapon):
     direction=(thorax@direction).normalized()
     definitions={d[0]:d for d in HUMAN}
     for suffix,side,shoulder,hand in [('R',1,shoulderR,right),('L',-1,shoulderL,left)]:
-        if (hand-shoulder).length>.577:hand=shoulder+(hand-shoulder).normalized()*.577
+        reach=hand-shoulder
+        # Keep both hinge limits away from singular poses: a locked arm and a
+        # wrist pulled into the shoulder each cause an abrupt elbow swivel.
+        hand=shoulder+reach.normalized()*max(.20,min(.577,reach.length))
         if suffix=='R':right=hand
         bend=elbow(shoulder,hand,.327,.255,thorax@v((side*.55,.25,-1)))
         poses['upperArm'+suffix]=(shoulder,bend);poses['forearm'+suffix]=(bend,hand)
@@ -278,7 +297,9 @@ def human_pose(kind,time,duration,weapon):
         # making the wrist point along it (which used to fold the hand backwards).
         frames['hand'+suffix]=frames['forearm'+suffix]
         poses['hand'+suffix]=(hand,hand+frames['hand'+suffix]@(v(fist[3])-v(fist[2])))
-    poses['weapon']=(right,right+direction*.2)
+    # The handle passes through the glove's palm, rather than the wrist joint.
+    grip=right+frames['handR']@v((0,-.038,-.021))
+    poses['weapon']=(grip,grip+direction*.2)
     previous=body((0,.19,.49))
     for j in range(3):
         end=previous+v((math.sin(cycle-j*.6)*.018,(.16 if crouch else .06)+(.12 if run else .025)*math.sin(cycle-j*.8),-.29 if crouch else -.39))
@@ -362,11 +383,12 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
           inverseBind=[rests[index].inverted()[r][c] for c in range(4) for r in range(4)],length=b.length,radius=definition[4],mass=definition[5]))
     for obj in objects:
         mod=obj.modifiers.new('Meep export skin','ARMATURE');mod.object=rig;obj.parent=rig
+    reference_q=[None]*len(bones)
     for clip_name,kind,duration,weapon in clips:
         action=bpy.data.actions.new(clip_name);action.use_fake_user=True;rig.animation_data.action=action
-        count=max(2,round(duration*30));times=[i*duration/count for i in range(count+1)]
-        tracks=[dict(position=[],rotation=[],scale=[]) for b in bones];last_q=[None]*len(bones)
-        for frame,time in enumerate(times):
+        count=max(2,round(duration*(60 if name=='pilgrim' and kind in ['sword','spear'] else 30)));times=[i*duration/count for i in range(count+1)]
+        tracks=[dict(position=[],rotation=[],scale=[]) for b in bones];last_q=[None]*len(bones);last_basis=[None]*len(bones)
+        for time in times:
             poses=pose_builder(kind,time,duration,weapon)
             # Write parents first; Blender resolves pose matrices into editable local keys.
             for b in bones:
@@ -374,12 +396,28 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
                 orientation=(basis[0].to_quaternion() if basis else rest_dir.rotation_difference(direction))@b.matrix_local.to_quaternion()
                 pb=rig.pose.bones[b.name];pb.matrix=Matrix.Translation(head)@orientation.to_matrix().to_4x4()
                 bpy.context.view_layer.update()
-                pb.keyframe_insert(data_path='location',frame=frame+1);pb.keyframe_insert(data_path='rotation_quaternion',frame=frame+1);pb.keyframe_insert(data_path='scale',frame=frame+1)
+                index=indices[b.name]
+                if last_basis[index] is not None and pb.rotation_quaternion.dot(last_basis[index])<0:pb.rotation_quaternion.negate()
+                last_basis[index]=pb.rotation_quaternion.copy()
+                # Dense strike samples use subframes on the same 30 fps source
+                # timeline, so the editable Action keeps the runtime duration.
+                pb.keyframe_insert(data_path='location',frame=1+time*30);pb.keyframe_insert(data_path='rotation_quaternion',frame=1+time*30);pb.keyframe_insert(data_path='scale',frame=1+time*30)
             for i,b in enumerate(bones):
                 pb=rig.pose.bones[b.name];world=C@pb.matrix;local=(C@rig.pose.bones[b.parent.name].matrix).inverted()@world if b.parent else world
                 p,q,s=local.decompose()
-                if last_q[i] is not None and q.dot(last_q[i])<0:q.negate()
+                # Meep blends quaternion components directly. Opposite signs
+                # encode the same pose but cancel during a cross-fade, so start
+                # every Action in a shared per-joint hemisphere, then retain
+                # continuity within that Action.
+                reference=last_q[i] if last_q[i] is not None else reference_q[i]
+                if reference is not None and q.dot(reference)<0:q.negate()
+                if reference_q[i] is None:reference_q[i]=q.copy()
                 last_q[i]=q.copy();tracks[i]['position'].extend(round(x,6) for x in p);tracks[i]['rotation'].extend(round(x,6) for x in [q.x,q.y,q.z,q.w]);tracks[i]['scale'].extend(round(x,6) for x in s)
+        for layer in action.layers:
+            for strip in layer.strips:
+                for bag in strip.channelbags:
+                    for curve in bag.fcurves:
+                        for key in curve.keyframe_points:key.interpolation='LINEAR'
         info['clips'][clip_name]={'duration':duration,'times':times,'tracks':tracks}
     rig.animation_data.action=None
     for pb in rig.pose.bones:pb.matrix_basis=Matrix.Identity(4)

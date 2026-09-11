@@ -150,3 +150,37 @@ test('a sword cut winds the torso back, transfers weight into a step and recover
   for(const name of ['hips','head','handR','footL','footR'])expect(Math.hypot(...recovered[name].map((v,i)=>v-carry[name][i])),`${name} recovery`).toBeLessThan(.06);
   expect(Math.hypot(...recoveredBlade.end.map((v,i)=>v-carryBlade.end[i]))).toBeLessThan(.12);
 });
+
+test.each([0,2,4.7,6.5])('sword elbows and wrists retain natural lengths, flex and continuity at %s m/s',speed=>{
+  const a=actor(),yaw=.73,travelAngle=Math.PI/4-yaw;
+  Object.assign(a,{yaw,vx:Math.sin(travelAngle)*speed,vz:-Math.cos(travelAngle)*speed,attackKind:'weapon'});
+  const indices=Object.fromEntries(rigs.pilgrim.bones.map((bone,i)=>[bone.name,i]));
+  const difference=(to,from)=>to.map((value,i)=>value-from[i]),length=values=>Math.hypot(...values);
+  const dot=(first,second)=>first.reduce((sum,value,i)=>sum+value*second[i],0);
+  let previous;
+  // Include entry from locomotion, the complete cut and return to locomotion.
+  // Actor translation stays fixed so continuity measures the articulated pose.
+  for(let frame=-6;frame<=Math.ceil((rigs.pilgrim.clips.sword.duration+.05)*120);frame++){
+    const time=frame/120;Object.assign(a,{attackAge:frame<0?-1:time,gaitPhase:.6+time*speed,animationTime:1+time});
+    const poses=actorJointPoses(a);
+    for(const side of ['L','R']){
+      const shoulder=poses[indices['upperArm'+side]],elbow=poses[indices['forearm'+side]],wrist=poses[indices['hand'+side]];
+      const upper=difference(elbow.position,shoulder.position),forearm=difference(wrist.position,elbow.position),label=`${side} arm at ${time.toFixed(4)} s, ${speed} m/s`;
+      expect(Math.abs(length(upper)-rigs.pilgrim.bones[indices['upperArm'+side]].length),label).toBeLessThan(.004);
+      expect(Math.abs(length(forearm)-rigs.pilgrim.bones[indices['forearm'+side]].length),label).toBeLessThan(.004);
+      const elbowCosine=dot(upper,forearm)/length(upper)/length(forearm);
+      expect(elbowCosine,label).toBeLessThan(Math.cos(8*Math.PI/180));
+      expect(elbowCosine,label).toBeGreaterThan(Math.cos(150*Math.PI/180));
+      const socket=actorSocket(new Transform64(),a,'hand'+side);
+      const handAxis=new Vector3(0,1,0).applyMatrix4(socket).sub(new Vector3(...socket.translation)).normalize();
+      expect(dot([handAxis.x,handAxis.y,handAxis.z],forearm)/length(forearm),label).toBeGreaterThan(Math.cos(70*Math.PI/180));
+      if(previous)for(const name of ['forearm'+side,'hand'+side]){
+        const current=poses[indices[name]],prior=previous[indices[name]];
+        expect(length(difference(current.position,prior.position)),`${name} position, ${label}`).toBeLessThan(.10);
+        const rotationStep=2*Math.acos(Math.min(1,Math.abs(dot(current.rotation,prior.rotation))));
+        expect(rotationStep,`${name} rotation, ${label}`).toBeLessThan(15*Math.PI/180);
+      }
+    }
+    previous=poses;
+  }
+});
