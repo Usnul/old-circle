@@ -143,6 +143,10 @@ export class Characters {
       if(rig.telegraph){view.remove(rig.telegraph);delete rig.telegraph;}
       rig.worldPoses=state.joints.map(()=>new Transform64());rig.inverse=new Float64Array(16);rig.matrix=new Float64Array(16);
     }
+    if(rig.weapon&&state.weaponPose){
+      const {position,rotation}=state.weaponPose;
+      for(const {id,t} of rig.weapon){t.setTranslation(...position);t.setRotation(...rotation);t.setScale(state.scale,state.scale,state.scale);t.updateMatrix();t64_announce_change(view.ecd,id);}
+    }
     const instance=view.meshSystem.instance_of(rig.id);if(!instance)return;
     const skin=instance.skins[0],bones=rigs[state.name].bones;
     if(!rig.corpseReady){
@@ -159,10 +163,6 @@ export class Characters {
     // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
     for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
     if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],clamp01((45-state.age)/4));
-    if(rig.weapon){
-      const pose=rig.worldPoses[bones.findIndex(b=>b.name==='weapon')],grip=state.weapon==='sword'?.25:0;
-      for(const {id,t} of rig.weapon){t.copy(pose);t.setTranslation(pose[12]+pose[4]*grip,pose[13]+pose[5]*grip,pose[14]+pose[6]*grip);t.updateMatrix();t64_announce_change(view.ecd,id);}
-    }
   }
   remove(rig){
     this.clearViewAlpha(rig);

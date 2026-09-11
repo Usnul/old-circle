@@ -6,6 +6,8 @@ import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityCo
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
+import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
+import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
 import {SoftwareGPUDevice} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUDevice.js';
 import {SoftwareGPUBuffer} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUBuffer.js';
 import {SoftwareGPUTextureView} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUTextureView.js';
@@ -17,7 +19,7 @@ import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/Me
 import {MeshletGeometrySerializationAdapter} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import {StandardShadeMaterial} from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
-import {actorJointPoses,rigs} from '@old-circle/game/simulation/animation.mjs';
+import {actorJointPoses,createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {Characters} from './characters.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {ARMOR} from '@old-circle/game/content/equipment.mjs';
@@ -95,17 +97,19 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       expect(context.skinning.prev_position_vertex_count).toBe(peakVertices);
       expect(graphics.geometries.meshlets.gpu_memory_usage_occupied).toBe(baseBytes*2);
       const rig=instances[0];
-      // No weapon geometry is needed here; separate entities exercise attachment cleanup.
+      // Fade the skin alone: weapon entities need no geometry for the pose/cleanup checks.
       const weapon=rig.weapon;rig.weapon=null;
       const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0],opaqueMaterial=deadMesh.material;
       characters.viewAlpha(rig,.25);
+      rig.weapon=weapon;
       for(const age of [0,41,44,45]){
-        characters.corpse(rig,{name:'pilgrim',scale:1,age,joints:actorJointPoses(actors[0])});
+        const weaponPose={position:[3+age/10,.15,2],rotation:[Math.SQRT1_2,0,0,Math.SQRT1_2]};
+        characters.corpse(rig,{name:'pilgrim',scale:1,age,joints:actorJointPoses(actors[0]),weapon:'sword',weaponPose});
+        for(const {t} of weapon){expect(Array.from(t.translation)).toEqual(weaponPose.position);expect(Array.from(t.rotation)).toEqual(weaponPose.rotation);}
         expect(deadMesh.material).toBe(opaqueMaterial);
         expect(deadMesh.material.transparency_mode).toBe(TransparencyMode.Opaque);
         expect(deadMesh.material.diffuse_color.a).toBe(1);
       }
-      rig.weapon=weapon;
       if(mode==='pool'){
         rig.telegraph=view.model();rig.lantern={parts:view.model(),light:{id:ecd.createEntity()}};
       }
@@ -132,6 +136,23 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
     if(started)await new Promise((resolve,reject)=>em.shutdown(resolve,reject));
     context?.destroy();graphics?.destroy();device.destroy();vi.unstubAllGlobals();
   }
+});
+
+test('newly received corpses place dropped weapons before the skin loads and never follow the hand',()=>{
+  const ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64,SGMesh,Animation]);
+  const skeleton=createSkeleton('pilgrim');let ready=false;
+  const view={ecd,meshSystem:{instance_of:()=>ready?{skins:[{joints:skeleton.joints}]}:null},model:()=>{
+    const t=new Transform64(),id=new Entity().add(t).build(ecd);return [{id,t}];
+  },remove:parts=>{for(const {id} of parts)ecd.removeEntity(id);}};
+  const characters=new Characters(view);
+  const actor={kind:'enemy',archetype:'hollow',weapon:'sword',x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true};
+  const rig=characters.create(actor),[{id:weaponId,t}]=rig.weapon;
+  const state={name:'pilgrim',scale:1.85,age:0,joints:actorJointPoses(actor),weapon:'sword',weaponPose:{position:[7,.2,4],rotation:[0,0,Math.SQRT1_2,Math.SQRT1_2]}};
+  characters.corpse(rig,state);expect(Array.from(t.translation)).toEqual(state.weaponPose.position);expect(Array.from(t.scale)).toEqual([1.85,1.85,1.85]);
+  ready=true;characters.corpse(rig,state);
+  for(const joint of state.joints)joint.position[0]+=10;
+  characters.corpse(rig,state);expect(Array.from(t.translation)).toEqual(state.weaponPose.position);expect(Array.from(t.rotation)).toEqual(state.weaponPose.rotation);
+  characters.remove(rig);expect(ecd.entityExists(weaponId)).toBe(false);
 });
 
 test('unadorned banner URLs and every keeper skin resolve to the correct shared rig, including newly received corpses',()=>{
