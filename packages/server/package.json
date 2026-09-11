@@ -4,5 +4,5 @@
   "private": true,
   "type": "module",
   "scripts": { "start": "node src/main.mjs" },
-  "dependencies": { "@old-circle/game": "workspace:*", "@woosh/meep-engine": "3.22.0", "ws": "8.21.3" }
+  "dependencies": { "@old-circle/game": "workspace:*", "@woosh/meep-engine": "3.23.0", "ws": "8.21.3" }
 }

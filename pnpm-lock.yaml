@@ -18,8 +18,8 @@ importers:
         specifier: workspace:*
         version: link:../game
       '@woosh/meep-engine':
-        specifier: 3.22.0
-        version: 3.22.0(dat.gui@0.7.9)
+        specifier: 3.23.0
+        version: 3.23.0(dat.gui@0.7.9)
       dat.gui:
         specifier: 0.7.9
         version: 0.7.9
@@ -40,8 +40,8 @@ importers:
   packages/game:
     dependencies:
       '@woosh/meep-engine':
-        specifier: 3.22.0
-        version: 3.22.0(dat.gui@0.7.9)
+        specifier: 3.23.0
+        version: 3.23.0(dat.gui@0.7.9)
 
   packages/server:
     dependencies:
@@ -49,8 +49,8 @@ importers:
         specifier: workspace:*
         version: link:../game
       '@woosh/meep-engine':
-        specifier: 3.22.0
-        version: 3.22.0(dat.gui@0.7.9)
+        specifier: 3.23.0
+        version: 3.23.0(dat.gui@0.7.9)
       ws:
         specifier: 8.21.3
         version: 8.21.3
@@ -499,8 +499,8 @@ packages:
   '@vitest/utils@3.2.7':
     resolution: {integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==}
 
-  '@woosh/meep-engine@3.22.0':
-    resolution: {integrity: sha512-Lqq6w3AbdDC/Dnh2RAsvgAMlD30dQKbklCp2FjmqZl5X7m+mmclGqNNPSW6Z+wNC5/wi4hUA6aQ9GRgQAvIiww==}
+  '@woosh/meep-engine@3.23.0':
+    resolution: {integrity: sha512-YyJgOam9de9SJug6FTBwxcW0hzyNeFXn4EP6UBH8G87826oIOcrAHcUq3I+Zkm6eZFRpLYQJU048QeNvWeiE/A==}
     engines: {node: '>=24'}
     peerDependencies:
       dat.gui: '>=0.7.0'
@@ -1066,7 +1066,7 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
-  '@woosh/meep-engine@3.22.0(dat.gui@0.7.9)':
+  '@woosh/meep-engine@3.23.0(dat.gui@0.7.9)':
     dependencies:
       dat.gui: 0.7.9
       opentype.js: 1.3.4
