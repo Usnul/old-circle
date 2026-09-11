@@ -4,12 +4,15 @@ import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
 import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
 import {AnimationClip} from '@woosh/meep-engine/src/engine/ecs/animation/AnimationClip.js';
-import {SceneBundle} from '@woosh/meep-engine/src/shade/renderer/loader/SceneBundle.js';
-import {SkinnedMesh} from '@woosh/meep-engine/src/shade/renderer/scene/SkinnedMesh.js';
+import {SceneNode} from '@woosh/meep-engine/src/shade/renderer/loader/SceneNode.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
-import {TransformAuthority} from '@woosh/meep-engine/src/shade/renderer/scene/TransformAuthority.js';
+import {TransformAttachment} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachment.js';
+import {TRANSFORM_ATTACHMENT_EVENT_CHANGE} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TRANSFORM_ATTACHMENT_EVENT_CHANGE.js';
+import {GPUStateAuthorityFlags} from '@woosh/meep-engine/src/engine/ecs/gpu/GPUStateAuthorityFlags.js';
+import {gpu_authority_revoke} from '@woosh/meep-engine/src/engine/ecs/gpu/gpu_authority_revoke.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {shaded_geometry_announce_change} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/shaded_geometry_announce_change.js';
 import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {m4_invert} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_invert.js';
@@ -35,39 +38,37 @@ export class Characters {
   appearance(a){return actorRig(a)+':'+(a.kind==='player'?'player':a.archetype)+':'+(a.kind==='player'?armorFor(a).appearance:BOSSES[a.archetype]?'boss_'+a.archetype:a.archetype==='mage'?'keeper':a.archetype==='archer'?'wayfarer':a.archetype==='sentinel'?'sentinel':'pilgrim');}
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);
-    const [name,appearance,outfit='pilgrim']=url.split(':'),skeleton=createSkeleton(name),bundle=new SceneBundle();bundle.scenes=[skeleton.root];bundle.clips=skeleton.clips;
+    const [name,appearance,outfit='pilgrim']=url.split(':'),skeleton=createSkeleton(name),bundle=skeleton.bundle;
     const model=outfit.startsWith('boss_')?outfit:name==='pilgrim'&&outfit!=='pilgrim'?'armor_'+outfit:name;
-    const meshes=this.view.models.get(model).map(c=>{
-      const mesh=new SkinnedMesh();mesh.geometry=c.geometry;mesh.material=c.material;
+        const meshes=this.view.models.get(model).map(c=>{
+      let material=c.material;
       if(appearance!=='player'){
-        mesh.material=c.material.clone();
-        if(c.material===this.view.materials.cloth)mesh.material.diffuse_color.set(...(appearance==='mage'?[.12,.17,.23]:appearance==='archer'?[.22,.20,.13]:[.20,.12,.08]));
-        if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...(appearance==='mage'?[.7,.9,1.3]:appearance==='archer'?[1.1,.97,.72]:[1.2,.75,.52]));
-        if(appearance==='sentinel'&&c.material===this.view.materials.iron)mesh.material.diffuse_color.set(.38,.30,.17);
+        material=c.material.clone();
+        if(c.material===this.view.materials.cloth)material.diffuse_color.set(...(appearance==='mage'?[.12,.17,.23]:appearance==='archer'?[.22,.20,.13]:[.20,.12,.08]));
+        if(c.material===this.view.materials.cloak)material.diffuse_color.set(...(appearance==='mage'?[.7,.9,1.3]:appearance==='archer'?[1.1,.97,.72]:[1.2,.75,.52]));
+        if(appearance==='sentinel'&&c.material===this.view.materials.iron)material.diffuse_color.set(.38,.30,.17);
       }
       if(outfit.startsWith('boss_')){
-        for(const [material,color] of Object.entries(keeperColors[appearance]))if(c.material===this.view.materials[material])mesh.material.diffuse_color.set(...color);
-        if(appearance==='frostbound'&&c.material===this.view.materials.ember){mesh.material.diffuse_color.set(.2,.6,.8);mesh.material.emissive_factor.set(.08,.5,.8);}
+        for(const [slot,color] of Object.entries(keeperColors[appearance]))if(c.material===this.view.materials[slot])material.diffuse_color.set(...color);
+        if(appearance==='frostbound'&&c.material===this.view.materials.ember){material.diffuse_color.set(.2,.6,.8);material.emissive_factor.set(.08,.5,.8);}
       }else if(outfit!=='pilgrim'&&name==='pilgrim'){
-        mesh.material=mesh.material.clone();
+        material=material.clone();
         const colors={wayfarer:{cloth:[.12,.17,.09],cloak:[.48,.64,.37]},keeper:{cloth:[.24,.27,.24],cloak:[1.05,1.16,1.10]},sentinel:{cloth:[.12,.08,.055],cloak:[.66,.37,.23]},winter:{cloth:[.32,.35,.34],cloak:[1.3,1.4,1.4]}}[outfit];
-        if(c.material===this.view.materials.cloth)mesh.material.diffuse_color.set(...colors.cloth);
-        if(c.material===this.view.materials.cloak)mesh.material.diffuse_color.set(...colors.cloak);
+        if(c.material===this.view.materials.cloth)material.diffuse_color.set(...colors.cloth);
+        if(c.material===this.view.materials.cloak)material.diffuse_color.set(...colors.cloak);
       }
-      mesh.parent=skeleton.root;skeleton.root.children.push(mesh);return mesh;
+      // a skinned primitive under the skeleton's root; the skin below names it
+      return bundle.add_node(SceneNode.from({parent:skeleton.root,geometry:c.geometry,material}));
     });
     bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes})];
-    skeleton.root.updateMatrices();this.bundles.set(url,bundle);return bundle;
+    this.bundles.set(url,bundle);return bundle;
   }
   create(a){
     const url=this.appearance(a),available=this.pool.get(url),rig=available?.pop();
     if(rig){
       rig.dead=false;rig.corpseReady=false;rig.clips.clear();
-      const instance=this.view.meshSystem.instance_of(rig.id);
-      const source=this.bundle(url);
-      for(let s=0;s<(instance?.skins.length??0);s++)for(let i=0;i<instance.skins[s].joints.length;i++){
-        const joint=instance.skins[s].joints[i];joint.transform_authority=TransformAuthority.GPU;joint.transform_local.copy(source.skins[s].joints[i].transform_local);
-      }
+      // The corpse left the joints' offsets where physics put them; the clips the new Animation
+      // binds take the joints back for the GPU and pose them from the clips, so nothing is reset.
       rig.animation=new Animation();this.view.ecd.addComponentToEntity(rig.id,rig.animation);
       rig.weapon=a.archetype==='hound'?null:this.view.model(a.weapon);rig.weaponName=a.weapon;return rig;
     }
@@ -110,13 +111,11 @@ export class Characters {
         const faded=material.clone();faded.transparency_mode=TransparencyMode.Transparent;
         rig.viewMaterials.push({material,faded,apply});
       };
-      view.meshSystem.traverse_meshes(rig.id,mesh=>remember(mesh.material,material=>{mesh.material=material;mesh.updateMatrices();}));
-      for(const {id} of [...rig.weapon??[],...rig.lantern?.parts??[]]){
+      // The skin's primitives are entities like the weapon's: the material is written on the
+      // component and announced, which rewrites the row and keeps a skinned primitive's clone.
+      for(const id of [...view.meshSystem.mesh_entities_of(rig.id),...(rig.weapon??[]).map(p=>p.id),...(rig.lantern?.parts??[]).map(p=>p.id)]){
         const geometry=view.ecd.getComponent(id,ShadedGeometry);
-        remember(geometry.material,material=>{
-          view.ecd.removeComponentFromEntity(id,ShadedGeometry);
-          view.ecd.addComponentToEntity(id,material===geometry.material?geometry:ShadedGeometry.from(geometry.geometry,material));
-        });
+        remember(geometry.material,material=>{geometry.material=material;shaded_geometry_announce_change(view.ecd,id);});
       }
     }
     const fading=alpha<1;
@@ -148,20 +147,22 @@ export class Characters {
       for(const {id,t} of rig.weapon){t.setTranslation(...position);t.setRotation(...rotation);t.setScale(state.scale,state.scale,state.scale);t.updateMatrix();t64_announce_change(view.ecd,id);}
     }
     const instance=view.meshSystem.instance_of(rig.id);if(!instance)return;
-    const skin=instance.skins[0],bones=rigs[state.name].bones;
+    const skin=instance.skins[0],bones=rigs[state.name].bones,{ecd}=view;
     if(!rig.corpseReady){
-      // Scene-bundle clips declare GPU ownership even before playback starts.
-      // Unregistering Animation stops the clips; physics must claim the joints.
-      for(const joint of skin.joints)joint.transform_authority=TransformAuthority.CPU;
+      // The clips gave the joints to the GPU and unregistering Animation took them back; physics
+      // claims them here as well, so a clip still draining cannot keep a row it no longer drives.
+      for(const joint of skin.joints)gpu_authority_revoke(ecd,joint,GPUStateAuthorityFlags.TransformAttachment);
       rig.corpseReady=true;
     }
     for(let i=0;i<state.joints.length;i++){
       const pose=state.joints[i],world=rig.worldPoses[i];world.setTranslation(...pose.position);world.setRotation(...pose.rotation);world.setScale(state.scale,state.scale,state.scale);world.updateMatrix();
-      if(bones[i].parent<0)skin.joints[i].transform_local.copy(world);
-      else{m4_invert(rig.inverse,rig.worldPoses[bones[i].parent]);m4_multiply(rig.matrix,rig.inverse,world);skin.joints[i].transform_local.fromMatrix(rig.matrix);}
+      const local=ecd.getComponent(skin.joints[i],TransformAttachment).transform;
+      if(bones[i].parent<0)local.copy(world);
+      else{m4_invert(rig.inverse,rig.worldPoses[bones[i].parent]);m4_multiply(rig.matrix,rig.inverse,world);local.fromMatrix(rig.matrix);}
     }
-    // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
-    for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
+    // Each joint's offset is announced on the joint, parents first; the mesh system carries the
+    // announcement to the joint's row, and the GPU composes the chain from the offsets.
+    for(let i=0;i<bones.length;i++)ecd.sendEvent(skin.joints[i],TRANSFORM_ATTACHMENT_EVENT_CHANGE);
     if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],clamp01((45-state.age)/4));
   }
   remove(rig){

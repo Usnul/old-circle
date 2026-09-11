@@ -5,6 +5,7 @@ import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js'
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
+import {ShadedGeometrySystem} from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
 import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
@@ -14,12 +15,13 @@ import {SoftwareGPUTextureView} from '@woosh/meep-engine/src/shade/device/mock/S
 import {SoftwareGPUSampler} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUSampler.js';
 import {ShadeGPUCommandContext} from '@woosh/meep-engine/src/shade/device/ShadeGPUCommandContext.js';
 import {Scene} from '@woosh/meep-engine/src/shade/renderer/scene/Scene.js';
-import {TransformAuthority} from '@woosh/meep-engine/src/shade/renderer/scene/TransformAuthority.js';
+import {GPUStateAuthority} from '@woosh/meep-engine/src/engine/ecs/gpu/GPUStateAuthority.js';
+import {GPUStateAuthorityFlags} from '@woosh/meep-engine/src/engine/ecs/gpu/GPUStateAuthorityFlags.js';
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import {MeshletGeometrySerializationAdapter} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import {StandardShadeMaterial} from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
-import {actorJointPoses,createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
+import {actorJointPoses,createSimulationSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {Characters} from './characters.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {ARMOR} from '@old-circle/game/content/equipment.mjs';
@@ -34,6 +36,7 @@ test('the compiled catalogue retains every playable and keeper skin after a worl
 });
 import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {SHADED_GEOMETRY_EVENT_CHANGE} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/SHADED_GEOMETRY_EVENT_CHANGE.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 
 async function withNativeCharacters(run){
@@ -60,7 +63,8 @@ async function withNativeCharacters(run){
     const characters=new Characters(view);
     view.meshSystem=new MeshSystem(facade,scene,async url=>characters.bundle(url));
     view.animations=new AnimationSystem(facade,view.meshSystem);
-    em.addSystem(view.meshSystem);em.addSystem(view.animations);em.attachDataset(ecd);
+    // a model's primitives are entities, and the system that owns primitives is what puts them in the scene
+    em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(view.animations);em.attachDataset(ecd);
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
     for(const [name,file] of [['pilgrim','pilgrim-0.meep'],['briarHound','briarHound-0.meep']]){
       const bytes=await readFile(new URL(`../../public/assets/geometry/${file}`,import.meta.url));
@@ -113,18 +117,18 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
   await withNativeCharacters(async({characters,view,scene,graphics,context,flush})=>{
     const {ecd}=view,baseBytes=graphics.geometries.meshlets.gpu_memory_usage_occupied;
     const actors=[{kind:'enemy',archetype:'hollow',weapon:'sword'},{kind:'enemy',archetype:'hound',weapon:'sword'}].map(a=>({...a,x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true}));
-    let peakVertices,peakBlasBytes,sceneNodeCount;
+    let peakVertices,peakBlasBytes,pooledEntityCount;
     for(let cycle=0;cycle<8;cycle++){
       const instances=actors.map(a=>characters.create(a));
       await setImmediate();flush();
       for(let i=0;i<instances.length;i++){
         const rig=instances[i],instance=view.meshSystem.instance_of(rig.id),skin=instance.skins[0];
-        expect(skin.joints.every(joint=>joint.transform_authority===TransformAuthority.GPU)).toBe(true);
-        expect(skin.meshes[0].material.diffuse_color.a).toBe(1);
+        expect(ecd.getComponent(skin.meshes[0],ShadedGeometry).material.diffuse_color.a).toBe(1);
         characters.update(rig,actors[i]);
       }
       flush();
-      sceneNodeCount??=scene.instances.nodes.length;
+      // the clips the update bound gave every joint to the GPU
+      for(const rig of instances)for(const joint of view.meshSystem.instance_of(rig.id).skins[0].joints)expect(ecd.getComponent(joint,GPUStateAuthority).flags&GPUStateAuthorityFlags.TransformAttachment).toBeTruthy();
       peakBlasBytes??=graphics.geometries.blas.buffer_data.size;
       // MEEP-012: keep the game pool until BLAS node ranges are reclaimed too.
       if(mode==='pool')expect(graphics.geometries.blas.buffer_data.size).toBe(peakBlasBytes);
@@ -136,16 +140,16 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       const rig=instances[0];
       // Fade the skin alone: weapon entities need no geometry for the pose/cleanup checks.
       const weapon=rig.weapon;rig.weapon=null;
-      const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0],opaqueMaterial=deadMesh.material;
+      const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0],materialOf=()=>ecd.getComponent(deadMesh,ShadedGeometry).material,opaqueMaterial=materialOf();
       characters.viewAlpha(rig,.25);
       rig.weapon=weapon;
       for(const age of [0,41,44,45]){
         const weaponPose={position:[3+age/10,.15,2],rotation:[Math.SQRT1_2,0,0,Math.SQRT1_2]};
         characters.corpse(rig,{name:'pilgrim',scale:1,age,joints:actorJointPoses(actors[0]),weapon:'sword',weaponPose});
         for(const {t} of weapon){expect(Array.from(t.translation)).toEqual(weaponPose.position);expect(Array.from(t.rotation)).toEqual(weaponPose.rotation);}
-        expect(deadMesh.material).toBe(opaqueMaterial);
-        expect(deadMesh.material.transparency_mode).toBe(TransparencyMode.Opaque);
-        expect(deadMesh.material.diffuse_color.a).toBe(1);
+        expect(materialOf()).toBe(opaqueMaterial);
+        expect(materialOf().transparency_mode).toBe(TransparencyMode.Opaque);
+        expect(materialOf().diffuse_color.a).toBe(1);
       }
       if(mode==='pool'){
         rig.telegraph=view.model();rig.lantern={parts:view.model(),light:{id:ecd.createEntity()}};
@@ -155,26 +159,27 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
         else{view.remove(rig.weapon??[]);ecd.removeEntity(rig.id);}
       }
       flush();
-      expect(ecd.entityCount).toBe(mode==='pool'?instances.length:0);
+      // pooled: the rigs and the models they keep offstage — entities now — and no more of them each cycle; torn down: nothing
+      if(mode==='pool'){pooledEntityCount??=ecd.entityCount;expect(pooledEntityCount).toBeGreaterThan(instances.length);expect(ecd.entityCount).toBe(pooledEntityCount);}
+      else expect(ecd.entityCount).toBe(0);
       for(const rig of instances){
         if(mode==='teardown')expect(view.meshSystem.instance_of(rig.id)).toBeNull();
         expect(view.animations.playbacks_of(rig.id)).toHaveLength(0);
       }
-      expect(scene.instances.nodes).toHaveLength(mode==='pool'?sceneNodeCount:0);
       expect(graphics.geometries.meshlets.gpu_memory_usage_occupied).toBe(baseBytes*(mode==='pool'?2:1));
     }
     if(mode==='teardown'){
       const pending=characters.create(actors[0]);view.remove(pending.weapon);ecd.removeEntity(pending.id);
       await setImmediate();flush();
-      expect(ecd.entityCount).toBe(0);expect(scene.instances.nodes).toHaveLength(0);
+      expect(ecd.entityCount).toBe(0);
       expect(graphics.geometries.meshlets.gpu_memory_usage_occupied).toBe(baseBytes);
     }
   });
 });
 
 test('newly received corpses place dropped weapons before the skin loads and never follow the hand',()=>{
-  const ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64,SGMesh,Animation]);
-  const skeleton=createSkeleton('pilgrim');let ready=false;
+  // the joints physics writes are entities, so the corpse's skeleton and the view share a dataset
+  const skeleton=createSimulationSkeleton('pilgrim'),ecd=skeleton.dataset;ecd.registerManyComponentTypes([SGMesh,Animation]);let ready=false;
   const view={ecd,meshSystem:{instance_of:()=>ready?{skins:[{joints:skeleton.joints}]}:null},model:()=>{
     const t=new Transform64(),id=new Entity().add(t).build(ecd);return [{id,t}];
   },remove:parts=>{for(const {id} of parts)ecd.removeEntity(id);}};
@@ -201,22 +206,28 @@ test('unadorned banner URLs and every keeper skin resolve to the correct shared 
 
 test('wall contact fades only the local skin and equipment, reuses materials and restores them before reuse',()=>{
   const ecd=new EntityComponentDataset();ecd.setComponentTypeMap([ShadedGeometry]);
-  const shared=new StandardShadeMaterial(),other={material:shared},body={material:shared,updateMatrices(){}};
-  const weapon=new Entity().add(ShadedGeometry.from({},shared)).build(ecd),lantern=new Entity().add(ShadedGeometry.from({},shared)).build(ecd);
-  const originalWeapon=ecd.getComponent(weapon,ShadedGeometry),originalLantern=ecd.getComponent(lantern,ShadedGeometry);
+  const shared=new StandardShadeMaterial(),other={material:shared};
+  // the skin's primitive is an entity of the model's, like the weapon and the lantern are their own
+  const body=new Entity().add(ShadedGeometry.from({},shared)).build(ecd),weapon=new Entity().add(ShadedGeometry.from({},shared)).build(ecd),lantern=new Entity().add(ShadedGeometry.from({},shared)).build(ecd);
+  const materialOf=id=>ecd.getComponent(id,ShadedGeometry).material;
+  // the fade is written on the components themselves and announced; nothing is replaced
+  const components=[body,weapon,lantern].map(id=>ecd.getComponent(id,ShadedGeometry)),announced=[];
+  for(const id of [body,weapon,lantern])ecd.addEntityEventListener(id,SHADED_GEOMETRY_EVENT_CHANGE,()=>announced.push(id));
   let ready=false;
-  const renderer=new Characters({ecd,meshSystem:{instance_of:()=>ready?{}:null,traverse_meshes:(id,visit)=>visit(body)}});
+  const renderer=new Characters({ecd,meshSystem:{instance_of:()=>ready?{}:null,mesh_entities_of:()=>[body]}});
   const rig={id:0,weapon:[{id:weapon}],lantern:{parts:[{id:lantern}]}};
   renderer.viewAlpha(rig,0);expect(rig.viewMaterials).toBeUndefined();ready=true;
   renderer.viewAlpha(rig,.25);
-  const faded=body.material,fadedWeapon=ecd.getComponent(weapon,ShadedGeometry);
-  for(const material of [faded,fadedWeapon.material,ecd.getComponent(lantern,ShadedGeometry).material]){
+  const faded=materialOf(body),fadedWeapon=materialOf(weapon);
+  for(const material of [faded,fadedWeapon,materialOf(lantern)]){
     expect(material).not.toBe(shared);expect(material.transparency_mode).toBe(TransparencyMode.Transparent);expect(material.diffuse_color.a).toBe(.25);
   }
+  expect(announced).toEqual([body,weapon,lantern]);
   expect(other.material.diffuse_color.a).toBe(1);expect(shared.transparency_mode).toBe(TransparencyMode.Opaque);
-  renderer.viewAlpha(rig,0);expect(body.material).toBe(faded);expect(faded.diffuse_color.a).toBe(0);expect(ecd.getComponent(weapon,ShadedGeometry)).toBe(fadedWeapon);
-  renderer.viewAlpha(rig,1);expect(body.material).toBe(shared);expect(ecd.getComponent(weapon,ShadedGeometry)).toBe(originalWeapon);expect(ecd.getComponent(lantern,ShadedGeometry)).toBe(originalLantern);
-  renderer.viewAlpha(rig,.5);expect(body.material).toBe(faded);
-  renderer.clearViewAlpha(rig);expect(body.material).toBe(shared);expect(rig.viewMaterials).toBeNull();expect(ecd.getComponent(weapon,ShadedGeometry)).toBe(originalWeapon);
-  rig.dead=true;renderer.viewAlpha(rig,0);expect(body.material).toBe(shared);
+  renderer.viewAlpha(rig,0);expect(materialOf(body)).toBe(faded);expect(faded.diffuse_color.a).toBe(0);expect(materialOf(weapon)).toBe(fadedWeapon);
+  renderer.viewAlpha(rig,1);for(const id of [body,weapon,lantern])expect(materialOf(id)).toBe(shared);
+  expect([body,weapon,lantern].map(id=>ecd.getComponent(id,ShadedGeometry))).toEqual(components);
+  renderer.viewAlpha(rig,.5);expect(materialOf(body)).toBe(faded);
+  renderer.clearViewAlpha(rig);expect(materialOf(body)).toBe(shared);expect(rig.viewMaterials).toBeNull();expect(materialOf(weapon)).toBe(shared);
+  rig.dead=true;renderer.viewAlpha(rig,0);expect(materialOf(body)).toBe(shared);
 });

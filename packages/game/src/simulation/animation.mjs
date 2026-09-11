@@ -1,12 +1,16 @@
-import {Node3D} from '@woosh/meep-engine/src/shade/renderer/scene/Node3D.js';
+import {SceneNode} from '@woosh/meep-engine/src/shade/renderer/loader/SceneNode.js';
 import {ShadeAnimationClip} from '@woosh/meep-engine/src/shade/renderer/animation/ShadeAnimationClip.js';
 import {ShadeAnimationChannel} from '@woosh/meep-engine/src/shade/renderer/animation/ShadeAnimationChannel.js';
 import {Node3DProperty} from '@woosh/meep-engine/src/shade/renderer/object_property/Node3DProperty.js';
 import {AnimationCurve} from '@woosh/meep-engine/src/engine/animation/curve/AnimationCurve.js';
 import {curve_from_track_data_linear} from '@woosh/meep-engine/src/engine/animation/clip/curve_from_track_data_linear.js';
 import {animation_curve_optimize} from '@woosh/meep-engine/src/engine/animation/curve/animation_curve_optimize.js';
-import {pose_evaluate_world} from '@woosh/meep-engine/src/shade/renderer/animation/pose/pose_evaluate_world.js';
+import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
+import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
+import {SceneBundle} from '@woosh/meep-engine/src/shade/renderer/loader/SceneBundle.js';
+import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
+import {prefab_instantiate} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_instantiate.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
@@ -19,12 +23,17 @@ export const actorRig=a=>a.archetype==='hound'?'briarHound':'pilgrim';
 export const actorScale=a=>a.boss?1.85:1;
 export const actorFeet=a=>[a.x,a.y-(a.boss?1.2675:a.crouch?.495:.845),a.z];
 
-/** Meep skeletons and curves compiled from Blender bind poses and Actions. */
+/** Meep skeletons and curves compiled from Blender bind poses and Actions — the loader's shape: a scene bundle of records, joints addressed by index. */
 export function createSkeleton(name){
-  const data=rigs[name],root=new Node3D();root.name=name;
-  const joints=data.bones.map(b=>{const n=new Node3D();n.name=b.name;n.transform_local.setTranslation(...b.position);n.transform_local.setRotation(...b.rotation);n.transform_local.setScale(...b.scale);return n;});
-  for(let i=0;i<joints.length;i++)(data.bones[i].parent<0?root:joints[data.bones[i].parent]).addChild(joints[i]);
-  root.updateMatrices();
+  const data=rigs[name],bundle=new SceneBundle(),root=bundle.add_node(SceneNode.from({name}));
+  // parents before children, whatever order the export listed the bones in
+  const joints=new Array(data.bones.length).fill(-1);let pending=data.bones.map((_b,i)=>i);
+  while(pending.length>0){
+    const next=[];
+    for(const i of pending){const b=data.bones[i];if(b.parent>=0&&joints[b.parent]===-1){next.push(i);continue;}joints[i]=bundle.add_node(SceneNode.from({name:b.name,parent:b.parent<0?root:joints[b.parent],translation:b.position,rotation:b.rotation,scale:b.scale}));}
+    if(next.length===pending.length)throw new Error(`rig ${name}: bones form a cycle`);
+    pending=next;
+  }
   const clips=Object.entries(data.clips).map(([name,source])=>{
     const channels=[];
     for(let i=0;i<joints.length;i++)for(const [key,property,count] of [['position',Node3DProperty.Translation,3],['rotation',Node3DProperty.Rotation,4],['scale',Node3DProperty.Scale,3]]){
@@ -36,7 +45,8 @@ export function createSkeleton(name){
     }
     return ShadeAnimationClip.from({name,channels});
   });
-  return {root,joints,clips,data,byName:new Map(clips.map(c=>[c.name,c]))};
+    bundle.clips=clips;
+  return {bundle,root,joints,clips,data,byName:new Map(clips.map(c=>[c.name,c]))};
 }
 
 const directions=['','_forward_right','_right','_back_right','_back','_back_left','_left','_forward_left'];
@@ -83,15 +93,29 @@ export function animationPlan(a){
   return plan;
 }
 
+/**
+ * The same rig as the engine holds a spawned one: entities in a dataset of their own, each joint an
+ * offset from its parent, the clips retargeted onto them. Sockets and joint poses are evaluated
+ * exactly from the clips over that chain, which is the same arithmetic the GPU runs for the drawn
+ * character — so the CPU's damage sockets and the picture agree.
+ */
+export function createSimulationSkeleton(name){
+    const skeleton=createSkeleton(name);
+  const prefab=prefab_compile(skeleton.bundle),dataset=new EntityComponentDataset();dataset.registerManyComponentTypes([Transform64]);
+  const root=dataset.createEntity(),placement=new Transform64();placement.updateMatrix();dataset.addComponentToEntity(root,placement);
+  const instance=prefab_instantiate(prefab,dataset,root),joints=skeleton.data.bones.map(b=>instance.entity_of(b.name)),clips=instance.clips;
+  return {dataset,root,placement,instance,joints,clips,data:skeleton.data,byName:new Map(clips.map(c=>[c.name,c]))};
+}
+
 const templates=new Map();
-export function skeletonFor(a){const name=actorRig(a);if(!templates.has(name))templates.set(name,createSkeleton(name));return templates.get(name);}
+export function skeletonFor(a){const name=actorRig(a);if(!templates.has(name))templates.set(name,createSimulationSkeleton(name));return templates.get(name);}
 export function actorPlaybacks(a,skeleton=skeletonFor(a)){return animationPlan(a).map(p=>({clip:skeleton.byName.get(p.name),time:p.time,weight:p.weight}));}
-export function placeSkeleton(a,skeleton){const scale=actorScale(a),yaw=a.yaw+Math.PI;skeleton.root.transform_local.setTranslation(...actorFeet(a));skeleton.root.transform_local.setScale(scale,scale,scale);skeleton.root.transform_local.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));}
+export function placeSkeleton(a,skeleton){const scale=actorScale(a),yaw=a.yaw+Math.PI,t=skeleton.placement;t.setTranslation(...actorFeet(a));t.setScale(scale,scale,scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();}
 export function actorSocket(result,a,name){
   const skeleton=skeletonFor(a);placeSkeleton(a,skeleton);
-  return pose_evaluate_world(result,skeleton.joints.find(n=>n.name===name),actorPlaybacks(a,skeleton));
+  return t64_evaluate_world(result,skeleton.dataset,skeleton.instance.entity_of(name),actorPlaybacks(a,skeleton));
 }
 export function actorJointPoses(a){
   const skeleton=skeletonFor(a);placeSkeleton(a,skeleton);const playbacks=actorPlaybacks(a,skeleton);
-  return skeleton.joints.map(j=>{const t=pose_evaluate_world(new Transform64(),j,playbacks);return {position:Array.from(t.translation),rotation:Array.from(t.rotation)};});
+  return skeleton.joints.map(j=>{const t=t64_evaluate_world(new Transform64(),skeleton.dataset,j,playbacks);return {position:Array.from(t.translation),rotation:Array.from(t.rotation)};});
 }

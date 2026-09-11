@@ -28,7 +28,8 @@ afterAll(()=>vi.unstubAllGlobals());
 test.each([60,120,144])('lateral solo travel keeps the rendered camera and body together at %i Hz between engine ticks',async refresh=>{
   const clock=vi.spyOn(performance,'now').mockReturnValue(0);
   const em=new EntityManager(),ecd=new EntityComponentDataset(),scene=new Scene(),camera=new RenderCamera();
-  const graphics={isGraphicsEngine:true,camera:{camera},renderer:{}};
+  // no device: the systems that place rows ask for a scene context and get none
+  const graphics={isGraphicsEngine:true,camera:{camera},renderer:{},scene_context:()=>null};
   em.addSystem(new CameraSystem(graphics));em.addSystem(new ShadedGeometrySystem(graphics,scene));em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
   try{
@@ -64,7 +65,7 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
       // Callback workload varies even though display timestamps remain evenly spaced.
       clock.mockReturnValue((time+[.001,.005,.002,.004][frame%4])*1000);
       view.update(snapshot,actor.id,1/refresh,time);
-      const body=view.characters.get(actor.id).geometry.node.transform_global;
+      const body=view.characters.get(actor.id).t;
       expect(camera.transform.translation_x).toBeCloseTo(body.translation_x,10);
       expect(camera.transform.translation_z-body.translation_z).toBeCloseTo(5.8,10);
       if(time>.3)speeds.push((body.translation_x-previousX)*refresh);
