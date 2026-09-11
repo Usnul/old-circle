@@ -77,3 +77,76 @@ test('animation blends stay normalized through movement, attacks and climbing',(
     expect(plan.every(p=>Number.isFinite(p.time)&&rigs.pilgrim.clips[p.name])).toBe(true);
   }
 });
+
+test.each([
+  {stance:'idle',speed:0,stride:1.12,crouch:false},
+  {stance:'walk',speed:2,stride:1.12,crouch:false},
+  {stance:'run',speed:6.5,stride:1.84,crouch:false},
+  {stance:'crouch',speed:0,stride:1.12,crouch:true},
+  {stance:'crouch walk',speed:1.3,stride:1.12,crouch:true},
+])('the sword stays in an upright, ground-clearing carry throughout $stance',({stance,speed,stride,crouch})=>{
+  const a=actor();Object.assign(a,{weapon:'sword',crouch,y:crouch?.495:.845,yaw:.73});
+  for(let sector=0;sector<8;sector++)for(let frame=0;frame<=32;frame++){
+    const phase=frame/32,angle=sector*Math.PI/4-a.yaw;
+    Object.assign(a,{vx:Math.sin(angle)*speed,vz:-Math.cos(angle)*speed,gaitPhase:phase*stride,animationTime:phase*3.2});
+    const socket=actorSocket(new Transform64(),a,'weapon'),pose=weaponPose(a);
+    // The model origin is .25 m along the hand socket. Its pommel extends
+    // .49 m behind that origin, including the rounded end of the pommel.
+    const pommel=new Vector3(0,.25-.49,0).applyMatrix4(socket),label=`${stance}, heading ${sector}, phase ${phase}`;
+    expect(pose.end[1]-socket.translation[1],label).toBeGreaterThan(.12);
+    expect(pose.end[1],label).toBeGreaterThan(.10);
+    expect(pommel.y,label).toBeGreaterThan(.10);
+  }
+});
+
+function namedHumanPose(a){
+  return Object.fromEntries(actorJointPoses(a).map((pose,i)=>[rigs.pilgrim.bones[i].name,pose.position]));
+}
+const excursion=values=>Math.max(...values)-Math.min(...values);
+const average=values=>values.reduce((sum,value)=>sum+value,0)/values.length;
+
+test('walking bends the spine and running adds forward weight with visible pelvis and head bob',()=>{
+  const gaits=[];
+  for(const [speed,stride] of [[2,1.12],[6.5,1.84]]){
+    const a=actor();a.vz=-speed;
+    const poses=[],bends=[],leans=[];
+    for(let frame=0;frame<32;frame++){
+      a.gaitPhase=frame/32*stride;const pose=namedHumanPose(a);poses.push(pose);
+      const axis=name=>{
+        const socket=actorSocket(new Transform64(),a,name);
+        return new Vector3(0,1,0).applyMatrix4(socket).sub(new Vector3(...socket.translation)).normalize();
+      };
+      bends.push(Math.acos(Math.max(-1,Math.min(1,axis('hips').dot(axis('chest'))))));
+      leans.push(Math.atan2(pose.hips[2]-pose.head[2],pose.head[1]-pose.hips[1]));
+    }
+    expect(average(bends),`spine bend at ${speed} m/s`).toBeGreaterThan(.035);
+    for(const joint of ['hips','head'])expect(excursion(poses.map(pose=>pose[joint][1])),`${joint} bob at ${speed} m/s`).toBeGreaterThan(.025);
+    gaits.push({lean:average(leans),bob:excursion(poses.map(pose=>pose.hips[1]))});
+  }
+  expect(gaits[0].lean).toBeGreaterThan(.025);
+  expect(gaits[1].lean).toBeGreaterThan(gaits[0].lean+.05);
+  expect(gaits[1].bob).toBeGreaterThan(gaits[0].bob+.015);
+});
+
+test('a sword cut winds the torso back, transfers weight into a step and recovers its carry',()=>{
+  const a=actor();a.attackKind='weapon';
+  const carry=namedHumanPose(a),carryBlade=weaponPose(a),duration=rigs.pilgrim.clips.sword.duration;
+  const shoulderYaw=pose=>Math.atan2(pose.upperArmR[2]-pose.upperArmL[2],pose.upperArmL[0]-pose.upperArmR[0]);
+  const yawFromCarry=pose=>Math.atan2(Math.sin(shoulderYaw(pose)-shoulderYaw(carry)),Math.cos(shoulderYaw(pose)-shoulderYaw(carry)));
+  const samples=[];
+  for(let frame=0;frame<=48;frame++){
+    a.attackAge=frame/48*duration;samples.push({time:a.attackAge,pose:namedHumanPose(a)});
+  }
+  const anticipation=samples.filter(sample=>sample.time>0&&sample.time<.18);
+  const followThrough=samples.filter(sample=>sample.time>=.26&&sample.time<=.50);
+  const wound=anticipation.reduce((best,sample)=>Math.abs(yawFromCarry(sample.pose))>Math.abs(yawFromCarry(best.pose))?sample:best);
+  const windingYaw=yawFromCarry(wound.pose);
+  expect(Math.abs(windingYaw)).toBeGreaterThan(.12);
+  expect(Math.max(...followThrough.map(sample=>-Math.sign(windingYaw)*yawFromCarry(sample.pose)))).toBeGreaterThan(.12);
+  expect(Math.max(...anticipation.map(({pose})=>Math.hypot(...pose.handR.map((v,i)=>v-carry.handR[i]))))).toBeGreaterThan(.12);
+  expect(Math.max(...samples.map(({pose})=>Math.hypot(pose.hips[0]-carry.hips[0],pose.hips[2]-carry.hips[2])))).toBeGreaterThan(.05);
+  expect(Math.max(...samples.flatMap(({pose})=>['footL','footR'].map(name=>carry[name][2]-pose[name][2])))).toBeGreaterThan(.08);
+  a.attackAge=duration-.015;const recovered=namedHumanPose(a),recoveredBlade=weaponPose(a);
+  for(const name of ['hips','head','handR','footL','footR'])expect(Math.hypot(...recovered[name].map((v,i)=>v-carry[name][i])),`${name} recovery`).toBeLessThan(.06);
+  expect(Math.hypot(...recoveredBlade.end.map((v,i)=>v-carryBlade.end[i]))).toBeLessThan(.12);
+});
