@@ -1,5 +1,6 @@
-import {afterEach,expect,test} from 'vitest';
+import {afterEach,expect,test,vi} from 'vitest';
 import {GameWorld,BUTTON} from './world.mjs';
+import {PhysicsSystem} from '@woosh/meep-engine/src/engine/physics/ecs/PhysicsSystem.js';
 import {heightAt,HEARTHS} from '../world/regions.mjs';
 import {hearthArrival} from './resting.mjs';
 import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
@@ -13,6 +14,16 @@ async function setup(){const w=await new GameWorld().start({populate:false});wor
 afterEach(async()=>{for(const w of worlds)await w.stop();worlds.length=0;});
 const run=(w,n)=>{for(let i=0;i<n;i++)w.step();};
 
+// A previous spelling of this call did not exist on PhysicsSystem, and the
+// optional invocation that guarded it silently skipped the whole optimisation.
+test('starting the world hands its linked statics to Meep for broadphase optimisation',async()=>{
+  const optimize=vi.spyOn(PhysicsSystem.prototype,'optimize');
+  try{
+    const w=await setup();
+    expect(optimize).toHaveBeenCalledTimes(1);
+    expect(optimize.mock.instances[0]).toBe(w.physics);
+  }finally{optimize.mockRestore();}
+});
 test('native foot rays ignore characters and identify the contacted floor and its normal',async()=>{
   const w=await setup(),p=w.addPlayer('feet');run(w,30);
   const hit=w.footSurface([p.x,p.y-.845,p.z]);expect(hit).not.toBeNull();expect(hit.normal[1]).toBeGreaterThan(.65);
