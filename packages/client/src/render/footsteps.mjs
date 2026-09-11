@@ -8,6 +8,7 @@ import {actorFeet,actorScale} from '@old-circle/game/simulation/animation.mjs';
 import {sphere_project} from '@woosh/meep-engine/src/core/geom/3d/sphere/sphere_project.js';
 import {effect,FOOTSTEP_EFFECTS} from './effects.mjs';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
+import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 
 const surfaces={
   // Broken blades leave the terrain visible between flattened strands.
@@ -48,7 +49,7 @@ export class WorldFootsteps {
   update(actors,playerId,epoch,now,dt){
     if(epoch!==this.contacts.epoch){this.contacts.reset(epoch);this.pending=null;}
     this.current=new Map(actors.map(a=>[a.id,a]));this.playerId=playerId;
-    for(const mark of this.pool){if(!mark.active)continue;mark.age+=dt;const fade=Math.max(0,Math.min(1,(mark.life-mark.age)/2));mark.decal.color.setA(mark.alpha*fade);if(mark.age>=mark.life){mark.active=false;mark.decal.color.setA(0);this.view.ecd.removeComponentFromEntity(mark.id,Decal);}}
+    for(const mark of this.pool){if(!mark.active)continue;mark.age+=dt;const fade=clamp01((mark.life-mark.age)/2);mark.decal.color.setA(mark.alpha*fade);if(mark.age>=mark.life){mark.active=false;mark.decal.color.setA(0);this.view.ecd.removeComponentFromEntity(mark.id,Decal);}}
     // Leave spare projectors while the oldest prints fade under crowd pressure.
     for(const hound of [false,true]){
       const active=this.pool.filter(m=>m.active&&m.hound===hound).sort((a,b)=>b.age-a.age);

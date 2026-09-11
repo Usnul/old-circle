@@ -13,6 +13,8 @@ export function spawnHazard(world,owner,kind,position,options={}){
   t.setTranslation(...position);world.ecd.addComponentToEntity(e,t);world.ecd.addComponentToEntity(e,p);world.projectiles.add(e);return p;
 }
 const ground=(x,z)=>[x,heightAt(x,z)+.12,z];
+// One reused query sphere: hazards test their band every tick and never nest.
+const hazardVolume=SphereShape3D.from(1),upright=[0,0,0,1];
 export function castBossMove(world,a,move){
   const strong=bossEnraged(a),damage=BOSSES[a.archetype].damage;
   const players=[...world.actors.keys()].map(id=>world.actor(id)).filter(p=>p.kind==='player'&&p.hp>0&&Math.hypot(p.x-a.home[0],p.z-a.home[2])<29).sort((p,q)=>p.id.localeCompare(q.id)).slice(0,6);
@@ -55,7 +57,8 @@ export function stepHazard(world,e,p,t,dt){
   const before=waveRadius(p,p.age-dt);
   if(p.kind==='wave')p.radius=waveRadius(p);
   const x=t.translation_x,y=t.translation_y,z=t.translation_z;
-  const count=world.physics.overlap(SphereShape3D.from(p.radius+1.6),[x,y+.6,z],[0,0,0,1],world.overlaps,0);
+  hazardVolume.radius=p.radius+1.6;
+  const count=world.physics.overlap(hazardVolume,[x,y+.6,z],upright,world.overlaps,0);
   // Meep resolves its own packed body handles back to entities.
   const touched=new Set();for(let i=0;i<count;i++){const body=world.physics.entityOf(world.overlaps[i]);if(body>=0)touched.add(body);}
   for(const [id,entity] of world.actors){

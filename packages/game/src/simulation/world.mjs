@@ -37,6 +37,9 @@ export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:
 const rotation=[0,0,0,1];
 const kill=WORLD_KILL_VOLUME;
 const q=[0,0,0,1];
+// Standing clearance is tested every tick that a body crouches or reaches for a
+// ledge; the query capsule is reused rather than rebuilt for each test.
+const standing=CapsuleShape3D.from(.32,1.05);
 const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
 const optionalMotion={airTime:0,fallSpeed:0,landingAge:-1,landingStrength:0};
 
@@ -237,7 +240,7 @@ export class GameWorld {
   setCrouch(a,crouch){
     if(a.kind!=='player'||a.hp<=0)return;
     const e=this.actors.get(a.id),y=a.y+(crouch?-.35:.35);
-    if(!crouch&&this.physics.overlap(CapsuleShape3D.from(.32,1.05),[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
+    if(!crouch&&this.physics.overlap(standing,[a.x,y+.025,a.z],q,this.overlaps,0,id=>id!==e)>0)return;
     this.ecd.removeComponentFromEntity(e,Collider);const c=new Collider();c.shape=CapsuleShape3D.from(.32,crouch?.35:1.05);c.friction=0;
     this.ecd.addComponentToEntity(e,c);const b=this.ecd.getComponent(e,RigidBody);
     this.physics.setPose(b,[a.x,y,a.z],rotation);a.y=y;a.crouch=crouch;
@@ -336,7 +339,7 @@ export class GameWorld {
     this.ray.set([x,a.y+1.7,z,0,-1,0,1.8]);
     if(!this.physics.raycast(this.ray,this.hit,id=>id!==e)||this.hit.normal[1]<.7)return;
     const y=this.hit.position[1]+.9;
-    if(this.physics.overlap(CapsuleShape3D.from(.32,1.05),[x,y+.08,z],q,this.overlaps,0,id=>id!==e)>0)return;
+    if(this.physics.overlap(standing,[x,y+.08,z],q,this.overlaps,0,id=>id!==e)>0)return;
     a.mantle={phase:'hang',from:[a.x,y-1.65,a.z],to:[x,y,z],t:0};a.stamina-=14;this.event('ledge-grab',a);
   }
   lineOfSight(from,to,ignore=-1,target=-1,filter){
