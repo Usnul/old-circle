@@ -1,7 +1,7 @@
 @use 'tokens' as *;
 .map-toolbar { display:flex;align-items:center;gap:$space;margin-bottom:$space;flex-wrap:wrap; }
 .map-toolbar span { margin-left:auto;color:$muted;font:12px $font-body; }
-.map.terrain-map { height:min(58vh,640px);touch-action:none;cursor:grab; }
+.map.terrain-map { height:min(58vh,640px);touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab; }
 .map.terrain-map text { paint-order:stroke;stroke:$ink;stroke-width:2px;stroke-linejoin:round;fill:$paper;font-size:var(--map-label,18px); }
 .terrain-map .map-region { fill:$paper;letter-spacing:.04em; }
 .map-place text { display:none; }.map-close .map-place text { display:block; }

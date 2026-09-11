@@ -3,6 +3,10 @@ import {REGIONS,LANDMARKS,HEARTHS} from '@old-circle/game/world/regions.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {RELICS} from '@old-circle/game/content/relics.mjs';
 
+const PLAYER_ZOOM=2.5;
+// Keep the explored view when the map dialog is rebuilt during this journey.
+let savedView;
+
 export function worldMapMarkup(player){
   const [x,y]=worldToMap(player.x,player.z);
   const names=REGIONS.map(r=>{const [x,y]=worldToMap(...r.center);return `<text class="map-region" x="${x}" y="${y+23}" text-anchor="middle">${r.name}</text>`;}).join('');
@@ -19,14 +23,26 @@ export function worldMapMarkup(player){
 }
 
 export function installMapControls(getPlayer){
-  const svg=document.querySelector('#world-map'),[width,height]=MAP_SIZE;let zoom=1,center=[width/2,height/2],drag;
-  const update=()=>{const w=width/zoom,h=height/zoom;center=[Math.max(w/2,Math.min(width-w/2,center[0])),Math.max(h/2,Math.min(height-h/2,center[1]))];svg.setAttribute('viewBox',`${center[0]-w/2} ${center[1]-h/2} ${w} ${h}`);const rect=svg.getBoundingClientRect(),scale=Math.min(rect.width/w,rect.height/h);svg.style.setProperty('--map-label',`${12/scale}px`);svg.classList.toggle('map-close',zoom>1.5);};
+  const svg=document.querySelector('#world-map'),[width,height]=MAP_SIZE,player=getPlayer();
+  let {zoom,center}=savedView??{zoom:PLAYER_ZOOM,center:worldToMap(player.x,player.z)},drag;
+  const update=()=>{
+    const w=width/zoom,h=height/zoom;
+    center=[Math.max(w/2,Math.min(width-w/2,center[0])),Math.max(h/2,Math.min(height-h/2,center[1]))];
+    savedView={zoom,center};
+    svg.setAttribute('viewBox',`${center[0]-w/2} ${center[1]-h/2} ${w} ${h}`);
+    const rect=svg.getBoundingClientRect(),scale=Math.min(rect.width/w,rect.height/h);
+    svg.style.setProperty('--map-label',`${12/scale}px`);svg.classList.toggle('map-close',zoom>1.5);
+  };
   document.querySelector('#map-in').onclick=()=>{zoom=Math.min(4,zoom*1.5);update();};
   document.querySelector('#map-out').onclick=()=>{zoom=Math.max(1,zoom/1.5);update();};
   document.querySelector('#map-all').onclick=()=>{zoom=1;update();};
-  document.querySelector('#map-you').onclick=()=>{const player=getPlayer();zoom=2.5;center=worldToMap(player.x,player.z);update();};
-  svg.onpointerdown=e=>{drag=[e.clientX,e.clientY,...center];svg.setPointerCapture(e.pointerId);};
-  svg.onpointermove=e=>{if(!drag)return;const rect=svg.getBoundingClientRect(),scale=Math.min(rect.width/(width/zoom),rect.height/(height/zoom));center=[drag[2]-(e.clientX-drag[0])/scale,drag[3]-(e.clientY-drag[1])/scale];update();};
-  svg.onpointerup=svg.onpointercancel=()=>{drag=null;};
+  document.querySelector('#map-you').onclick=()=>{const player=getPlayer();zoom=PLAYER_ZOOM;center=worldToMap(player.x,player.z);update();};
+  svg.onpointerdown=e=>{
+    if(e.button!==0||drag)return;
+    e.preventDefault();svg.focus({preventScroll:true});
+    drag={pointerId:e.pointerId,x:e.clientX,y:e.clientY,center};svg.setPointerCapture(e.pointerId);
+  };
+  svg.onpointermove=e=>{if(!drag||e.pointerId!==drag.pointerId)return;const rect=svg.getBoundingClientRect(),scale=Math.min(rect.width/(width/zoom),rect.height/(height/zoom));center=[drag.center[0]-(e.clientX-drag.x)/scale,drag.center[1]-(e.clientY-drag.y)/scale];update();};
+  svg.onpointerup=svg.onpointercancel=svg.onlostpointercapture=e=>{if(e.pointerId===drag?.pointerId)drag=null;};
   svg.setAttribute('tabindex','0');svg.onkeydown=e=>{const directions={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},d=directions[e.key];if(d){e.preventDefault();center=center.map((v,i)=>v+d[i]*30/zoom);update();}};update();
 }
