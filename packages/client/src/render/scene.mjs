@@ -55,8 +55,6 @@ export class WorldView {
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
   prepareToRender(snapshot,playerId){
     this.update(snapshot,playerId,0);
-    // The render loop can run before the camera system's next simulation tick.
-    this.engine.entityManager.getSystem(CameraSystem).update(0);
   }
   async start(progress=()=>{},position=[0,heightAt(0,23)+1,23]){
     progress('Loading game…',.1);
@@ -183,10 +181,9 @@ export class WorldView {
       const emitter=this.emitter(ev.effect,[px,Math.max(y-.7,heightAt(px,pz)+.15),pz],0,1.1);this.particles.burst(emitter.id,10);
     }
   }
-  update(snapshot,playerId,dt){
+  update(snapshot,playerId,dt,renderTime=performance.now()/1000){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
     const present=new Set(),presented=[];
-    const renderTime=performance.now()/1000;
     for(const state of snapshot.actors){
       const a=this.poses.sample(state,renderTime);
       presented.push(a);
@@ -217,7 +214,7 @@ export class WorldView {
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     this.combatFeedback.update(snapshot,presented,playerId,dt);
-    const playerState=snapshot.actors.find(a=>a.id===playerId),player=playerState&&this.poses.sample(playerState,renderTime);if(player){
+    const player=presented.find(a=>a.id===playerId);if(player){
       this.streaming.update(player,dt);
       const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
@@ -247,5 +244,10 @@ export class WorldView {
     this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
     this.bossHazards.update(snapshot.projectiles,player,this.poses.epoch,dt);
     this.combatTrails.update(presented,snapshot.projectiles,player,this.poses.epoch,dt);
+    // Mesh transforms publish immediately; these bridges otherwise wait for the
+    // independent engine ticker. Publish the matching camera and skeletal poses
+    // before drawing, without advancing animation clocks a second time.
+    this.animations.update(0);
+    this.engine.entityManager.getSystem(CameraSystem).update(0);
   }
 }

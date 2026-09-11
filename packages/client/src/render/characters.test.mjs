@@ -36,7 +36,7 @@ import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 
-test.each(['pool','teardown'])('character %s reuses skin allocations and resets death presentation',async mode=>{
+async function withNativeCharacters(run){
   // WebGPU's browser constants, with Meep's software device executing buffer operations in Node.
   vi.stubGlobal('GPUBufferUsage',{MAP_READ:1,MAP_WRITE:2,COPY_SRC:4,COPY_DST:8,INDEX:16,VERTEX:32,UNIFORM:64,STORAGE:128,INDIRECT:256,QUERY_RESOLVE:512});
   vi.stubGlobal('GPUShaderStage',{VERTEX:1,FRAGMENT:2,COMPUTE:4});
@@ -69,12 +69,49 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       view.models.set(name,[{geometry,material:new StandardShadeMaterial()}]);
       graphics.geometries.add(geometry);
     }
-    const baseBytes=graphics.geometries.meshlets.gpu_memory_usage_occupied;
     const flush=()=>{
       em.simulate(0);context.build();
       const cmd=ShadeGPUCommandContext.create(graphics,'character lifecycle regression');
       context.animation_manager.update(cmd);cmd.finish();
     };
+    await run({characters,view,scene,graphics,context,flush});
+  }finally{
+    if(started)await new Promise((resolve,reject)=>em.shutdown(resolve,reject));
+    context?.destroy();graphics?.destroy();device.destroy();vi.unstubAllGlobals();
+  }
+}
+
+test('presentation updates publish manual animation and gait samples without an engine tick',async()=>{
+  await withNativeCharacters(async({characters,view,context})=>{
+    const actor={kind:'enemy',archetype:'hollow',weapon:'sword',x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:-.3,grounded:true,animationTime:0,gaitPhase:0};
+    const rig=characters.create(actor);
+    await setImmediate();
+    characters.update(rig,actor);view.animations.update(0);
+    const publishTime=vi.spyOn(context.animation_manager,'set_time');
+    try{
+      for(const [animationTime,gaitPhase] of [[.4,.14],[.8,.28],[1.2,.42]]){
+        Object.assign(actor,{animationTime,gaitPhase});
+        publishTime.mockClear();
+        characters.update(rig,actor);
+        view.animations.update(0);
+        const poses=[];
+        expect(view.animations.write_pose_playbacks(poses,rig.id)).toBe(true);
+        expect(poses.map(p=>p.clip.name)).toEqual(['sword_idle','sword_walk']);
+        const expectedTimes=[animationTime/3.2*rigs.pilgrim.clips.sword_idle.duration,gaitPhase/1.12*rigs.pilgrim.clips.sword_walk.duration];
+        expect(publishTime).toHaveBeenCalledTimes(2);
+        for(let i=0;i<poses.length;i++){
+          expect(poses[i].time).toBeCloseTo(expectedTimes[i]);
+          expect(poses[i].weight).toBeCloseTo(.5);
+          expect(publishTime.mock.calls[i][1]).toBeCloseTo(expectedTimes[i]);
+        }
+      }
+    }finally{publishTime.mockRestore();}
+  });
+});
+
+test.each(['pool','teardown'])('character %s reuses skin allocations and resets death presentation',async mode=>{
+  await withNativeCharacters(async({characters,view,scene,graphics,context,flush})=>{
+    const {ecd}=view,baseBytes=graphics.geometries.meshlets.gpu_memory_usage_occupied;
     const actors=[{kind:'enemy',archetype:'hollow',weapon:'sword'},{kind:'enemy',archetype:'hound',weapon:'sword'}].map(a=>({...a,x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true}));
     let peakVertices,peakBlasBytes,sceneNodeCount;
     for(let cycle=0;cycle<8;cycle++){
@@ -132,10 +169,7 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       expect(ecd.entityCount).toBe(0);expect(scene.instances.nodes).toHaveLength(0);
       expect(graphics.geometries.meshlets.gpu_memory_usage_occupied).toBe(baseBytes);
     }
-  }finally{
-    if(started)await new Promise((resolve,reject)=>em.shutdown(resolve,reject));
-    context?.destroy();graphics?.destroy();device.destroy();vi.unstubAllGlobals();
-  }
+  });
 });
 
 test('newly received corpses place dropped weapons before the skin loads and never follow the hand',()=>{

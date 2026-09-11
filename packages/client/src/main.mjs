@@ -190,7 +190,8 @@ function frame(now){
   const player=snapshot?.actors.find(a=>a.id===playerId),next=player&&Object.values(BOSSES).find(b=>!player.seals.includes(b.seal));
   if(started&&player&&completionPending&&player.hp>0&&player.attackAge<0)ending();
   if(player)updateCompass(view.yaw,player,next&&LANDMARKS.find(l=>l.id===next.landmark));
-  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);
+  // Sample poses on the display clock, before variable callback work can skew it.
+  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt,now/1000);
   if(started&&!menu)send({type:'input',intent:input.sample(view.yaw,view.aimPitch??view.pitch)});
   if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}frameId=requestAnimationFrame(frame);
 }
