@@ -66,11 +66,12 @@ button:disabled { opacity:.4;cursor:default; }
 #app { position:fixed;inset:0;z-index:3;pointer-events:none; }
 .screen { position:absolute;inset:0;pointer-events:auto; }
 .eyebrow { font-size:10px;font-weight:500;letter-spacing:.26em;text-transform:uppercase;color:$gold; }
-.title-screen { background:linear-gradient(90deg,rgba(7,17,14,.96) 0%,rgba(7,17,14,.87) 23%,rgba(7,17,14,.42) 48%,rgba(7,17,14,.07) 75%),linear-gradient(0deg,rgba(8,15,12,.9),transparent 35%),url('/assets/art/old-circle-concept.png') center center/cover;display:flex;flex-direction:column;justify-content:space-between;padding:42px 5.3vw 28px; }
-.masthead { display:flex;justify-content:space-between;align-items:center;font-size:10px;letter-spacing:.2em;text-transform:uppercase; }
-.wordmark { font-family:$font-display;letter-spacing:.22em;font-size:18px; }
+.title-screen { background:linear-gradient(90deg,rgba(7,17,14,.96) 0%,rgba(7,17,14,.87) 23%,rgba(7,17,14,.42) 48%,rgba(7,17,14,.07) 75%),linear-gradient(0deg,rgba(8,15,12,.9),transparent 35%),url('/assets/art/old-circle-concept.png') center center/cover;display:flex;flex-direction:column;gap:32px;padding:42px 5.3vw 28px;overflow-y:auto; }
 .top-note {color:$muted;display:flex;align-items:center;gap:12px;}.top-note:before{content:'';width:5px;height:5px;border-radius:50%;background:$gold;box-shadow:0 0 12px $gold;}
-.title-content { width:470px;max-width:90vw;margin-top:18px; }
+.title-content { width:470px;max-width:100%;flex:1 0 auto;display:flex;flex-direction:column;justify-content:center;gap:clamp(48px,8vh,96px); }
+.title-brand h1 { margin:0; }
+.title-brand .rule { margin:32px 0 0; }
+.title-menu { display:grid;justify-items:start;gap:8px; }
 .sigil { width:56px;height:56px;border:1px solid rgba($gold,.55);border-radius:50%;position:relative;transform:rotate(-25deg);border-top-color:transparent;margin:0 0 32px 3px; }
 .sigil:before{content:'';position:absolute;inset:7px;border:1px solid rgba($gold,.35);border-radius:50%;border-right-color:transparent;}
 .sigil:after{content:'';position:absolute;left:26px;top:-8px;width:1px;height:72px;background:linear-gradient(transparent,$gold,transparent);transform:rotate(25deg);}

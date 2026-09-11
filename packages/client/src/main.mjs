@@ -24,8 +24,10 @@ let input=null,menuCleanup=null,equipmentOpen=false,equipmentFocus=null,modalRet
 function saved(){return journey.character;}
 app.innerHTML=`
 <section class="screen title-screen" id="title">
-  <header class="masthead"><span class="wordmark">Old Circle</span></header>
-  <div class="title-content"><div class="sigil" aria-hidden="true"></div><h1>OLD<br>CIRCLE</h1><div class="rule"></div><button class="primary" id="begin"><span>${saved()?'Continue':'New game'}</span><span>⟶</span></button><button class="menu-link" id="new-journey">${saved()?'New game':'Choose character'}</button><button class="menu-link" id="controls-menu">How to play</button><p class="save-warning" data-save-warning role="status" hidden></p></div>
+  <div class="title-content">
+    <div class="title-brand"><div class="sigil" aria-hidden="true"></div><h1>OLD<br>CIRCLE</h1><div class="rule"></div></div>
+    <nav class="title-menu" aria-label="Main menu"><button class="primary" id="begin"><span>${saved()?'Continue':'New game'}</span><span>⟶</span></button><button class="menu-link" id="new-journey">${saved()?'New game':'Choose character'}</button><button class="menu-link" id="controls-menu">How to play</button><p class="save-warning" data-save-warning role="status" hidden></p></nav>
+  </div>
   <footer class="title-footer">Early playable build</footer>
 </section>
 <section class="screen loading" id="loading" hidden><div><div class="sigil"></div><div class="eyebrow">Old Circle</div><h2 id="loading-text">Loading world…</h2><div class="loading-bar"><div id="loading-progress"></div></div></div></section>
