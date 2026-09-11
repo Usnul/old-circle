@@ -1,6 +1,5 @@
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {SphereShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/SphereShape3D.js';
-import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {Actor,Projectile} from './components.mjs';
 import {actorFeet} from './animation.mjs';
@@ -57,9 +56,10 @@ export function stepHazard(world,e,p,t,dt){
   if(p.kind==='wave')p.radius=waveRadius(p);
   const x=t.translation_x,y=t.translation_y,z=t.translation_z;
   const count=world.physics.overlap(SphereShape3D.from(p.radius+1.6),[x,y+.6,z],[0,0,0,1],world.overlaps,0);
-  const touched=new Set(world.overlaps.subarray(0,count));
+  // Meep resolves its own packed body handles back to entities.
+  const touched=new Set();for(let i=0;i<count;i++){const body=world.physics.entityOf(world.overlaps[i]);if(body>=0)touched.add(body);}
   for(const [id,entity] of world.actors){
-    const victim=world.actor(id);if(p.hitIds.includes(id)||!touched.has(world.ecd.getComponent(entity,RigidBody)._bodyId))continue;
+    const victim=world.actor(id);if(p.hitIds.includes(id)||!touched.has(entity))continue;
     const radius=.32*(victim.boss?1.5:1),distance=Math.hypot(victim.x-x,victim.z-z),feet=actorFeet(victim)[1];
     if(distance>p.radius+radius||p.kind==='wave'&&distance+radius<before*WAVE_INNER_FRACTION)continue;
     const surface=heightAt(victim.x,victim.z)+.12;

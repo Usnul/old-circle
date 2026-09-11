@@ -5,18 +5,20 @@ import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
-import {Quaternion} from '@woosh/meep-engine/src/core/geom/Quaternion.js';
-import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
+import {quat3_multiply} from '@woosh/meep-engine/src/core/geom/3d/quaternion/quat3_multiply.js';
+import {v3_quaternion_apply} from '@woosh/meep-engine/src/core/geom/vec3/v3_quaternion_apply.js';
+import {v3_quaternion_apply_inverse} from '@woosh/meep-engine/src/core/geom/vec3/v3_quaternion_apply_inverse.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {GameWorld,DT} from './world.mjs';
 import {actorJointPoses,actorRig,actorScale,rigs} from './animation.mjs';
 
-const quaternion=values=>{const q=new Quaternion();q.set(...values);return q;};
-const inverse=q=>quaternion(q).conjugate();
-const rotated=(p,q)=>new Vector3(...p).applyQuaternion(quaternion(q));
-const point=(origin,q,p)=>rotated(p,q).add(new Vector3(...origin));
-const localPoint=(p,origin,q)=>new Vector3(...p).sub(new Vector3(...origin)).applyQuaternion(inverse(q));
-const product=(a,b)=>{const q=quaternion(a);q.multiply(quaternion(b));return q;};
+// Meep's indexed quaternion helpers write into a plain result array, so a bone
+// hierarchy costs no Quaternion/Vector3 objects per joint per frame.
+const point=(origin,q,p)=>{const o=[0,0,0];v3_quaternion_apply(o,0,p[0],p[1],p[2],q[0],q[1],q[2],q[3]);o[0]+=origin[0];o[1]+=origin[1];o[2]+=origin[2];return o;};
+const localPoint=(p,origin,q)=>{const o=[0,0,0];v3_quaternion_apply_inverse(o,0,p[0]-origin[0],p[1]-origin[1],p[2]-origin[2],q[0],q[1],q[2],q[3]);return o;};
+const product=(a,b)=>{const o=[0,0,0,0];quat3_multiply(o,0,a[0],a[1],a[2],a[3],b[0],b[1],b[2],b[3]);return o;};
+// `a` inverted then composed with `b`: the conjugate of a unit quaternion.
+const productInverse=(a,b)=>{const o=[0,0,0,0];quat3_multiply(o,0,-a[0],-a[1],-a[2],a[3],b[0],b[1],b[2],b[3]);return o;};
 const IDENTITY=[0,0,0,1];
 export const CORPSE_LIFETIME=45;
 
@@ -44,7 +46,7 @@ export class Ragdolls {
     const velocity=(a.deathVelocity??[a.vx,a.vy,a.vz]).map(v=>clamp(v||0,-8,8));
     const locals=pose.map((p,i)=>{
       const parent=data.bones[i].parent;if(parent<0)return null;const q=pose[parent];
-      return {position:Array.from(localPoint(p.position,q.position,q.rotation)),rotation:Array.from(product(inverse(q.rotation),p.rotation))};
+      return {position:localPoint(p.position,q.position,q.rotation),rotation:productInverse(q.rotation,p.rotation)};
     });
     for(let i=0;i<data.bones.length;i++){
       const bone=data.bones[i];if(!bone.mass)continue;
@@ -59,7 +61,7 @@ export class Ragdolls {
       const joint=new Joint();joint.entityA=body.id;joint.entityB=parent.id;
       joint.localAnchorA.set([0,-body.length/2,0]);joint.localAnchorB.set(localPoint(pose[i].position,parent.t.translation,parent.t.rotation));
       const basis=bone.name.startsWith('calf')?IDENTITY:[0,0,Math.SQRT1_2,Math.SQRT1_2];
-      joint.localBasisA.set(basis);joint.localBasisB.set(product(inverse(parent.t.rotation),product(body.t.rotation,basis)));
+      joint.localBasisA.set(basis);joint.localBasisB.set(productInverse(parent.t.rotation,product(body.t.rotation,basis)));
       if(bone.name.startsWith('calf'))joint.asHinge(0).setAngularLimit(0,-.15,1.85);
       else joint.asConeTwist(-.45,.45,bone.name.startsWith('upperArm')?1.25:.7);
       const id=this.world.ecd.createEntity();this.world.ecd.addComponentToEntity(id,joint);constraints.push(id);
@@ -79,8 +81,8 @@ export class Ragdolls {
   readPose(record){
     for(let i=0;i<record.pose.length;i++){
       const body=record.bodies.get(i),p=record.pose[i];
-      if(body){p.rotation=Array.from(body.t.rotation);p.position=Array.from(point(body.t.translation,body.t.rotation,[0,-body.length/2,0]));}
-      else{const parent=record.pose[record.data.bones[i].parent],local=record.locals[i];p.rotation=Array.from(product(parent.rotation,local.rotation));p.position=Array.from(point(parent.position,parent.rotation,local.position));}
+      if(body){p.rotation=Array.from(body.t.rotation);p.position=point(body.t.translation,body.t.rotation,[0,-body.length/2,0]);}
+      else{const parent=record.pose[record.data.bones[i].parent],local=record.locals[i];p.rotation=product(parent.rotation,local.rotation);p.position=point(parent.position,parent.rotation,local.position);}
     }
   }
   update(dt,actors){

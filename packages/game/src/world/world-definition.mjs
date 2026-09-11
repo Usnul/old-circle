@@ -3,6 +3,14 @@ import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
 export const WORLD_VERSION = 6;
 export const WORLD_BOUNDS=Object.freeze({minX:-240,minZ:-480,width:480,depth:640});
+// Leaving the landscape is fatal. The lateral inset keeps the kill volume inside
+// the terrain collider, so a body that walks off the playable surface is removed
+// instead of coming to rest on the heightfield's outer rim.
+export const WORLD_KILL_VOLUME=Object.freeze({
+  floor:-25,
+  minX:WORLD_BOUNDS.minX+5,maxX:WORLD_BOUNDS.minX+WORLD_BOUNDS.width-5,
+  minZ:WORLD_BOUNDS.minZ+15,maxZ:WORLD_BOUNDS.minZ+WORLD_BOUNDS.depth-15,
+});
 export const SPAWN = [0, 0, 23];
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },

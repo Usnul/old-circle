@@ -3,7 +3,10 @@ import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/
 import {serializeTexture,deserializeTexture} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/serialization/TextureBinaryBufferSerializer.js';
 import {WORLD_VERSION,WORLD_BOUNDS} from './world-definition.mjs';
 
-const cols=WORLD_BOUNDS.width/2+1,rows=WORLD_BOUNDS.depth/2+1,count=cols*rows;
+// One description of the baked height grid: two metres between samples, with a
+// sample on both edges of WORLD_BOUNDS. Sampling and authoring share it.
+export const TERRAIN_GRID=Object.freeze({spacing:2,cols:WORLD_BOUNDS.width/2+1,rows:WORLD_BOUNDS.depth/2+1});
+const cols=TERRAIN_GRID.cols,rows=TERRAIN_GRID.rows,count=cols*rows;
 const headerBytes=8,textureHeaderBytes=10,byteLength=headerBytes+textureHeaderBytes*2+count*8;
 
 // Native texture serialization preserves the float32 sampler and vertex grid.

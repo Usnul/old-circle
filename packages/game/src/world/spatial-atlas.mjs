@@ -7,7 +7,7 @@ import {line2_compute_segment_point_distance_sqr} from '@woosh/meep-engine/src/c
 import {line3_compute_segment_point_distance} from '@woosh/meep-engine/src/core/geom/3d/line/line3_compute_segment_point_distance.js';
 import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {Actor} from '../simulation/components.mjs';
-import { heightAt,LANDMARKS,ROAD_PATHS,landmarkPosition,pathDistance } from './regions.mjs';
+import { heightAt,ROAD_PATHS,landmarkPosition,pathDistance } from './regions.mjs';
 import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 
 // Real SH, order 2 (three bands / nine coefficients), Y up. Coefficients encode

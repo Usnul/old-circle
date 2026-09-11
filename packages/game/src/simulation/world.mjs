@@ -16,7 +16,7 @@ import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
 import {loadStaticScene} from '../world/static-scene-data.mjs';
 import {EnemyMind,enemySeed} from './enemy-mind.mjs';
-import { heightAt, landmarkPosition, REGIONS, regionAt, SPAWN,WORLD_VERSION,WORLD_BOUNDS,HEARTHS } from '../world/regions.mjs';
+import { heightAt, landmarkPosition, REGIONS, SPAWN,WORLD_VERSION,WORLD_KILL_VOLUME,HEARTHS } from '../world/regions.mjs';
 import {restStatus,hearthArrival} from './resting.mjs';
 import { buildLayout } from '../world/layout.mjs';
 import {CAVES} from '../world/interiors.mjs';
@@ -35,6 +35,7 @@ import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
 export const DT=1/60;
 export const BUTTON={SPRINT:1,CROUCH:2,JUMP:4,ATTACK:8,NOVA:16,HEAL:32,INTERACT:64};
 const rotation=[0,0,0,1];
+const kill=WORLD_KILL_VOLUME;
 const q=[0,0,0,1];
 const motionFields=['yaw','vx','vy','vz','animationTime','gaitPhase','cooldown','hurtTime','attackAge','attackId','deadTime','deathTick','lastButtons'];
 const optionalMotion={airTime:0,fallSpeed:0,landingAge:-1,landingStrength:0};
@@ -54,7 +55,8 @@ export class GameWorld {
     this.layout.solids=scene.solids;this.contactSurfaces=scene.contactSurfaces;this.terrainEntity=scene.terrainEntity;
     if(navigation)this.navigation=await loadNavigation();
     if(populate){this.populate();this.authoredActors=new Map([...this.actors.keys()].map(id=>this.actor(id)).filter(a=>a.kind==='enemy').map(a=>[a.id,structuredClone(a)]));}
-    this.physics.optimizeBroadphase?.();return this;
+    // Statics are linked; reshape the broadphase once so every later query walks fewer nodes.
+    this.physics.optimize();return this;
   }
   footSurface(position,scale=1){
     this.ray.set([position[0],position[1]+.18*scale,position[2],0,-1,0,.45*scale]);
@@ -213,7 +215,7 @@ export class GameWorld {
       const a=this.actor(id),t=this.ecd.getComponent(e,Transform64),b=this.ecd.getComponent(e,RigidBody);
       a.x=t.translation_x;a.y=t.translation_y;a.z=t.translation_z;
       a.vx=b.linearVelocity[0];a.vy=b.linearVelocity[1];a.vz=b.linearVelocity[2];
-      if(a.hp>0&&(a.y < -25 || Math.abs(a.x)>235 || a.z < -465 || a.z>145)){a.hp=0;a.deathTick=this.tick;a.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(a);this.event('death',a);}
+      if(a.hp>0&&(a.y<kill.floor||a.x<kill.minX||a.x>kill.maxX||a.z<kill.minZ||a.z>kill.maxZ)){a.hp=0;a.deathTick=this.tick;a.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(a);this.event('death',a);}
     }
     this.stepProjectiles(dt);this.checkEncounters();
   }
@@ -298,12 +300,11 @@ export class GameWorld {
     const n=this.physics.overlap(SphereShape3D.from(radius),[a.x,a.y,a.z],q,this.overlaps,0);
     const hit=new Set();
     for(let i=0;i<n;i++){
-      const body=this.overlaps[i];
-      for(const [id,e] of this.actors){
-        const b=this.ecd.getComponent(e,RigidBody),v=this.actor(id);
-        if(b._bodyId!==body||hit.has(id))continue;hit.add(id);
-        if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420,effect==='shockwave'?'physical':'magic');
-      }
+      // Meep resolves its own packed body handles back to entities.
+      const e=this.physics.entityOf(this.overlaps[i]);if(e<0)continue;
+      const v=this.ecd.getComponent(e,Actor);
+      if(v===undefined||hit.has(v.id))continue;hit.add(v.id);
+      if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420,effect==='shockwave'?'physical':'magic');
     }
   }
   spawnProjectile(a,w){
