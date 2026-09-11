@@ -50,10 +50,16 @@ const quat=new Quaternion();
 export class WorldView {
   constructor(){this.models=new Map();this.characters=new Map();this.corpses=new Map();this.missiles=new Map();this.transients=[];this.yaw=0;this.pitch=0;this.distance=5.8;this.elapsed=0;this.cameraPosition=null;this.fps=60;this.poses=new PresentationPoses();}
   acceptSnapshot(snapshot){this.poses.accept(snapshot,performance.now()/1000);}
+  prepareToRender(snapshot,playerId){
+    this.update(snapshot,playerId,0);
+    // The render loop can run before the camera system's next simulation tick.
+    this.engine.entityManager.getSystem(CameraSystem).update(0);
+  }
   async start(progress=()=>{},position=[0,heightAt(0,23)+1,23]){
     progress('Kindling the light…',.1);
     this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
+      engine.renderingEnabled=false;
       this.scene=EngineHarness.shadeScene(engine);
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
       this.meshSystem=new MeshSystem(engine.graphics,this.scene,async url=>this.characterRenderer.bundle(url));config.addSystem(this.meshSystem);

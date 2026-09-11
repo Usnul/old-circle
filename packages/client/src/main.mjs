@@ -10,6 +10,7 @@ import {worldToMap} from '@old-circle/game/world/map.mjs';
 import {equipmentMarkup} from './ui/equipment.mjs';
 import {combatStatus} from './ui/combat-status.mjs';
 import {trapDialogFocus} from './ui/dialog-focus.mjs';
+import {LoadingScreen} from './ui/loading.mjs';
 import {ARMOR,armorFor,reinforcement,hasAllSeals} from '@old-circle/game/content/equipment.mjs';
 import {BOSS_MOVES,bossEnraged} from '@old-circle/game/content/boss-moves.mjs';
 import {RELICS,flaskCapacity,nearbyRelic} from '@old-circle/game/content/relics.mjs';
@@ -39,6 +40,7 @@ app.innerHTML=`
 </section><button id="capture-mouse" hidden>Resume mouse look <span>Click to capture · Escape releases</span></button><div id="modal-root"></div>`;
 
 const $=s=>document.querySelector(s),send=data=>worker?.postMessage(data);
+const loading=new LoadingScreen($('#loading'));
 function updateSaveWarning(){document.querySelectorAll('[data-save-warning]').forEach(el=>{el.textContent=journey.warning;el.hidden=!journey.warning;});}
 updateSaveWarning();
 function modal(content,{dismissible=true}={}){
@@ -71,7 +73,7 @@ function toast(message){
   $('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),3500);
 }
 async function start(character){
-  $('#title').hidden=true;$('#loading').hidden=false;
+  $('#title').hidden=true;loading.show();
   try{
     if(!navigator.gpu)throw new Error('Old Circle requires WebGPU. Open this game in a WebGPU-capable desktop browser.');
     const {WorldView}=await import('./render/scene.mjs');view=new WorldView();if(Number.isFinite(character?.motion?.yaw))view.yaw=character.motion.yaw;
@@ -107,14 +109,23 @@ async function start(character){
         if(e.type==='relic-found'){const relic=RELICS.find(r=>r.id===e.relic);toast(`${e.name} recovered. +${e.reward} embers${relic?.flasks?' · Flask capacity '+flaskCapacity(snapshot.actors.find(a=>a.id===playerId)):relic?.charm?' · Choose your charm at a hearth':''}`);}
         if(e.type==='circle-completed'){completionPending=true;send({type:'save'});}
       }
-      if(data.type==='ready'){$('#loading').hidden=true;$('#hud').hidden=false;started=true;$('#capture-mouse').hidden=inspecting;requestAnimationFrame(frame);view.engine.viewStack.el.focus();}
+      if(data.type==='ready')enterWorld().catch(e=>showError(e.stack??String(e)));
     };
     if(inspecting){const {installInspector}=await import('./inspector.mjs');inspector=installInspector({send,getView:()=>view,getSnapshot:()=>snapshot,playerId});}
     send({type:'start',origin:character?.origin??origin,saved:inspecting?null:character,playerId,inspect:inspecting,url:inspecting?null:`${location.protocol==='https:'?'wss':'ws'}://${location.host}/multiplayer`});
     setInterval(()=>send({type:'save'}),8000);
   }catch(e){showError(e.stack??String(e));}
 }
-function showError(message){$('#loading').hidden=true;modal(`<div class="panel-top"><div><div class="eyebrow">The road is interrupted</div><h2>Unable to enter the world</h2></div></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Return to the beginning</span><span>⟶</span></button>`,{dismissible:false});$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
+async function enterWorld(){
+  input.suspend(true);
+  // Install the first snapshot and player camera before allowing any draw.
+  view.queryFootSurfaces=send;view.prepareToRender(snapshot,playerId);
+  $('#hud').hidden=false;updateHud();previous=performance.now();frameId=requestAnimationFrame(frame);
+  if(!await loading.reveal(view.engine))return;
+  started=true;input.suspend(menu);$('#capture-mouse').hidden=inspecting||menu;
+  if(!menu)view.engine.viewStack.el.focus();
+}
+function showError(message){started=false;cancelAnimationFrame(frameId);if(view?.engine)view.engine.renderingEnabled=false;loading.show();modal(`<div class="panel-top"><div><div class="eyebrow">The road is interrupted</div><h2>Unable to enter the world</h2></div></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Return to the beginning</span><span>⟶</span></button>`,{dismissible:false});$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
 function journal(){
   equipmentOpen=false;
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
@@ -156,17 +167,17 @@ function map(){
   equipmentOpen=false;modal(worldMapMarkup(p));installMapControls(()=>snapshot.actors.find(a=>a.id===playerId));
 }
 for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');$('#nova').onclick=()=>input?.pulse('nova');
-let previous=performance.now();
+let previous=performance.now(),frameId;
 function frame(now){
   const dt=Math.min(.1,(now-previous)/1000);previous=now;
   if(view.streaming.error){toast('Part of the road could not load. Retrying…');console.warn(view.streaming.error);view.streaming.error=null;}
-  if(!menu){
+  if(started&&!menu){
     input.update(dt);send({type:'input',intent:input.sample(view.yaw)});
   }
   const player=snapshot?.actors.find(a=>a.id===playerId),next=player&&Object.values(BOSSES).find(b=>!player.seals.includes(b.seal));
-  if(player&&completionPending&&player.hp>0&&player.attackAge<0)ending();
+  if(started&&player&&completionPending&&player.hp>0&&player.attackAge<0)ending();
   if(player)updateCompass(view.yaw,player,next&&LANDMARKS.find(l=>l.id===next.landmark));
-  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}requestAnimationFrame(frame);
+  view.queryFootSurfaces=send;view.update(snapshot,playerId,dt);if(now-lastHud>80){updateHud();inspector?.update(snapshot);if(view.wantedCamera)send({type:'camera',from:view.cameraTarget,position:view.wantedCamera});lastHud=now;}frameId=requestAnimationFrame(frame);
 }
 function updateHud(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;

@@ -60,13 +60,12 @@ export class Characters {
   create(a){
     const url=this.appearance(a),available=this.pool.get(url),rig=available?.pop();
     if(rig){
-      rig.dead=false;rig.deathMaterials=null;rig.clips.clear();
+      rig.dead=false;rig.corpseReady=false;rig.clips.clear();
       const instance=this.view.meshSystem.instance_of(rig.id);
       const source=this.bundle(url);
       for(let s=0;s<(instance?.skins.length??0);s++)for(let i=0;i<instance.skins[s].joints.length;i++){
         const joint=instance.skins[s].joints[i];joint.transform_authority=TransformAuthority.GPU;joint.transform_local.copy(source.skins[s].joints[i].transform_local);
       }
-      for(const {mesh,material} of rig.baseMaterials??[]){mesh.material=material;mesh.updateMatrices();}
       rig.animation=new Animation();this.view.ecd.addComponentToEntity(rig.id,rig.animation);
       rig.weapon=a.archetype==='hound'?null:this.view.model(a.weapon);rig.weaponName=a.weapon;return rig;
     }
@@ -144,23 +143,11 @@ export class Characters {
     }
     const instance=view.meshSystem.instance_of(rig.id);if(!instance)return;
     const skin=instance.skins[0],bones=rigs[state.name].bones;
-    if(!rig.deathMaterials){
+    if(!rig.corpseReady){
       // Scene-bundle clips declare GPU ownership even before playback starts.
       // Unregistering Animation stops the clips; physics must claim the joints.
       for(const joint of skin.joints)joint.transform_authority=TransformAuthority.CPU;
-      rig.baseMaterials??=[];rig.deathMaterials=[];view.meshSystem.traverse_meshes(rig.id,mesh=>{
-        if(!rig.baseMaterials.some(entry=>entry.mesh===mesh))rig.baseMaterials.push({mesh,material:mesh.material});
-        mesh.material=mesh.material.clone();mesh.material.transparency_mode=TransparencyMode.Transparent;rig.deathMaterials.push(mesh.material);mesh.updateMatrices();
-      });
-      for(const part of rig.weapon??[]){
-        const geometry=view.ecd.getComponent(part.id,ShadedGeometry),material=geometry.material.clone();
-        material.transparency_mode=TransparencyMode.Transparent;
-        view.ecd.removeComponentFromEntity(part.id,ShadedGeometry);view.ecd.addComponentToEntity(part.id,ShadedGeometry.from(geometry.geometry,material));rig.deathMaterials.push(material);
-      }
-      for(const part of rig.lantern?.parts??[]){
-        const geometry=view.ecd.getComponent(part.id,ShadedGeometry),material=geometry.material.clone();material.transparency_mode=TransparencyMode.Transparent;
-        view.ecd.removeComponentFromEntity(part.id,ShadedGeometry);view.ecd.addComponentToEntity(part.id,ShadedGeometry.from(geometry.geometry,material));rig.deathMaterials.push(material);
-      }
+      rig.corpseReady=true;
     }
     for(let i=0;i<state.joints.length;i++){
       const pose=state.joints[i],world=rig.worldPoses[i];world.setTranslation(...pose.position);world.setRotation(...pose.rotation);world.setScale(state.scale,state.scale,state.scale);world.updateMatrix();
@@ -169,8 +156,7 @@ export class Characters {
     }
     // Parent-first hierarchy refresh sends CPU ragdoll joints to Meep skinning.
     for(let i=0;i<bones.length;i++)if(bones[i].parent<0)skin.joints[i].updateMatrices();
-    const alpha=Math.max(0,Math.min(1,(45-state.age)/4));for(const material of rig.deathMaterials)material.diffuse_color.setA(alpha);
-    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],alpha);
+    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],Math.max(0,Math.min(1,(45-state.age)/4)));
     if(rig.weapon){
       const pose=rig.worldPoses[bones.findIndex(b=>b.name==='weapon')],grip=state.weapon==='sword'?.25:0;
       for(const {id,t} of rig.weapon){t.copy(pose);t.setTranslation(pose[12]+pose[4]*grip,pose[13]+pose[5]*grip,pose[14]+pose[6]*grip);t.updateMatrix();t64_announce_change(view.ecd,id);}

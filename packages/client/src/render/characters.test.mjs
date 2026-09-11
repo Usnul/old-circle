@@ -87,13 +87,18 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       const rig=instances[0];
       // No weapon geometry is needed here; separate entities exercise attachment cleanup.
       const weapon=rig.weapon;rig.weapon=null;
-      characters.corpse(rig,{name:'pilgrim',scale:1,age:44,joints:actorJointPoses(actors[0])});
+      const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0],opaqueMaterial=deadMesh.material;
+      characters.viewAlpha(rig,.25);
+      for(const age of [0,41,44,45]){
+        characters.corpse(rig,{name:'pilgrim',scale:1,age,joints:actorJointPoses(actors[0])});
+        expect(deadMesh.material).toBe(opaqueMaterial);
+        expect(deadMesh.material.transparency_mode).toBe(TransparencyMode.Opaque);
+        expect(deadMesh.material.diffuse_color.a).toBe(1);
+      }
       rig.weapon=weapon;
       if(mode==='pool'){
         rig.telegraph=view.model();rig.lantern={parts:view.model(),light:{id:ecd.createEntity()}};
       }
-      const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0];
-      expect(deadMesh.material.diffuse_color.a).toBeCloseTo(.25);
       for(const rig of instances){
         if(mode==='pool')characters.remove(rig);
         else{view.remove(rig.weapon??[]);ecd.removeEntity(rig.id);}
