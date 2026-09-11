@@ -51,7 +51,8 @@ def build_dungeons(world,cube,mesh,finish,cone):
         for i in range(11):
             a=i*math.pi/11;b=(i+1)*math.pi/11
             vertices=[point(r*math.cos(t),n,front+3.9+r*math.sin(t)) for n in [-3.35,-2.65] for r in [2.08,2.6] for t in [a,b]]
-            mesh('Threshold arch',vertices,[(0,1,3,2),(4,6,7,5),(0,4,5,1),(2,3,7,6),(0,2,6,4),(1,5,7,3)],trim_mat)
+            # Match the outward winding of the freestanding arch stones.
+            mesh('Threshold arch',vertices,[(2,3,1,0),(5,7,6,4),(1,5,4,0),(6,7,3,2),(4,6,2,0),(3,7,5,1)],trim_mat)
         finish('dungeon_'+dungeon['id'],physical)
     # Two native states make the personal reward legible without a UI marker.
     for opened in [False,True]:

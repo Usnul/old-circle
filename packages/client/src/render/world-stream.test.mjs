@@ -4,8 +4,8 @@ import {ModelStore} from './model-store.mjs';
 import {WorldStream,propBounds,sceneryModel} from './world-stream.mjs';
 import {WorldBanners} from './banners.mjs';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
-import {HEARTHS} from '@old-circle/game/world/regions.mjs';
-import {DUNGEONS,dungeonPoint} from '@old-circle/game/world/dungeons.mjs';
+import {HEARTHS,heightAt} from '@old-circle/game/world/regions.mjs';
+import {DUNGEONS,dungeonPoint,dungeonFloors,floorHeight} from '@old-circle/game/world/dungeons.mjs';
 import {MeshShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/MeshShape3D.js';
 import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
 import {geometry_build_from_meshlet_geometry} from '@woosh/meep-engine/src/shade/renderer/geometry/geometry_build_from_meshlet_geometry.js';
@@ -17,6 +17,37 @@ import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.j
 const base=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',base),'utf8'));
 const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{}]));
 const read=async file=>{const bytes=await readFile(new URL(file,base));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);};
+
+test.each(['','_distant'])('arch stones expose outward faces and normals at detail %s',async suffix=>{
+  const store=new ModelStore({manifest,materials,read});
+  const arches=[{name:'arch',center:[0,4.5,0],inner:1.7,outer:2.42,depth:.48,count:13,gap:.02},...DUNGEONS.map(d=>({
+    name:'dungeon_'+d.id,center:[d.origin[0],floorHeight(dungeonFloors(d,heightAt).at(-1),0,-3)+3.9,d.origin[1]+3],inner:2.08,outer:2.6,depth:.35,count:11,gap:0,
+  }))];
+  for(const arch of arches){
+    const counts=new Array(arch.count).fill(0),parts=await store.load(arch.name+suffix);
+    for(const part of parts){
+      const g=geometry_build_from_meshlet_geometry(part.geometry),p=g.getAttribute('position').data,n=g.getAttribute('normal').data,indices=g.index.data;
+      for(let i=0;i<indices.length;i+=3){
+        const ids=[indices[i],indices[i+1],indices[i+2]],v=ids.map(id=>arch.center.map((c,k)=>p[id*3+k]-c));
+        if(!v.every(([x,y,z])=>y>-.001&&Math.abs(Math.abs(z)-arch.depth)<.001&&[arch.inner,arch.outer].some(r=>Math.abs(Math.hypot(x,y)-r)<.001)))continue;
+        const angles=v.map(([x,y])=>Math.atan2(Math.max(0,y),x));
+        // Adjacent dungeon wedges share their radial end caps. Check the four
+        // exposed surfaces: front, back, the inner soffit and the outer crown.
+        if(Math.max(...angles)-Math.min(...angles)<.001)continue;
+        const stone=Math.min(arch.count-1,Math.floor(angles.reduce((a,b)=>a+b,0)/3*arch.count/Math.PI));
+        const a=stone*Math.PI/arch.count,b=(stone+1)*Math.PI/arch.count-arch.gap,r=(arch.inner+arch.outer)/4;
+        const center=[r*(Math.cos(a)+Math.cos(b)),r*(Math.sin(a)+Math.sin(b)),0];
+        const u=v[1].map((x,k)=>x-v[0][k]),w=v[2].map((x,k)=>x-v[0][k]);
+        const normal=[u[1]*w[2]-u[2]*w[1],u[2]*w[0]-u[0]*w[2],u[0]*w[1]-u[1]*w[0]],length=Math.hypot(...normal);
+        const label=`${arch.name+suffix} stone ${stone} triangle ${i/3}`;
+        expect(normal.reduce((sum,x,k)=>sum+x*(v[0][k]-center[k]),0),label+' winding').toBeGreaterThan(.001);
+        for(const id of ids)expect(normal.reduce((sum,x,k)=>sum+x*n[id*3+k],0)/length,label+' normal').toBeGreaterThan(.99);
+        counts[stone]++;
+      }
+    }
+    expect(counts,arch.name+suffix+' exposed faces').toEqual(new Array(arch.count).fill(8));
+  }
+});
 
 test('every distant terrain tile meets its full-detail perimeter without cracks',async()=>{
   const store=new ModelStore({manifest,materials,read});

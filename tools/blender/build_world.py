@@ -191,7 +191,8 @@ for side in [-1,1]:
 for j in range(13):
  a=j*math.pi/13; b=(j+1)*math.pi/13-.02
  verts=[(r*math.cos(t),y,4.5+r*math.sin(t)) for y in [-.48,.48] for r in [1.7,2.42] for t in [a,b]]
- mesh('Arch stone',verts,[(0,1,3,2),(4,6,7,5),(0,4,5,1),(2,3,7,6),(0,2,6,4),(1,5,7,3)],'stoneLight' if j%4==0 else 'stone')
+ # Wind every face outward from the solid wedge, including the inner soffit.
+ mesh('Arch stone',verts,[(2,3,1,0),(5,7,6,4),(1,5,4,0),(6,7,3,2),(4,6,2,0),(3,7,5,1)],'stoneLight' if j%4==0 else 'stone')
 finish('arch')
 for j in range(28):
  a=(j+2)*math.tau/32; b=a+math.tau/32-.022
