@@ -60,7 +60,12 @@ export function animationPlan(a){
     const move=BOSS_MOVES[a.bossMove];action=move.clip;actionTime=move.windup+(a.windup>0?-a.windup:a.attackAge);
     actionWeight=smoothStep(0,1,actionTime/.12)*(1-smoothStep(0,1,(actionTime-move.windup-move.recovery+.15)/.15));
   }
-  else if(a.attackAge>=0){action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;const length=data.clips[action]?.duration??.7;actionWeight=smoothStep(0,1,actionTime/.09)*(1-smoothStep(0,1,(actionTime-length+.12)/.12));}
+  else if(a.attackAge>=0){
+    action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;
+    const length=data.clips[action]?.duration??.7,blendIn=!hound&&(action==='sword'||action==='spear')?.12:.09;
+    // Settle the running arms into the windup before the active blade window.
+    actionWeight=smoothStep(0,1,actionTime/blendIn)*(1-smoothStep(0,1,(actionTime-length+.12)/.12));
+  }
   else if(a.windup>0&&a.attackKind==='nova'){action='nova';actionTime=Math.min(.5,1-a.windup);actionWeight=.85;}
   else if(a.hurtTime>0){action='hurt';actionTime=.3-a.hurtTime;actionWeight=.8;}
   else if(!a.grounded){

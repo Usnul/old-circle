@@ -38,10 +38,23 @@ test('fixed simulation frames keep walking smooth under uneven Worker message ar
   expect(poses.sample(returning,3).x).toBe(12);
 });
 
-test('ragdoll joints use the same delayed Meep timeline and expire from the key table',()=>{
-  const poses=new PresentationPoses(),a={key:'enemy:18',joints:[{position:[0,2,0],rotation:[0,0,0,1]}]};
+test('ragdoll joints and dropped weapons move independently on the same delayed Meep timeline and expire',()=>{
+  const poses=new PresentationPoses(),a={key:'enemy:18',weapon:'spear',joints:[{position:[0,2,0],rotation:[0,0,0,1]}],weaponPose:{position:[1,2,3],rotation:[0,0,0,1]}};
   poses.accept({actors:[],ragdolls:[a]},0);
-  const b={...a,joints:[{position:[.2,1.8,0],rotation:[0,0,Math.sin(.1),Math.cos(.1)]}]};poses.accept({actors:[],ragdolls:[b]},1/30);
-  const p=poses.corpse(b,.05).joints[0];expect(p.position[0]).toBeCloseTo(.1);expect(p.position[1]).toBeCloseTo(1.9);expect(p.rotation[2]).toBeCloseTo(Math.sin(.05));
+  const b={...a,joints:[{position:[.2,1.8,0],rotation:[0,0,Math.sin(.1),Math.cos(.1)]}],weaponPose:{position:[.4,1.2,3.4],rotation:[0,Math.sin(.2),0,Math.cos(.2)]}};poses.accept({actors:[],ragdolls:[b]},1/30);
+  const corpse=poses.corpse(b,.05),p=corpse.joints[0];expect(p.position[0]).toBeCloseTo(.1);expect(p.position[1]).toBeCloseTo(1.9);expect(p.rotation[2]).toBeCloseTo(Math.sin(.05));
+  expect(corpse.weapon).toBe('spear');
+  for(const [i,value] of [.7,1.6,3.2].entries())expect(corpse.weaponPose.position[i]).toBeCloseTo(value);
+  expect(corpse.weaponPose.rotation[1]).toBeCloseTo(Math.sin(.1));expect(corpse.weaponPose.rotation[2]).toBe(0);expect(corpse.weaponPose.rotation[3]).toBeCloseTo(Math.cos(.1));
+  expect(poses.keys.has('corpse:enemy:18:weapon')).toBe(true);
+  expect(poses.corpse({...b,weaponPose:null},.05).weaponPose).toBeNull();
+  const {weaponPose,...unarmed}=b;expect(poses.corpse(unarmed,.05)).not.toHaveProperty('weaponPose');
   for(let i=0;i<18;i++)poses.accept({actors:[]},(i+2)/30);expect(poses.keys.size).toBe(0);
+});
+
+test('new corpse weapon poses retain their received transform when no interpolation history exists',()=>{
+  const poses=new PresentationPoses(),corpse={key:'enemy:new',weapon:'sword',joints:[{position:[2,1,0],rotation:[0,0,0,1]}],weaponPose:{position:[4,.5,2],rotation:[Math.sin(.2),0,0,Math.cos(.2)]}};
+  expect(poses.corpse(corpse,0)).toEqual(corpse);
+  poses.accept({actors:[],ragdolls:[{...corpse,key:'enemy:other'}]},0);
+  expect(poses.corpse(corpse,.05)).toEqual(corpse);
 });

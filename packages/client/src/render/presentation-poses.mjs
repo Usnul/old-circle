@@ -31,7 +31,10 @@ export class PresentationPoses {
     for(const a of snapshot.actors){
       this.record(a.id,[a.x,a.y,a.z],[0,Math.sin(a.yaw/2),0,Math.cos(a.yaw/2)]);
     }
-    for(const corpse of snapshot.ragdolls??[])for(let i=0;i<corpse.joints.length;i++)this.record(`corpse:${corpse.key}:${i}`,corpse.joints[i].position,corpse.joints[i].rotation);
+    for(const corpse of snapshot.ragdolls??[]){
+      for(let i=0;i<corpse.joints.length;i++)this.record(`corpse:${corpse.key}:${i}`,corpse.joints[i].position,corpse.joints[i].rotation);
+      if(corpse.weaponPose)this.record(`corpse:${corpse.key}:weapon`,corpse.weaponPose.position,corpse.weaponPose.rotation);
+    }
     this.log.end_tick();this.frames.push({tick,time,sourceFrame,actors:new Map(snapshot.actors.map(a=>[a.id,a]))});if(this.frames.length>16)this.frames.shift();
     for(const [key,entry] of this.keys)if(entry.seen<tick-16)this.keys.delete(key);
   }
@@ -51,10 +54,15 @@ export class PresentationPoses {
   }
   corpse(state,time){
     const interval=this.interval(time);
-    return {...state,joints:state.joints.map((joint,i)=>{
+    const result={...state,joints:state.joints.map((joint,i)=>{
       const t=this.pose(`corpse:${state.key}:${i}`,interval);
       return t?{position:Array.from(t.translation),rotation:Array.from(t.rotation)}:joint;
     })};
+    if(state.weaponPose){
+      const t=this.pose(`corpse:${state.key}:weapon`,interval);
+      if(t)result.weaponPose={position:Array.from(t.translation),rotation:Array.from(t.rotation)};
+    }
+    return result;
   }
   sample(actor,time){
     if(!this.frames.length)return actor;

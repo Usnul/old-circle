@@ -4,6 +4,7 @@ import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js'
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
+import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {quat3_multiply} from '@woosh/meep-engine/src/core/geom/3d/quaternion/quat3_multiply.js';
 import {v3_quaternion_apply} from '@woosh/meep-engine/src/core/geom/vec3/v3_quaternion_apply.js';
@@ -21,6 +22,13 @@ const product=(a,b)=>{const o=[0,0,0,0];quat3_multiply(o,0,a[0],a[1],a[2],a[3],b
 const productInverse=(a,b)=>{const o=[0,0,0,0];quat3_multiply(o,0,-a[0],-a[1],-a[2],a[3],b[0],b[1],b[2],b[3]);return o;};
 const IDENTITY=[0,0,0,1];
 export const CORPSE_LIFETIME=45;
+// Collision bounds around the authored weapon models (Y is length).
+const WEAPON_BOUNDS={
+  sword:{center:[0,.32,0],half:[.16,.81,.04],radius:.075},
+  spear:{center:[0,.225,0],half:[.075,1.325,.075],radius:.075},
+  bow:{center:[-.15,0,0],half:[.19,.81,.04]},
+  staff:{center:[0,.545,0],half:[.17,.945,.13]},
+};
 
 class JointSystem extends System {
   constructor(physics){super();this.physics=physics;this.dependencies=[Joint];}
@@ -66,7 +74,19 @@ export class Ragdolls {
       else joint.asConeTwist(-.45,.45,bone.name.startsWith('upperArm')?1.25:.7);
       const id=this.world.ecd.createEntity();this.world.ecd.addComponentToEntity(id,joint);constraints.push(id);
     }
-    this.records.set(key,{key,actorId:a.id,appearance:a.kind==='player'?'player':a.archetype,armor:a.inventory?.armor,name,scale,age:Math.min(35,a.deadTime??0),active:true,bodies,constraints,pose,locals,data,weapon:a.archetype==='hound'?null:a.weapon});
+    const weapon=a.archetype==='hound'?null:a.weapon,bounds=WEAPON_BOUNDS[weapon];let weaponBody=null,weaponPose=null;
+    if(bounds){
+      const socket=pose[data.bones.findIndex(b=>b.name==='weapon')],grip=weapon==='sword'?.25:0;
+      weaponPose={position:Array.from(point(socket.position,socket.rotation,[0,grip*scale,0])),rotation:[...socket.rotation]};
+      const offset=bounds.center.map(v=>v*scale),half=bounds.half.map(v=>v*scale),mass=2*scale**3;
+      const inertia=half.map((_,i)=>3/(mass*(half[(i+1)%3]**2+half[(i+2)%3]**2)));
+      // Lowered blades can start below ground; capsule contacts recover that overlap.
+      const shape=bounds.radius?CapsuleShape3D.from(bounds.radius*scale,2*(half[1]-bounds.radius*scale)):BoxShape3D.from(...half);
+      // No joint connects the released weapon to the hand or any ragdoll body.
+      weaponBody=this.body(point(weaponPose.position,weaponPose.rotation,offset),weaponPose.rotation,shape,{mass,velocity,inertia});
+      weaponBody.offset=offset;weaponBody.b.angularVelocity.set([.3,0,.15]);
+    }
+    this.records.set(key,{key,actorId:a.id,appearance:a.kind==='player'?'player':a.archetype,armor:a.inventory?.armor,name,scale,age:Math.min(35,a.deadTime??0),active:true,bodies,constraints,pose,locals,data,weapon,weaponBody,weaponPose});
   }
   sync(actors){
     const live=new Set();
@@ -79,6 +99,10 @@ export class Ragdolls {
     for(const [id,proxy] of this.proxies)if(!live.has(id)){this.world.ecd.removeEntity(proxy.id);this.proxies.delete(id);}
   }
   readPose(record){
+    if(record.weaponBody){
+      const {t,offset}=record.weaponBody;
+      record.weaponPose={position:Array.from(point(t.translation,t.rotation,offset.map(v=>-v))),rotation:Array.from(t.rotation)};
+    }
     for(let i=0;i<record.pose.length;i++){
       const body=record.bodies.get(i),p=record.pose[i];
       if(body){p.rotation=Array.from(body.t.rotation);p.position=point(body.t.translation,body.t.rotation,[0,-body.length/2,0]);}
@@ -97,10 +121,11 @@ export class Ragdolls {
     if(!record.active)return;this.readPose(record);
     for(const id of record.constraints)this.world.ecd.removeEntity(id);
     for(const body of record.bodies.values())this.world.ecd.removeEntity(body.id);
+    if(record.weaponBody){this.world.ecd.removeEntity(record.weaponBody.id);record.weaponBody=null;}
     record.constraints=[];record.bodies.clear();record.active=false;
   }
   remove(key){const record=this.records.get(key);if(!record)return;this.freeze(record);this.records.delete(key);}
   clear(){for(const key of this.records.keys())this.remove(key);this.seenDeaths.clear();}
-  snapshot(){return [...this.records.values()].map(r=>({key:r.key,actorId:r.actorId,name:r.name,appearance:r.appearance,armor:r.armor,scale:r.scale,age:r.age,joints:r.pose,weapon:r.weapon}));}
+  snapshot(){return [...this.records.values()].map(r=>({key:r.key,actorId:r.actorId,name:r.name,appearance:r.appearance,armor:r.armor,scale:r.scale,age:r.age,joints:r.pose,weapon:r.weapon,weaponPose:r.weaponPose}));}
   async stop(){this.clear();await this.world.stop();}
 }
