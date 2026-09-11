@@ -8,6 +8,8 @@ import {compassMarkup,updateCompass} from './ui/compass.mjs';
 import {worldMapMarkup,installMapControls} from './ui/world-map.mjs';
 import {worldToMap} from '@old-circle/game/world/map.mjs';
 import {equipmentMarkup} from './ui/equipment.mjs';
+import {combatStatus} from './ui/combat-status.mjs';
+import {trapDialogFocus} from './ui/dialog-focus.mjs';
 import {ARMOR,armorFor,reinforcement,hasAllSeals} from '@old-circle/game/content/equipment.mjs';
 import {BOSS_MOVES,bossEnraged} from '@old-circle/game/content/boss-moves.mjs';
 import {RELICS,flaskCapacity,nearbyRelic} from '@old-circle/game/content/relics.mjs';
@@ -27,11 +29,11 @@ app.innerHTML=`
 </section>
 <section class="screen loading" id="loading" hidden><div><div class="sigil"></div><div class="eyebrow">Old Circle</div><h2 id="loading-text">The road awaits.</h2><div class="loading-bar"><div id="loading-progress"></div></div><p>Every ending leaves a path.</p></div></section>
 <section class="hud" id="hud" hidden>
- <div class="vitals"><div class="crest" aria-hidden="true">◌</div><div class="bars">${[['health','Health',''],['mana','Focus','mana'],['stamina','Stamina','stamina']].map(([id,label,style])=>`<div class="bar ${style}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="${id}"></span></div>`).join('')}</div></div>
+ <div class="vitals"><div class="crest" aria-hidden="true">◌</div><div class="bars">${[['health','Health',''],['mana','Focus','mana'],['stamina','Stamina','stamina']].map(([id,label,style])=>`<div class="bar ${style}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="${id}"></span><small class="meter-value" id="${id}-value" aria-hidden="true"></small></div>`).join('')}</div></div>
  <div id="stamina-state" class="stamina-state" role="status"></div><div class="compass">${compassMarkup()}</div>
  <div class="world-status"><div class="mode" id="network-state">Solo journey</div><div id="daytime">Evening · The Waking Fields</div><div id="pvp-state">PvP off</div><p class="save-warning" data-save-warning role="status" hidden></p></div>
  <div class="area-title" id="area-title"><div class="eyebrow" id="area-level"></div><h2 id="area-name"></h2></div>
- <div class="weapon-name" id="weapon-name"></div><div class="quickbar">${Object.entries(WEAPONS).map(([id,w],i)=>`<button class="slot" data-weapon="${id}" title="${w.name}"><kbd>${i+1}</kbd><img src="/assets/icons/${w.icon}.png" alt="${w.name}"></button>`).join('')}<button class="slot" id="flask" title="Drink healing flask"><kbd>R</kbd><img src="/assets/icons/flask.png" alt="Healing flask"><span class="count" id="flask-count">3</span></button></div>
+ <div class="combat-panel"><div class="weapon-name" id="weapon-name"></div><div id="weapon-cost" class="combat-detail"></div><div id="weapon-state" class="combat-state" role="status"></div><div id="nova-state" class="combat-detail"></div></div><div class="quickbar">${Object.entries(WEAPONS).map(([id,w],i)=>`<button class="slot" data-weapon="${id}" title="${w.name}"><kbd>${i+1}</kbd><img src="/assets/icons/${w.icon}.png" alt="${w.name}"></button>`).join('')}<button class="slot nova-slot" id="nova" aria-label="Cast frost nova" aria-describedby="nova-state"><kbd>Q</kbd><span class="nova-sigil" aria-hidden="true">❄</span><span class="slot-caption">Nova</span></button><button class="slot" id="flask" title="Drink healing flask"><kbd>R</kbd><img src="/assets/icons/flask.png" alt="Healing flask"><span class="count" id="flask-count">3 / 3</span></button></div>
  <div class="embers" id="embers">0</div><div class="hint" id="interact" hidden><kbd>E</kbd>Rest at the Pilgrim’s Hearth</div><div class="controls">WASD move · Shift sprint · C crouch · Space jump / mantle · Click / F attack · Q frost nova · R heal · Tab journal</div>
  <div class="boss" id="boss" hidden><div class="boss-name" id="boss-name"></div><div class="bar" role="meter" aria-labelledby="boss-name" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="boss-health"></span></div><div id="boss-move" class="boss-move" role="status"></div></div><div class="toast" id="toast" role="status"></div><div class="death" id="death" role="status" hidden>LIGHT FADES</div>
 </section><button id="capture-mouse" hidden>Resume mouse look <span>Click to capture · Escape releases</span></button><div id="modal-root"></div>`;
@@ -48,7 +50,7 @@ function modal(content,{dismissible=true}={}){
   dialog.querySelector('.panel-top')?.insertAdjacentHTML('afterend','<p id="menu-status" role="status"></p>');
   if(journey.warning&&$('#menu-status'))$('#menu-status').textContent=journey.warning;
   // Let the browser handle dialog keys without reaching Meep's body-bound game map.
-  dialog.addEventListener('keydown',e=>e.stopPropagation());
+  dialog.addEventListener('keydown',e=>{e.stopPropagation();trapDialogFocus(e,dialog);});
   dialog.addEventListener('cancel',e=>{e.preventDefault();if(dismissible)closeModal();});
   dialog.querySelector('.close')?.addEventListener('click',closeModal);
   dialog.showModal();heading.focus({preventScroll:true});
@@ -153,7 +155,7 @@ function map(){
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;
   equipmentOpen=false;modal(worldMapMarkup(p));installMapControls(()=>snapshot.actors.find(a=>a.id===playerId));
 }
-for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');
+for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>send({type:'equip',weapon:b.dataset.weapon});$('#flask').onclick=()=>input?.pulse('heal');$('#nova').onclick=()=>input?.pulse('nova');
 let previous=performance.now();
 function frame(now){
   const dt=Math.min(.1,(now-previous)/1000);previous=now;
@@ -172,7 +174,17 @@ function updateHud(){
   $('#map-player')?.setAttribute('transform',`translate(${worldToMap(p.x,p.z).join(' ')})`);
   $('#stamina-state').textContent=p.sprintExhausted?'Recover stamina and release Shift to sprint again':'';
   for(const [id,v,m] of [['health',p.hp,p.healthMax],['mana',p.mana,p.manaMax],['stamina',p.stamina,p.staminaMax]])updateMeter(id,v,m);
-  $('#embers').textContent=Math.floor(p.embers).toLocaleString();$('#flask-count').textContent=p.flasks;$('#weapon-name').textContent=WEAPONS[p.weapon].name+(reinforcement(p)?' +'+reinforcement(p):'');
+  $('#embers').textContent=Math.floor(p.embers).toLocaleString();$('#flask-count').textContent=`${p.flasks} / ${flaskCapacity(p)}`;$('#weapon-name').textContent=WEAPONS[p.weapon].name+(reinforcement(p)?' +'+reinforcement(p):'');
+  const combat=combatStatus(p);
+  $('#weapon-cost').textContent=combat.weapon.detail;
+  const weaponState=combat.weapon.reason||'Click / F · Attack';
+  if($('#weapon-state').textContent!==weaponState)$('#weapon-state').textContent=weaponState;
+  $('#weapon-state').classList.toggle('unavailable',!combat.weapon.ready);
+  $('#nova-state').textContent=`Frost nova · ${combat.nova.detail}${combat.nova.reason?' · '+combat.nova.reason:''}`;
+  for(const [id,state,label] of [['nova',combat.nova,'Frost nova'],['flask',combat.heal,'Healing flask']]){
+    const button=$('#'+id);button.disabled=!state.ready;button.title=`${label} · ${state.detail}${state.reason?' · '+state.reason:''}`;
+    button.setAttribute('aria-label',button.title);
+  }
   document.querySelectorAll('[data-weapon]').forEach(b=>{b.classList.toggle('active',b.dataset.weapon===p.weapon);b.setAttribute('aria-pressed',String(b.dataset.weapon===p.weapon));b.disabled=!p.inventory.weapons.includes(b.dataset.weapon);b.title=b.disabled?'Find this weapon on your journey':WEAPONS[b.dataset.weapon].name;});
   const region=regionAt(p.x,p.z),room=dungeonRoomAt([p.x,p.y-.845,p.z],heightAt),hour=snapshot.time;$('#daytime').textContent=`${hour<6||hour>=18?'Night':hour>16?'Evening':'Day'} · ${room?.room.name??region.name}`;$('#pvp-state').textContent=`PvP ${p.pvp?'on':'off'}`;
   const next=Object.values(BOSSES).find(b=>!p.seals.includes(b.seal));$('#objective').textContent=next?LANDMARKS.find(l=>l.id===next.landmark).name.toUpperCase():'THE CIRCLE IS BROKEN';
@@ -185,6 +197,7 @@ function updateHud(){
 function updateMeter(id,value,max){
   const fill=$(`#${id}`),meter=fill.parentElement,current=Math.max(0,Math.min(max,value));
   fill.style.width=`${max>0?current/max*100:0}%`;
+  const valueLabel=$(`#${id}-value`);if(valueLabel)valueLabel.textContent=`${Math.floor(current)} / ${max}`;
   meter.setAttribute('aria-valuemax',String(max));meter.setAttribute('aria-valuenow',String(Math.round(current)));
   meter.setAttribute('aria-valuetext',`${Math.round(current)} of ${max}`);
 }

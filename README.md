@@ -33,6 +33,8 @@ WASD walks, Shift sprints, C crouches, Space jumps and grabs nearby ledges. Keep
 
 Choose a starting inventory and stat distribution, find weapons on enemies, earn embers and improve attributes at the hearth. The Bellkeeper's Hollow offers an early magic weapon. Six regional bosses grant seals. Players can enter ongoing encounters. Damage between players requires both to enable PvP. A defeated player returns to their checkpoint after four seconds and loses 25% of carried embers.
 
+The combat HUD shows current resources, weapon costs, remaining arrows when using a bow, and recovery or resource shortages. Frost nova has its own Q control beside the weapons; flasks show remaining charges and capacity. Nova and weapon attacks share recovery, while healing remains available during recovery if you are wounded and have a flask.
+
 ## Included
 
 - `packages/game`: shared Meep ECS/physics simulation, collision combat, progression, enemies, encounters, world layout, navigation/visibility sampling and Meep network sessions.

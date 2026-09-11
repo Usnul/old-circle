@@ -10,7 +10,7 @@ const keys={sprint:'shift',crouch:'c',jump:'space',strike:'f',nova:'q',heal:'r',
 export class GameInput {
   constructor(engine,{action,look,captureChanged,error,inspect=false}){
     Object.assign(this,{engine,action,look,captureChanged,error,inspect});this.enabled=true;this.pending=new Map();this.axis=[0,0];this.lookAxis=[0,0];this.edge=[0,0];this.capturePending=false;
-    this.element=engine.viewStack.el;this.element.tabIndex=0;
+    this.element=engine.viewStack.el;this.element.tabIndex=0;this.captureEpoch=0;
   }
   async start(){
     const devices=this.engine.devices;
@@ -36,21 +36,43 @@ export class GameInput {
       this.edge[0]=edge(event.clientX,rect.left,rect.right);this.edge[1]=edge(event.clientY,rect.top,rect.bottom);
     });
     this.element.addEventListener('pointerleave',()=>this.edge.fill(0));
-    document.addEventListener('pointerlockchange',()=>{this.capturePending=false;this.captureChanged(this.locked);if(!this.locked)this.pending.clear();});
-    window.addEventListener('blur',()=>{this.pending.clear();this.edge.fill(0);this.suppressAttack=true;this.freeLook=false;this.element.classList.remove('free-look');this.captureChanged(false);});
+    document.addEventListener('pointerlockchange',()=>{
+      const stale=this.captureEpoch!==this.activeCaptureEpoch;
+      if(stale){
+        if(this.locked){
+          this.capturePending=false;this.freeLook=false;this.element.classList.remove('free-look');this.pending.clear();this.captureChanged(false);document.exitPointerLock();
+        }else if(this.capturePending){
+          this.capturePending=false;this.pending.clear();
+        }
+        return;
+      }
+      this.capturePending=false;this.captureChanged(this.locked);if(!this.locked){this.pending.clear();this.freeLook=false;this.element.classList.remove('free-look');}
+    });
+    window.addEventListener('blur',()=>{
+      this.captureEpoch+=1;this.activeCaptureEpoch=0;this.capturePending=false;this.pending.clear();this.edge.fill(0);this.suppressAttack=true;this.freeLook=false;this.element.classList.remove('free-look');this.captureChanged(false);
+    });
     this.captureChanged(this.locked);return this;
   }
   get locked(){return document.pointerLockElement===this.element;}
   get activeLook(){return this.locked||this.freeLook;}
   async capture(){
-    if(this.locked||this.capturePending)return;this.capturePending=true;this.element.focus();
+    if(!this.enabled||this.locked||this.capturePending)return;
+    this.capturePending=true;this.element.focus();
+    const epoch=this.captureEpoch+=1;
+    this.activeCaptureEpoch=epoch;
     try{await this.element.requestPointerLock();}
     catch(e){
+      if(epoch!==this.captureEpoch||!this.enabled)return;
+      if(epoch===this.activeCaptureEpoch)this.activeCaptureEpoch=0;
       this.capturePending=false;this.freeLook=true;this.element.classList.add('free-look');this.captureChanged(true);
       this.error('Mouse look is active. Hold near an edge or use arrow keys to keep turning. Escape releases.');
     }
   }
-  suspend(value){this.enabled=!value;this.pending.clear();this.edge.fill(0);if(value){this.freeLook=false;this.element.classList.remove('free-look');document.exitPointerLock();}}
+  suspend(value){
+    this.enabled=!value;this.pending.clear();this.edge.fill(0);if(value){
+      this.captureEpoch+=1;this.activeCaptureEpoch=0;this.capturePending=false;this.freeLook=false;this.element.classList.remove('free-look');document.exitPointerLock();
+    }
+  }
   update(dt){
     if(!this.enabled)return;
     this.map.coordinate(this.lookAxis,0,'look');

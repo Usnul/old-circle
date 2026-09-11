@@ -218,6 +218,12 @@ export class WorldView {
       this.banners.update(dt,player);
     }
     const sky=this.sky.update(this.scene,snapshot.time);
+    // Auto exposure otherwise lifts the moonlit landscape back to daylight.
+    // Ease the bias away under roofs so sheltered stairs and doors stay legible.
+    const exposure=-1.35*sky.nightBlend*(1-.85*(this.shelter??0));
+    this.exposureBias??=exposure;
+    this.exposureBias+=(exposure-this.exposureBias)*(1-Math.exp(-dt*2));
+    this.engine.graphics.renderer.exposure_compensation=this.exposureBias;
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);
     t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
     this.audio.update(snapshot,player,dt);
