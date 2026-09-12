@@ -14,8 +14,8 @@ async function pixels(url){
 }
 /** Meep's terrain texturing pass, applied to the native meshes authored in Blender. */
 export class WorldGround {
-  async start(graphics,entities){
-    this.entities=entities;this.rows=new Uint32Array(0);this.pass=new GPUTerrainSplatRenderer();
+  async start(graphics,getEntities){
+    this.getEntities=getEntities;this.rows=new Uint32Array(0);this.pass=new GPUTerrainSplatRenderer();
     const base='/assets/terrain/',m=await fetch(base+'manifest.json').then(r=>r.json());
     const images=await Promise.all(m.layers.map(name=>pixels(base+name+'.png'))),masks=await Promise.all([0,1,2].map(i=>pixels(base+`weights-${i}.png`)));
     const count=m.layers.length,area=m.width*m.height,weights=new Uint8Array(area*count),layers=new Uint8Array(m.layerSize*m.layerSize*4*count);
@@ -51,7 +51,8 @@ export class WorldGround {
   }
   surfaceAt(x,z){return this.surfaceMixAt(x,z)[0].surface;}
   record(frame){
-    const packed=pack_terrain_row_table({tiles:this.entities,table:this.rows});this.rows=packed.table;
+    // MeshSystem may finish a LOD attachment after the last presentation update.
+    const packed=pack_terrain_row_table({tiles:this.getEntities(),table:this.rows});this.rows=packed.table;
     if(packed.size)this.pass.graph_draw({...this.data,frame,rows:this.rows,row_count:packed.size});
   }
 }

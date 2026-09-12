@@ -39,7 +39,8 @@ export class WorldAudio {
       this.events[name]=description;
       if(['impact','hurt','effort','potion'].includes(name))this.localEvents[name]=Object.assign(new EventDescription(),description,{is3D:false,gainDb:name==='impact'?-5:-8,maxInstances:3});
     }));
-    this.acoustics=await WorldAcoustics.create(this.sopra);this.wind=this.sopra.playEvent(this.events.wind);
+    this.acoustics = await WorldAcoustics.create(this.sopra, this.engine.entityManager);
+    this.wind = this.sopra.playEvent(this.events.wind);
     this.engine.sound.volume=.55;
   }
   spatial(description,position,{loop=false,sourceRadius=.2,maxLifetime=4}={}){

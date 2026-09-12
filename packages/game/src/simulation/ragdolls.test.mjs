@@ -1,9 +1,11 @@
 import {afterEach,expect,test} from 'vitest';
 import {Ragdolls,CORPSE_LIFETIME} from './ragdolls.mjs';
+import {GameWorld,DT} from './world.mjs';
 import {Actor} from './components.mjs';
 import {heightAt} from '../world/regions.mjs';
 import {Joint} from '@woosh/meep-engine/src/engine/physics/ecs/Joint.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {Quaternion} from '@woosh/meep-engine/src/core/geom/Quaternion.js';
@@ -12,6 +14,36 @@ const simulations=[];
 afterEach(async()=>{for(const sim of simulations)await sim.stop();simulations.length=0;});
 async function setup(options){const sim=await new Ragdolls(options).start();simulations.push(sim);return sim;}
 function dead(id='fallen'){return Object.assign(new Actor(),{id,x:160,y:heightAt(160,120)+.845,z:120,hp:0,grounded:true,deathVelocity:[2,.5,0]});}
+
+test('cosmetic physics shares static shapes without changing gameplay state',async()=>{
+  const world=await new GameWorld().start({populate:false,navigation:false});
+  simulations.push(world);
+  const sim=await setup();
+  const corpse=dead();
+  const actor=world.spawnActor('living',{},[corpse.x+.2,corpse.y,corpse.z]);
+  const entity=world.actors.get(actor.id);
+  const body=world.ecd.getComponent(entity,RigidBody);
+  const transform=world.ecd.getComponent(entity,Transform64);
+  body.linearVelocity.set([1,2,3]);
+  const before={snapshot:world.snapshot(),count:world.ecd.entityCount,body:structuredClone(body),transform:structuredClone(transform)};
+
+  for(const Component of [Transform64,RigidBody,Collider]){
+    expect(sim.world.ecd.getComponent(sim.world.terrainEntity,Component)).not.toBe(world.ecd.getComponent(world.terrainEntity,Component));
+  }
+  expect(sim.world.ecd.getComponent(sim.world.terrainEntity,Collider).shape).toBe(world.ecd.getComponent(world.terrainEntity,Collider).shape);
+
+  sim.spawn(corpse);
+  const start=structuredClone(sim.snapshot()[0]);
+  for(let i=0;i<60;i++)sim.update(DT,[actor,corpse]);
+  expect(sim.snapshot()[0].joints).not.toEqual(start.joints);
+  expect(sim.proxies.has(actor.id)).toBe(true);
+  expect(world.snapshot()).toEqual(before.snapshot);
+  expect(world.ecd.entityCount).toBe(before.count);
+  expect(world.ecd.getComponent(entity,RigidBody)).toBe(body);
+  expect(world.ecd.getComponent(entity,Transform64)).toBe(transform);
+  expect(structuredClone(body)).toEqual(before.body);
+  expect(structuredClone(transform)).toEqual(before.transform);
+});
 
 test('Meep ragdoll joints retain their anchors as the body falls and settles',async()=>{
   const sim=await setup(),a=dead();sim.spawn(a);const start=structuredClone(sim.snapshot()[0]);

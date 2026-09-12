@@ -43,7 +43,7 @@ import SoundListenerSystem from '@woosh/meep-engine/src/engine/sound/ecs/SoundLi
 import SoundListener from '@woosh/meep-engine/src/engine/sound/ecs/SoundListener.js';
 import {ModelStore} from './model-store.mjs';
 import {WorldStream} from './world-stream.mjs';
-import {loadScenery,attachScenery} from './scenery-data.mjs';
+import {loadScenery} from './scenery-data.mjs';
 import {GeometryCache} from './geometry-cache.mjs';
 import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
 import {CombatTrails} from './combat-trails.mjs';
@@ -66,8 +66,9 @@ export class WorldView {
       config.addSystem(new TransformAttachmentSystem());
       this.scene=EngineHarness.shadeScene(engine);
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
-      this.meshSystem=new MeshSystem(engine.graphics,this.scene,async url=>this.characterRenderer.bundle(url));config.addSystem(this.meshSystem);
-      this.animations=new AnimationSystem(engine.graphics,this.meshSystem);config.addSystem(this.animations);
+      this.meshSystem = new MeshSystem(engine.graphics, this.scene, async url =>
+        url.includes(':') ? this.characterRenderer.bundle(url) : this.modelStore.bundle(url));
+      this.animations = new AnimationSystem(engine.graphics, this.meshSystem);
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
@@ -75,9 +76,11 @@ export class WorldView {
       this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
-      this.cloth=new WorldCloth(this.wind);config.addSystem(this.cloth);
+      this.cloth = new WorldCloth(this.wind);
     }});
     this.ecd=this.engine.entityManager.dataset;
+    const manifest = await fetch('/assets/geometry/manifest.json').then(response => response.json());
+    await loadScenery(manifest, this.ecd);
     this.wind.attach(this.ecd);this.wind.follow(0,heightAt(0,23)+1,23);
     this.engine.viewStack.el.classList.add('meep-world');
     const renderer=this.engine.graphics.renderer;
@@ -124,7 +127,6 @@ export class WorldView {
         material[`texture_${channel}`]=textures[texture];
       }
     }
-    const manifest=await fetch('/assets/geometry/manifest.json').then(r=>r.json());
     const gpuGeometry=renderer.scenes.obtain(this.scene).geometries;
     this.gpuGeometry=gpuGeometry;
     this.geometryCache=new GeometryCache(manifest);
@@ -132,11 +134,18 @@ export class WorldView {
     const core=Object.keys(manifest.models).filter(name=>name==='pilgrim'||name==='briarHound'||name==='votiveBanner'||name.startsWith('armor_')||name.startsWith('boss_'));
     core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
     await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
-    const layout=buildLayout(),scenery=await loadScenery(manifest);this.streaming=new WorldStream(this,layout,this.modelStore,scenery);
-    await this.streaming.start(position,p=>progress('Loading nearby terrain…',.15+p*.5));
+    const layout = buildLayout();
+    this.streaming = new WorldStream(this, layout, this.modelStore);
+    await this.engine.entityManager.addSystem(this.streaming);
+    await this.streaming.start(position, p => progress('Loading nearby terrain…', .15 + p * .5));
+    await this.engine.entityManager.addSystem(this.meshSystem);
+    await this.engine.entityManager.addSystem(this.animations);
+    await this.engine.entityManager.addSystem(this.cloth);
+    this.streaming.rebuildGround();
     await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundEntities);
+    this.ground = new WorldGround();
+    await this.ground.start(this.engine.graphics, () => this.streaming.rebuildGround());
     this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
@@ -160,10 +169,6 @@ export class WorldView {
     const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
     const rotation=up?quat._lookRotation(Math.sin(yaw),-(up[0]*Math.sin(yaw)+up[2]*Math.cos(yaw))/up[1],Math.cos(yaw),...up):[0,Math.sin(yaw/2),0,Math.cos(yaw/2)];
     const result=[];for(const c of chunks){const t=new Transform64();t.setTranslation(...position);t.setScale(...scale);t.setRotation(...rotation);t.updateMatrix();const id=new Entity().add(t).add(ShadedGeometry.from(c.geometry,material??c.material)).build(this.ecd);result.push({id,t});}return result;
-  }
-  sceneryModel(name,transform){
-    const chunks=this.models.get(name);if(!chunks)throw new Error(`Unknown Blender asset: ${name}`);
-    return attachScenery(this.ecd,chunks,transform);
   }
   pose(parts,p,scale=1,yaw=0,pitch=0,roll=0){
     quat.fromEulerAnglesYXZ(pitch,yaw,roll);
@@ -219,7 +224,7 @@ export class WorldView {
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     this.combatFeedback.update(snapshot,presented,playerId,dt);
     const player=presented.find(a=>a.id===playerId);if(player){
-      this.streaming.update(player,dt);
+      this.streaming.updateView(player,dt);
       const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
       wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);

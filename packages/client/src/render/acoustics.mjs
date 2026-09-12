@@ -9,9 +9,12 @@ import probes from '@old-circle/game/content/acoustic-probes.json';
 export const ACOUSTIC_VOICE_LIMIT=24;
 const SKY_DIRECTIONS=[[0,1,0],[.6,.8,0],[-.6,.8,0],[0,.8,.6],[0,.8,-.6]];
 export class WorldAcoustics {
-  static async create(sopra){return new WorldAcoustics(sopra,await createWorldAcoustics());}
-  constructor(sopra,{simulator,bodies}){
+  static async create(sopra, entityManager) {
+    return new WorldAcoustics(sopra, await createWorldAcoustics(entityManager));
+  }
+  constructor(sopra,{simulator,bodies,entityManager}){
     this.simulator=simulator;
+    this.entityManager=entityManager;
     this.field=new AcousticProbeField();this.field.fromJSON(probes.field);
     // A post-effects send returns through master gain; broad wind stays dry.
     this.reverb=new ProbeReverbRenderer(sopra.audioContext,sopra.busGraph.getInput('master'));

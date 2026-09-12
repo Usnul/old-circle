@@ -1,6 +1,8 @@
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import {MeshletGeometrySerializationAdapter} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
+import {SceneBundle} from '@woosh/meep-engine/src/shade/renderer/loader/SceneBundle.js';
+import {SceneNode} from '@woosh/meep-engine/src/shade/renderer/loader/SceneNode.js';
 
 /** Bounded I/O and ownership for native Meep geometry. Only scenery with no live
  * ECS users may leave; character rigs and persistent distant silhouettes are pinned. */
@@ -39,6 +41,16 @@ export class ModelStore {
     }return parts;
   }
   retain(name){const r=this.records.get(name);if(!r||!this.models.has(name))throw new Error(`Unloaded model ${name}`);r.refs++;r.lastUsed=this.time;}
+  bundle(name) {
+    const chunks = this.models.get(name);
+    if (!chunks) throw new Error(`Unloaded scenery model ${name}`);
+    const bundle = new SceneBundle();
+    const root = bundle.add_node(SceneNode.from({name}));
+    for (const {geometry, material} of chunks) {
+      bundle.add_node(SceneNode.from({parent: root, geometry, material}));
+    }
+    return bundle;
+  }
   release(name){const r=this.records.get(name);if(!r||r.refs<1)throw new Error(`Unbalanced scenery release ${name}`);r.refs--;r.lastUsed=this.time;}
   update(dt){
     this.time+=dt;

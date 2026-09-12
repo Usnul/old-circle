@@ -4,7 +4,15 @@ import {AcousticSolution} from '@woosh/meep-engine/src/engine/sound/simulation/c
 import {AcousticProbeField} from '@woosh/meep-engine/src/engine/sound/simulation/probe/AcousticProbeField.js';
 import {RayHit} from '@woosh/meep-engine/src/engine/sound/simulation/core/RayHit.js';
 import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
-import {createWorldAcoustics,AcousticTerrain} from './acoustics.mjs';
+import {createWorldAcoustics,AcousticTerrain,ACOUSTIC_MATERIALS} from './acoustics.mjs';
+import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
+import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
+import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
+import {TRANSFORM64_EVENT_CHANGE} from '@woosh/meep-engine/src/engine/ecs/transform/TRANSFORM64_EVENT_CHANGE.js';
+import {Name} from '@woosh/meep-engine/src/engine/ecs/name/Name.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
+import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {HeightMapShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
 import {buildAcousticTerrainSurface} from './acoustic-terrain-authoring.mjs';
@@ -12,6 +20,72 @@ import {encodeAcousticTerrainSurface,decodeAcousticTerrainSurface} from './acous
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {heightAt,WORLD_VERSION} from './regions.mjs';
 import baked from '../content/acoustic-probes.json' with {type:'json'};
+
+test('acoustics consumes live components and follows their pose and dataset lifecycle', async () => {
+  const entityManager = new EntityManager();
+  const dataset = new EntityComponentDataset();
+  dataset.registerManyComponentTypes([Transform64, Collider, Name]);
+  entityManager.attachDataset(dataset);
+  await new Promise((resolve, reject) => entityManager.startup(resolve, reject));
+
+  const entity = dataset.createEntity();
+  const transform = new Transform64();
+  transform.setTranslation(4, 0, 0);
+  transform.setScale(2, 1, 1);
+  transform.updateMatrix();
+  const collider = new Collider();
+  const shape = BoxShape3D.from(1, 1, 1);
+  collider.shape = shape;
+  const name = new Name('woodPlank');
+  dataset.addComponentToEntity(entity, transform);
+  dataset.addComponentToEntity(entity, collider);
+  dataset.addComponentToEntity(entity, name);
+
+  const world = await createWorldAcoustics(entityManager);
+  try {
+    expect(world.entityManager).toBe(entityManager);
+    expect(entityManager.dataset).toBe(dataset);
+    expect(dataset.entityCount).toBe(1);
+    expect(world.bodies).toBe(1);
+    expect(dataset.getComponent(entity, Transform64)).toBe(transform);
+    expect(dataset.getComponent(entity, Collider)).toBe(collider);
+    expect(dataset.getComponent(entity, Name)).toBe(name);
+    expect(collider.shape).toBe(shape);
+    const body = dataset.getComponent(entity, AcousticBody);
+    expect(body.material).toBe(ACOUSTIC_MATERIALS.wood);
+
+    const ray = new Ray3();
+    const hit = new RayHit();
+    ray.set([0, 0, 0, 1, 0, 0, 20]);
+    const intersects = () => world.simulator.occluderIndex.closestHit(ray, hit);
+    expect(intersects()).toBe(true);
+    expect(hit.position[0]).toBeCloseTo(2);
+
+    transform.setTranslation(10, 0, 0);
+    dataset.sendEvent(entity, TRANSFORM64_EVENT_CHANGE);
+    expect(intersects()).toBe(true);
+    expect(hit.position[0]).toBeCloseTo(8);
+
+    dataset.removeComponentFromEntity(entity, AcousticBody);
+    expect(intersects()).toBe(false);
+    dataset.addComponentToEntity(entity, body);
+    expect(intersects()).toBe(true);
+
+    entityManager.detachDataset();
+    expect(intersects()).toBe(false);
+    transform.setTranslation(14, 0, 0);
+    dataset.sendEvent(entity, TRANSFORM64_EVENT_CHANGE);
+    expect(intersects()).toBe(false);
+    entityManager.attachDataset(dataset);
+    expect(intersects()).toBe(true);
+    expect(hit.position[0]).toBeCloseTo(12);
+
+    dataset.removeEntity(entity);
+    expect(intersects()).toBe(false);
+  } finally {
+    await new Promise((resolve, reject) => entityManager.shutdown(resolve, reject));
+  }
+});
 
 test('baked native terrain BVH handles world-spanning rays without rebuilding or resampling the heightfield',()=>{
   const sampler=new Sampler2D(new Float32Array(241*321).fill(40),1,241,321);
@@ -32,8 +106,10 @@ test('baked native terrain BVH handles world-spanning rays without rebuilding or
   expect(()=>decodeAcousticTerrainSurface(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength-10))).toThrow('Malformed');
 });
 
-test('native acoustics distinguish an open doorway, stone partition, stacked floor and canonical terrain',async()=>{
-  const {simulator,bodies}=await createWorldAcoustics();expect(bodies).toBe(baked.bodies);expect(simulator.pathing).toBe(false);
+test('native acoustics distinguish an open doorway, stone partition, stacked floor and canonical terrain',async({onTestFinished})=>{
+  const {simulator,bodies,entityManager}=await createWorldAcoustics();
+  onTestFinished(() => new Promise((resolve, reject) => entityManager.shutdown(resolve, reject)));
+  expect(bodies).toBe(baked.bodies);expect(simulator.pathing).toBe(false);
   const solve=(listener,source)=>{const out=new AcousticSolution(),state=new AcousticSourceState();for(let i=0;i<12;i++)simulator.solveFor(listener,source,.05,state,out);return out;};
   const open=solve([35,5.8,-55],[28,5.8,-55]);expect(open.occlusion).toBeLessThan(.05);
   const wall=solve([35,5.8,-53],[28,5.8,-53]);expect(wall.occlusion).toBeGreaterThan(.95);expect(wall.transmission[0]).toBeGreaterThan(wall.transmission[2]);expect(wall.transmission[2]).toBeLessThan(.01);
@@ -43,8 +119,10 @@ test('native acoustics distinguish an open doorway, stone partition, stacked flo
   }
 });
 
-test('baked reverb selects visible probes on the correct dungeon storey without a pathing graph',async()=>{
-  const {simulator}=await createWorldAcoustics(),field=new AcousticProbeField();field.fromJSON(baked.field);
+test('baked reverb selects visible probes on the correct dungeon storey without a pathing graph',async({onTestFinished})=>{
+  const {simulator,entityManager}=await createWorldAcoustics();
+  onTestFinished(() => new Promise((resolve, reject) => entityManager.shutdown(resolve, reject)));
+  const field=new AcousticProbeField();field.fromJSON(baked.field);
   expect(baked.worldVersion).toBe(WORLD_VERSION);expect(field.hasVisibility).toBe(false);expect(field.size).toBeGreaterThan(500);
   const lower=field.nearestVisibleIndex(38,5.8,-66,simulator.occluderIndex),upper=field.nearestVisibleIndex(38,10.6,-72,simulator.occluderIndex);
   expect(field.probeY(lower)).toBeLessThan(8);expect(field.probeY(upper)).toBeGreaterThan(10);

@@ -1,8 +1,14 @@
-import {expect,test} from 'vitest';
+import {expect,test,vi} from 'vitest';
+import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
+import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
+import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
+import {Scene} from '@woosh/meep-engine/src/shade/renderer/scene/Scene.js';
+import {Scenery} from './scenery.mjs';
 import {readFile} from 'node:fs/promises';
 import {ModelStore} from './model-store.mjs';
 import {WorldStream,sceneryModel} from './world-stream.mjs';
-import {encodeScenery,propBounds} from './scenery-authoring.mjs';
+import {WorldGround} from './ground.mjs';
+import {encodeScenery,propBounds,propTransform} from './scenery-authoring.mjs';
 import {decodeScenery} from './scenery-data.mjs';
 import {WorldBanners} from './banners.mjs';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
@@ -16,11 +22,14 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
-import {pack_terrain_row_table} from '@woosh/meep-engine/src/engine/graphics3/terrain/pack_terrain_row_table.js';
 import {row_of_entity} from '@woosh/meep-engine/src/shade/renderer/scene/rows/GPUSceneRows.js';
 import {BVH} from '@woosh/meep-engine/src/core/bvh2/bvh3/BVH.js';
 import {ebvh_build_for_geometry_morton} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_build_for_geometry_morton.js';
 import {ebvh_geometry_query_nearest_triangle_ray} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_geometry_query_nearest_triangle_ray.js';
+
+// Exercise terrain row selection without initializing a GPU render pass.
+vi.mock('@woosh/meep-engine/src/engine/graphics3/TerrainSystem.js',()=>({TerrainExtension:class{}}));
+vi.mock('@woosh/meep-engine/src/engine/graphics3/terrain/GPUTerrainSplatRenderer.js',()=>({GPUTerrainSplatRenderer:class{}}));
 
 const base=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',base),'utf8'));
 const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{name:c.material}]));
@@ -189,17 +198,17 @@ test('distant dungeon geometry preserves the floors and walls visible in the det
 });
 
 test('travel selects local detail while preserving the complete terrain and landmark silhouettes',()=>{
-  const records=buildLayout().props.map(prop=>({prop,bounds:propBounds(prop,manifest),model:null}));
+  const records=buildLayout().props.map(prop=>({scenery:{model:prop.model,bounds:propBounds(prop,manifest)},transform:propTransform(prop),model:null}));
   for(const hearth of HEARTHS){
     const chosen=records.map(r=>sceneryModel(r,hearth.position,manifest));
-    expect(records.filter((r,i)=>r.prop.model.startsWith('terrain_')&&chosen[i])).toHaveLength(48);
-    expect(records.filter((r,i)=>r.prop.model.startsWith('terrain_')&&chosen[i]===r.prop.model).length).toBeLessThan(24);
+    expect(records.filter((r,i)=>r.scenery.model.startsWith('terrain_')&&chosen[i])).toHaveLength(48);
+    expect(records.filter((r,i)=>r.scenery.model.startsWith('terrain_')&&chosen[i]===r.scenery.model).length).toBeLessThan(24);
     expect(chosen.filter(Boolean).length).toBeLessThan(records.length*.55);
-    expect(records.filter(r=>r.prop.model==='halo').every(r=>sceneryModel(r,hearth.position,manifest))).toBe(true);
+    expect(records.filter(r=>r.scenery.model==='halo').every(r=>sceneryModel(r,hearth.position,manifest))).toBe(true);
   }
-  const r=records.find(r=>r.prop.model==='terrain_0_0');r.model=r.prop.model;
-  expect(sceneryModel(r,[210,20,40],manifest)).toBe(r.prop.model);
-  expect(sceneryModel({...r,model:null},[210,20,40],manifest)).toBe(manifest.lods[r.prop.model]);
+  const r=records.find(r=>r.scenery.model==='terrain_0_0');r.model=r.scenery.model;
+  expect(sceneryModel(r,[210,20,40],manifest)).toBe(r.scenery.model);
+  expect(sceneryModel({...r,model:null},[210,20,40],manifest)).toBe(manifest.lods[r.scenery.model]);
 });
 
 test('native model loading deduplicates requests, bounds I/O and releases only unreferenced scenery',async()=>{
@@ -212,22 +221,130 @@ test('native model loading deduplicates requests, bounds I/O and releases only u
   await store.load('terrain_0_0');expect(store.models.has('terrain_0_0')).toBe(true);
 });
 
-test('an in-flight replacement never removes the existing surface and stale travel loads are reclaimed',async()=>{
-  const prop={model:'terrain_0_0',position:[0,0,0],scale:[1,1,1],yaw:0},store=new ModelStore({manifest,materials,read});let id=0;const live=new Set();
-  const view={sceneryModel:name=>{expect(store.models.has(name)).toBe(true);const part={id:++id};live.add(part);return [part];},remove:parts=>{for(const p of parts)live.delete(p);}};
-  const layout={props:[prop],lights:[]},bytes=encodeScenery(layout,manifest),scenery=await decodeScenery(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),manifest);
-  const stream=new WorldStream(view,layout,store,scenery);await stream.start([0,10,0]);
-  const entities=stream.groundEntities,first=stream.records[0].parts[0].id;let rows=new Uint32Array(0);
-  const packedRows=()=>{const packed=pack_terrain_row_table({tiles:entities,table:rows});rows=packed.table;return Array.from(rows.subarray(0,packed.size)).flatMap((value,row)=>value?[row]:[]);};
-  expect(entities).toEqual([first]);expect(packedRows()).toEqual([row_of_entity(first)]);
-  stream.update({x:400,y:20,z:400},.1);expect(live.size).toBe(1);expect(stream.records[0].model).toBe(prop.model);
-  await Promise.all(stream.loading.values());stream.update({x:400,y:20,z:400},.1);expect(stream.records[0].model).toBe(manifest.lods[prop.model]);expect(live.size).toBe(1);
-  const replacement=stream.records[0].parts[0].id;expect(replacement).not.toBe(first);
-  expect(stream.groundEntities).toBe(entities);expect(entities).toEqual([replacement]);expect(packedRows()).toEqual([row_of_entity(replacement)]);
-  expect(rows[row_of_entity(first)]).toBe(0);
-  for(let i=0;i<60;i++)stream.update({x:400,y:20,z:400},.1);
-  expect(store.models.has(prop.model)).toBe(false);expect(stream.groundEntities).toHaveLength(1);
-  stream.replace(stream.records[0],null);stream.rebuildGround();expect(entities).toEqual([]);expect(packedRows()).toEqual([]);
+async function startStream(prop, store, extraView = {}) {
+  const layout = {props: [prop], lights: []};
+  const bytes = encodeScenery(layout, manifest);
+  const ecd = await decodeScenery(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), manifest);
+  const em = new EntityManager();
+  em.attachDataset(ecd);
+  em.addSystem(new TransformAttachmentSystem());
+  const graphics = {set_scene() {}, scene_context: () => null};
+  const meshSystem = new MeshSystem(graphics, new Scene(), async name => store.bundle(name));
+  const view = {ecd, meshSystem, ...extraView};
+  const stream = new WorldStream(view, layout, store);
+  em.addSystem(stream);
+  await new Promise((resolve, reject) => em.startup(resolve, reject));
+  await stream.start(prop.position);
+  await em.addSystem(meshSystem);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  stream.rebuildGround();
+  return {stream, ecd, em, meshSystem};
+}
+
+const stopManager = em => new Promise((resolve, reject) => em.shutdown(resolve, reject));
+
+test('detaching scenery consumers preserves authored components and reattaches native meshes', async () => {
+  const prop = {model: 'terrain_0_0', position: [0, 0, 0], scale: [1, 1, 1], yaw: 0};
+  const store = new ModelStore({manifest, materials, read, residentCache: true});
+  const {stream, ecd, em, meshSystem} = await startStream(prop, store);
+  const root = stream.records[0].entity;
+  const scenery = ecd.getComponent(root, Scenery);
+  const transform = ecd.getComponent(root, Transform64);
+  const mesh = ecd.getComponent(root, SGMesh);
+  mesh.flags = 0;
+  try {
+    expect(store.records.get(prop.model).refs).toBe(1);
+    em.detachDataset();
+    expect(stream.records).toHaveLength(0);
+    expect(store.records.get(prop.model).refs).toBe(0);
+    expect(meshSystem.mesh_entities_of(root)).toHaveLength(0);
+    expect(ecd.getComponent(root, Scenery)).toBe(scenery);
+    expect(ecd.getComponent(root, Transform64)).toBe(transform);
+    expect(ecd.getComponent(root, SGMesh)).toBe(mesh);
+    expect(mesh.flags).toBe(0);
+
+    em.attachDataset(ecd);
+    await stream.start(prop.position);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    stream.rebuildGround();
+    expect(stream.records).toHaveLength(1);
+    expect(stream.records[0].scenery).toBe(scenery);
+    expect(stream.records[0].transform).toBe(transform);
+    expect(ecd.getComponent(root, SGMesh)).toBe(mesh);
+    expect(mesh.flags).toBe(0);
+    expect(store.records.get(prop.model).refs).toBe(1);
+    expect(stream.groundEntities).toHaveLength(1);
+
+    const instance = meshSystem.instance_of(root);
+    await em.removeSystem(stream);
+    expect(ecd.getComponent(root, SGMesh)).toBe(mesh);
+    expect(meshSystem.instance_of(root)).toBe(instance);
+    expect(store.records.get(prop.model).refs).toBe(0);
+    await em.addSystem(stream);
+    await stream.start(prop.position);
+    expect(store.records.get(prop.model).refs).toBe(1);
+    expect(meshSystem.instance_of(root)).toBe(instance);
+  } finally {
+    await stopManager(em);
+  }
+});
+
+test('LOD loading preserves the live placement and keeps the old surface until its replacement is available', async () => {
+  const prop = {model: 'terrain_0_0', position: [0, 0, 0], scale: [1, 1, 1], yaw: 0};
+  const store = new ModelStore({manifest, materials, read, residentCache: true});
+  const {stream, ecd, em, meshSystem} = await startStream(prop, store);
+  try {
+    const record = stream.records[0];
+    const root = record.entity;
+    const transform = ecd.getComponent(root, Transform64);
+    const scenery = ecd.getComponent(root, Scenery);
+    const entities = stream.groundEntities;
+    const firstInstance = meshSystem.instance_of(root);
+    expect(entities).toHaveLength(1);
+    const first = entities[0];
+    const ground = new WorldGround();
+    ground.getEntities = () => stream.rebuildGround();
+    ground.rows = new Uint32Array(0);
+    ground.data = {};
+    let renderedRows = [];
+    ground.pass = {graph_draw({rows, row_count}) {
+      renderedRows = Array.from(rows.subarray(0, row_count)).flatMap((value, row) => value ? [row] : []);
+    }};
+    const packedRows = () => {
+      renderedRows = [];
+      ground.record({});
+      return renderedRows;
+    };
+    expect(packedRows()).toEqual([row_of_entity(first)]);
+
+    const far = {x: 400, y: 20, z: 400};
+    stream.updateView(far, .1);
+    expect(meshSystem.instance_of(root)).toBe(firstInstance);
+    expect(ecd.getComponent(root, SGMesh).url).toBe(prop.model);
+    await Promise.all(stream.loading.values());
+    stream.updateView(far, .1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // The native children arrive between presentation updates. Rendering must
+    // discover them without another updateView or an explicit terrain rebuild.
+    expect(packedRows()).toEqual([...meshSystem.mesh_entities_of(root)].map(row_of_entity));
+    expect(meshSystem.instance_of(root)).not.toBe(firstInstance);
+    expect(ecd.getComponent(root, SGMesh).url).toBe(manifest.lods[prop.model]);
+    expect(ecd.getComponent(root, Transform64)).toBe(transform);
+    expect(ecd.getComponent(root, Scenery)).toBe(scenery);
+    expect(record.entity).toBe(root);
+    expect(stream.groundEntities).toBe(entities);
+    expect(entities).toHaveLength(1);
+    expect(packedRows()).toEqual([row_of_entity(entities[0])]);
+    for (let i = 0; i < 60; i++) stream.updateView(far, .1);
+    expect(store.models.has(prop.model)).toBe(false);
+    stream.replace(record, null);
+    expect(packedRows()).toEqual([]);
+    expect(entities).toEqual([]);
+    expect(ecd.entityExists(root)).toBe(true);
+    expect(ecd.getComponent(root, Transform64)).toBe(transform);
+  } finally {
+    await stopManager(em);
+  }
 });
 
 test('repeated travel reuses registered geometry identities with the append-only native BLAS arena',async()=>{
@@ -245,16 +362,41 @@ test('wind-driven banners pause and reuse their native skin when the player trav
   banners.update(.1,{x:0,y:0,z:0});expect(banners.banners[0].id).toBe(first);expect(ecd.getComponent(first,Cloth)).toBeDefined();
 });
 
-test('suspended halo trails follow the placed ring and release their emitters after distant travel',async()=>{
-  const prop={model:'halo',position:[20,45,-10],scale:[2,2,2],yaw:Math.PI/2},store=new ModelStore({manifest,materials,read}),ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64]);
-  const view={ecd,sceneryModel:()=>[],remove:()=>{},emitter:(kind,p,rate)=>{
-    expect(kind).toBe('levitation');expect(rate).toBe(30);const t=new Transform64();t.setTranslation(...p);const id=ecd.createEntity();ecd.addComponentToEntity(id,t);return {id,t};
+test('suspended halo trails follow their persistent placement and release distant emitters', async () => {
+  const prop = {model: 'halo', position: [20, 45, -10], scale: [2, 2, 2], yaw: Math.PI / 2};
+  const store = new ModelStore({manifest, materials, read, residentCache: true});
+  let ecd;
+  const view = {emitter(kind, position, rate) {
+    expect(kind).toBe('levitation');
+    expect(rate).toBe(30);
+    const t = new Transform64();
+    t.setTranslation(...position);
+    const id = ecd.createEntity();
+    ecd.addComponentToEntity(id, t);
+    return {id, t};
   }};
-  const layout={props:[prop],lights:[]},bytes=encodeScenery(layout,manifest),scenery=await decodeScenery(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),manifest),stream=new WorldStream(view,layout,store,scenery);
-  await stream.start(prop.position);stream.update({x:20,y:40,z:-10},.1);
-  const halo=stream.halos[0],emitters=halo.emitters,first=Array.from(emitters[0].t.translation);
-  expect(emitters).toHaveLength(6);expect(ecd.entityCount).toBe(6);
-  for(const e of emitters){const [x,y,z]=e.t.translation;expect(Math.abs(x-20)).toBeCloseTo(.68,3);expect(Math.hypot(y-45,z+10)).toBeCloseTo(9.24,3);}
-  stream.update({x:20,y:40,z:-10},1);expect(Array.from(emitters[0].t.translation)).not.toEqual(first);expect(halo.emitters).toBe(emitters);
-  stream.update({x:1000,y:0,z:0},.1);expect(halo.emitters).toBeNull();expect(ecd.entityCount).toBe(0);
+  const active = await startStream(prop, store, view);
+  ecd = active.ecd;
+  const {stream, em} = active;
+  try {
+    const baseCount = ecd.entityCount;
+    stream.updateView({x: 20, y: 40, z: -10}, .1);
+    const halo = stream.halos[0], emitters = halo.emitters;
+    const first = Array.from(emitters[0].t.translation);
+    expect(emitters).toHaveLength(6);
+    expect(ecd.entityCount).toBe(baseCount + 6);
+    for (const e of emitters) {
+      const [x, y, z] = e.t.translation;
+      expect(Math.abs(x - 20)).toBeCloseTo(.68, 3);
+      expect(Math.hypot(y - 45, z + 10)).toBeCloseTo(9.24, 3);
+    }
+    stream.updateView({x: 20, y: 40, z: -10}, 1);
+    expect(Array.from(emitters[0].t.translation)).not.toEqual(first);
+    expect(halo.emitters).toBe(emitters);
+    stream.updateView({x: 1000, y: 0, z: 0}, .1);
+    expect(halo.emitters).toBeNull();
+    expect(ecd.entityCount).toBe(baseCount);
+  } finally {
+    await stopManager(em);
+  }
 });

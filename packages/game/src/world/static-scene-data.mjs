@@ -9,7 +9,6 @@ import {ColliderSerializationAdapter} from '@woosh/meep-engine/src/engine/physic
 import {NameSerializationAdapter} from '@woosh/meep-engine/src/engine/ecs/name/NameSerializationAdapter.js';
 import {Name} from '@woosh/meep-engine/src/engine/ecs/name/Name.js';
 import {EntityObserver} from '@woosh/meep-engine/src/engine/ecs/EntityObserver.js';
-import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
@@ -65,44 +64,45 @@ export async function decodeStaticScene(bytes,dataset,assets,{startSystems}={}){
   return {solids,contactSurfaces,terrainEntity};
 }
 
-// Collider's native adapter deliberately excludes its immutable shape asset.
-// Bake transformed hull vertices once, then prepare each shared native shape
-// once per realm. Mutable ECS components are always deserialized per world.
+// Shape assets are immutable and shared within a realm. Each live physics world
+// owns its mutable components; the presentation bake already contains its entities.
+async function readStaticAsset(url) {
+  if (url.protocol === 'file:') {
+    const {readFile} = await import('node:fs/promises');
+    const data = await readFile(url);
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Could not load static world');
+  return response.arrayBuffer();
+}
+
 let prepared;
-async function staticSceneAssets(){
-  return prepared??=(async()=>{
-    async function read(url){
-      if(url.protocol==='file:'){const {readFile}=await import('node:fs/promises'),data=await readFile(url);return data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);}
-      const response=await fetch(url);if(!response.ok)throw new Error('Could not load static world');return response.arrayBuffer();
+export async function loadStaticSceneAssets() {
+  return prepared ??= (async () => {
+    const [shapeBytes, terrain] = await Promise.all([
+      readStaticAsset(new URL('../content/static-shapes.json', import.meta.url)),
+      loadTerrain()
+    ]);
+    const assets = JSON.parse(new TextDecoder().decode(shapeBytes));
+    if (assets.worldVersion !== WORLD_VERSION || !Array.isArray(assets.shapes) || !Array.isArray(assets.bindings)) {
+      throw new Error('Static collider assets need rebuilding');
     }
-    const [bytes,shapeBytes,terrain]=await Promise.all([read(new URL('../content/static-scene.bin',import.meta.url)),read(new URL('../content/static-shapes.json',import.meta.url)),loadTerrain()]);
-    const assets=JSON.parse(new TextDecoder().decode(shapeBytes));
-    if(assets.worldVersion!==WORLD_VERSION||!Array.isArray(assets.shapes)||!Array.isArray(assets.bindings))throw new Error('Static collider assets need rebuilding');
-    const shapes=[];
-    await run(countTask(0,assets.shapes.length,index=>{
-      const asset=assets.shapes[index];
-      if(asset.terrain){
-        shapes[index]=HeightMapShape3D.from(terrain.sampler,WORLD_BOUNDS.width,asset.height,WORLD_BOUNDS.depth);
-      }else{
-        shapes[index]=ConvexHullShape3D.from(new Float32Array(asset.vertices),new Uint32Array(asset.indices));
-      }
+    const shapes = [];
+    await run(countTask(0, assets.shapes.length, index => {
+      const asset = assets.shapes[index];
+      shapes[index] = asset.terrain
+        ? HeightMapShape3D.from(terrain.sampler, WORLD_BOUNDS.width, asset.height, WORLD_BOUNDS.depth)
+        : ConvexHullShape3D.from(new Float32Array(asset.vertices), new Uint32Array(asset.indices));
     }));
-    return {bytes,worldVersion:assets.worldVersion,bindings:assets.bindings,shapes};
-  })().catch(error=>{prepared=undefined;throw error;});
+    return {worldVersion: assets.worldVersion, bindings: assets.bindings, shapes};
+  })().catch(error => { prepared = undefined; throw error; });
 }
 
-export async function loadStaticScene(dataset,options){
-  const assets=await staticSceneAssets();
-  return decodeStaticScene(assets.bytes,dataset,assets,options);
-}
-
-let geometry;
-export function loadStaticSceneGeometry(){
-  return geometry??=(async()=>{
-    const dataset=new EntityComponentDataset();await loadStaticScene(dataset);const bodies=[];
-    dataset.traverseEntities([Transform64,Collider,Name],(transform,collider,name)=>{
-      bodies.push({model:name.getValue(),position:Array.from(transform.translation),shape:collider.shape});
-    });
-    return bodies;
-  })().catch(error=>{geometry=undefined;throw error;});
+let entityBytes;
+export async function loadStaticScene(dataset, options) {
+  entityBytes ??= readStaticAsset(new URL('../content/static-scene.bin', import.meta.url))
+    .catch(error => { entityBytes = undefined; throw error; });
+  const [assets, bytes] = await Promise.all([loadStaticSceneAssets(), entityBytes]);
+  return decodeStaticScene(bytes, dataset, assets, options);
 }

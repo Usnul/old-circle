@@ -70,4 +70,4 @@ const {bakeAcousticTerrain}=await import('../packages/game/src/world/acoustic-te
 await writeChanged(resolve(root,'packages/game/src/content/acoustic-terrain.bin'),bakeAcousticTerrain());
 const {encodeScenery}=await import('../packages/client/src/render/scenery-authoring.mjs');
 const {buildLayout}=await import('../packages/game/src/world/layout.mjs');
-await writeChanged(resolve(out,'scenery.bin'),encodeScenery(buildLayout(),manifest));
+await writeChanged(resolve(out,'scenery.bin'),encodeScenery(buildLayout(),manifest,staticScene.dataset));

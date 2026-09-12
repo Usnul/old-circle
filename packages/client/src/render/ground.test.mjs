@@ -16,14 +16,15 @@ function ground(layers,width=1,height=1){
 const point=(u=.5,v=.5)=>[WORLD_BOUNDS.minX+u*WORLD_BOUNDS.width,WORLD_BOUNDS.minZ+v*WORLD_BOUNDS.depth];
 const sample=g=>g.surfaceMixAt(...point());
 
-test('terrain recording packs live entity rows and excludes removed tiles after a streamed rebuild',()=>{
-  const g=new WorldGround(),entities=[2,9],draws=[];
-  g.entities=entities;g.rows=new Uint32Array(0);g.data={layer_count:1};
+test('terrain recording resolves current entity rows and excludes removed tiles',()=>{
+  const g=new WorldGround(),draws=[];
+  let entities=[2,9];
+  g.getEntities=()=>entities;g.rows=new Uint32Array(0);g.data={layer_count:1};
   g.pass={graph_draw:args=>draws.push({...args,rows:Array.from(args.rows.subarray(0,args.row_count))})};
   const frame={};g.record(frame);
   expect(draws[0].frame).toBe(frame);expect(draws[0].row_count).toBe(row_of_entity(9)+1);
   expect(draws[0].rows.flatMap((value,row)=>value?[row]:[])).toEqual([row_of_entity(2),row_of_entity(9)]);
-  const table=g.rows;entities.splice(0,entities.length,5);g.record(frame);
+  const table=g.rows;entities=[5];g.record(frame);
   expect(g.rows).toBe(table);expect(draws[1].row_count).toBe(row_of_entity(5)+1);
   expect(draws[1].rows.flatMap((value,row)=>value?[row]:[])).toEqual([row_of_entity(5)]);
   entities.length=0;g.record(frame);expect(draws).toHaveLength(2);

@@ -28,5 +28,5 @@ export function encodeStaticScene(layout=buildLayout()){
   }
   const buffer=new BinaryBuffer();buffer.writeUint32(1);buffer.writeUint32(WORLD_VERSION);buffer.writeUint32(dataset.entityCount);
   const serializer=new BinaryBufferSerializer();serializer.registry=staticSceneRegistry();serializer.process(buffer,dataset);
-  return {entities:new Uint8Array(buffer.data,0,buffer.position),shapes:{worldVersion:WORLD_VERSION,shapes,bindings}};
+  return {dataset,entities:new Uint8Array(buffer.data,0,buffer.position),shapes:{worldVersion:WORLD_VERSION,shapes,bindings}};
 }
