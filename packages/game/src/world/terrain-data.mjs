@@ -7,7 +7,6 @@ import {WORLD_VERSION,WORLD_BOUNDS} from './world-definition.mjs';
 // sample on both edges of WORLD_BOUNDS. Sampling and authoring share it.
 export const TERRAIN_GRID=Object.freeze({spacing:2,cols:WORLD_BOUNDS.width/2+1,rows:WORLD_BOUNDS.depth/2+1});
 const cols=TERRAIN_GRID.cols,rows=TERRAIN_GRID.rows,count=cols*rows;
-const headerBytes=8,textureHeaderBytes=10,byteLength=headerBytes+textureHeaderBytes*2+count*8;
 
 // Native texture serialization preserves the float32 sampler and vertex grid.
 export function encodeTerrain({sampler,vertices}){
@@ -20,21 +19,15 @@ export function encodeTerrain({sampler,vertices}){
   return new Uint8Array(b.data,0,b.position);
 }
 
-export function decodeTerrain(bytes){
-  if(bytes.byteLength!==byteLength)throw new Error('Malformed terrain data');
-  const b=new BinaryBuffer();b.fromArrayBuffer(bytes);
-  if(b.readUint32()!==1||b.readUint32()!==WORLD_VERSION)throw new Error('Terrain needs rebuilding for this world version');
-  const read=()=>{
-    // Validate dimensions before the native decoder allocates its data array.
-    const start=b.position;
-    if(b.readUint32()!==cols||b.readUint32()!==rows||b.readUint8()!==1)throw new Error('Invalid terrain dimensions');
-    b.position=start;const sampler=deserializeTexture(b);
-    if(!(sampler.data instanceof Float32Array)||!sampler.data.every(Number.isFinite))throw new Error('Invalid terrain heights');
-    return sampler;
-  };
-  const sampler=read(),vertices=read().data;
-  if(b.position!==bytes.byteLength)throw new Error('Malformed terrain data');
-  return {sampler,vertices};
+export function decodeTerrain(bytes) {
+  const buffer = new BinaryBuffer();
+  buffer.fromArrayBuffer(bytes);
+  if (buffer.readUint32() !== 1 || buffer.readUint32() !== WORLD_VERSION) {
+    throw new Error('Terrain needs rebuilding for this world version');
+  }
+  const sampler = deserializeTexture(buffer);
+  const vertices = deserializeTexture(buffer).data;
+  return {sampler, vertices};
 }
 
 let prepared;

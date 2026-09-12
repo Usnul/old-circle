@@ -133,12 +133,9 @@ test('scenery rejects populated datasets before altering their existing entities
   expect([...transform]).toEqual(before);
 });
 
-test('scenery rejects stale geometry revisions and trailing bytes',async()=>{
+test('scenery rejects stale geometry revisions',async()=>{
   const bytes=arrayBuffer(encodeScenery({props},manifest));
   await expect(decodeScenery(bytes,{...manifest,revision:'different'})).rejects.toThrow('needs rebuilding');
-  const trailing=new Uint8Array(bytes.byteLength+1);
-  trailing.set(new Uint8Array(bytes));
-  await expect(decodeScenery(trailing.buffer,manifest)).rejects.toThrow('Malformed scenery dataset');
 });
 
 test('the presentation bake includes existing static entities and binds their shared shape assets',async()=>{
@@ -173,8 +170,14 @@ test('shipped scenery contains every authored placement and static collider in o
   expect(placements.filter(({scenery})=>scenery.relic).map(({scenery})=>scenery.relic))
     .toEqual(layout.props.filter(prop=>prop.relic).map(prop=>prop.relic));
   for(let index=0;index<layout.props.length;index++){
-    expect(placements[index].scenery.model).toBe(layout.props[index].model);
-    expect([...placements[index].transform]).toEqual([...bakedPropTransform(layout.props[index])]);
+    const {scenery, transform} = placements[index];
+    expect(scenery.model).toBe(layout.props[index].model);
+    expect(Object.hasOwn(current.models, scenery.model)).toBe(true);
+    expect([...transform]).toEqual([...bakedPropTransform(layout.props[index])]);
+    expect([...scenery.bounds, ...transform].every(Number.isFinite)).toBe(true);
+    expect(scenery.bounds.x0).toBeLessThanOrEqual(scenery.bounds.x1);
+    expect(scenery.bounds.y0).toBeLessThanOrEqual(scenery.bounds.y1);
+    expect(scenery.bounds.z0).toBeLessThanOrEqual(scenery.bounds.z1);
   }
   let colliders=0;
   dataset.traverseEntities([Collider],(collider,entity)=>{

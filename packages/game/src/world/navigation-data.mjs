@@ -17,29 +17,60 @@ export function encodeNavigation(atlas){
   return new Uint8Array(b.data,0,b.position);
 }
 
-export function decodeNavigation(bytes,{maxTiles=32}={}){
-  if(!Number.isInteger(maxTiles)||maxTiles<1)throw new Error('Invalid navigation cache budget');
-  const b=new BinaryBuffer();b.fromArrayBuffer(bytes);
-  if(b.readUint32()!==1||b.readUint32()!==WORLD_VERSION)throw new Error('Navigation needs rebuilding for this world version');
-  const spacing=b.readFloat32(),vertexValues=b.readUint32(),indexValues=b.readUint32();
-  if(vertexValues%3||indexValues%3||vertexValues+indexValues>2000000||20+4*(vertexValues+indexValues)!==bytes.byteLength)throw new Error('Malformed navigation geometry');
-  const positions=new Float32Array(vertexValues),indices=new Uint32Array(indexValues);
-  b.readFloat32Array(positions,0,vertexValues);b.readUint32Array(indices,0,indexValues);
-  if(!positions.every(Number.isFinite)||!indices.every(i=>i<vertexValues/3))throw new Error('Malformed navigation vertices');
-  const tiles=new Cache({maxWeight:maxTiles,keyHashFunction:computeStringHash,keyEqualityFunction:strictEquals});
-  return {spacing,faceCount:indexValues/3,cacheStats:()=>({tiles:tiles.size(),maxTiles}),tile(home){
-    const x=Math.floor(home[0]/40)*40,z=Math.floor(home[2]/40)*40,key=`${x},${z}`;
-    const cached=tiles.get(key);if(cached!==null)return cached;
-    const bounds=[x-32,z-32,x+72,z+72],vertices=[],faces=[],mapping=new Map();
-    for(let i=0;i<indices.length;i+=3){
-      const corners=[indices[i],indices[i+1],indices[i+2]];
-      if(!corners.every(j=>positions[j*3]>=bounds[0]&&positions[j*3]<=bounds[2]&&positions[j*3+2]>=bounds[1]&&positions[j*3+2]<=bounds[3]))continue;
-      for(const j of corners){if(!mapping.has(j)){mapping.set(j,vertices.length/3);vertices.push(...positions.subarray(j*3,j*3+3));}faces.push(mapping.get(j));}
+export function decodeNavigation(bytes, {maxTiles = 32} = {}) {
+  if (!Number.isInteger(maxTiles) || maxTiles < 1) throw new Error('Invalid navigation cache budget');
+  const buffer = new BinaryBuffer();
+  buffer.fromArrayBuffer(bytes);
+  if (buffer.readUint32() !== 1 || buffer.readUint32() !== WORLD_VERSION) {
+    throw new Error('Navigation needs rebuilding for this world version');
+  }
+  const spacing = buffer.readFloat32();
+  const vertexValues = buffer.readUint32();
+  const indexValues = buffer.readUint32();
+  const positions = new Float32Array(vertexValues);
+  const indices = new Uint32Array(indexValues);
+  buffer.readFloat32Array(positions, 0, vertexValues);
+  buffer.readUint32Array(indices, 0, indexValues);
+  const tiles = new Cache({maxWeight: maxTiles, keyHashFunction: computeStringHash, keyEqualityFunction: strictEquals});
+
+  return {
+    spacing,
+    faceCount: indexValues / 3,
+    cacheStats: () => ({tiles: tiles.size(), maxTiles}),
+    tile(home) {
+      const x = Math.floor(home[0] / 40) * 40;
+      const z = Math.floor(home[2] / 40) * 40;
+      const key = `${x},${z}`;
+      const cached = tiles.get(key);
+      if (cached !== null) return cached;
+      const bounds = [x - 32, z - 32, x + 72, z + 72];
+      const vertices = [];
+      const faces = [];
+      const mapping = new Map();
+      for (let index = 0; index < indices.length; index += 3) {
+        const corners = [indices[index], indices[index + 1], indices[index + 2]];
+        const inside = corners.every(vertex => positions[vertex * 3] >= bounds[0]
+          && positions[vertex * 3] <= bounds[2]
+          && positions[vertex * 3 + 2] >= bounds[1]
+          && positions[vertex * 3 + 2] <= bounds[3]);
+        if (!inside) continue;
+        for (const vertex of corners) {
+          if (!mapping.has(vertex)) {
+            mapping.set(vertex, vertices.length / 3);
+            vertices.push(...positions.subarray(vertex * 3, vertex * 3 + 3));
+          }
+          faces.push(mapping.get(vertex));
+        }
+      }
+      const atlas = new SpatialAtlas(null, {bounds, spacing});
+      atlas.nav = new NavigationMesh();
+      bt_mesh_from_indexed_geometry(atlas.nav.topology, faces, vertices);
+      bt_mesh_build_face_bvh(atlas.nav.bvh, atlas.nav.topology);
+      atlas.faceCount = faces.length / 3;
+      tiles.put(key, atlas);
+      return atlas;
     }
-    const atlas=new SpatialAtlas(null,{bounds,spacing});atlas.nav=new NavigationMesh();
-    bt_mesh_from_indexed_geometry(atlas.nav.topology,faces,vertices);bt_mesh_build_face_bvh(atlas.nav.bvh,atlas.nav.topology);atlas.faceCount=faces.length/3;
-    tiles.put(key,atlas);return atlas;
-  }};
+  };
 }
 
 let prepared;

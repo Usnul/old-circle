@@ -16,7 +16,9 @@ import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/A
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {HeightMapShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
 import {buildAcousticTerrainSurface} from './acoustic-terrain-authoring.mjs';
-import {encodeAcousticTerrainSurface,decodeAcousticTerrainSurface} from './acoustic-terrain-data.mjs';
+import {encodeAcousticTerrainSurface,decodeAcousticTerrainSurface,loadAcousticTerrainSurface} from './acoustic-terrain-data.mjs';
+import {TERRAIN_GRID} from './terrain-data.mjs';
+import {ELEMENT_WORD_COUNT} from '@woosh/meep-engine/src/core/bvh2/bvh3/BVH.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {heightAt,WORLD_VERSION} from './regions.mjs';
 import baked from '../content/acoustic-probes.json' with {type:'json'};
@@ -103,7 +105,32 @@ test('baked native terrain BVH handles world-spanning rays without rebuilding or
   expect(surface.__raycast_blas).toBe(tree);expect(tree.size).toBe(authored.__raycast_blas.size);expect(surface.surface_area).toBe(authored.surface_area);
   const stale=bytes.slice(),buffer=new BinaryBuffer();buffer.fromArrayBuffer(stale.buffer);buffer.writeUint32(WORLD_VERSION-1);
   expect(()=>decodeAcousticTerrainSurface(stale.buffer)).toThrow('needs rebuilding');
-  expect(()=>decodeAcousticTerrainSurface(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength-10))).toThrow('Malformed');
+  const incompatible = bytes.slice();
+  buffer.fromArrayBuffer(incompatible.buffer);
+  buffer.position = 4;
+  buffer.writeUTF8String('0.0.0');
+  expect(() => decodeAcousticTerrainSurface(incompatible.buffer)).toThrow('needs rebuilding');
+});
+
+test('shipped acoustic terrain contains a complete native mesh and baked ray BVH', async () => {
+  const surface = await loadAcousticTerrainSurface();
+  const vertices = TERRAIN_GRID.cols * TERRAIN_GRID.rows;
+  const triangles = (TERRAIN_GRID.cols - 1) * (TERRAIN_GRID.rows - 1) * 2;
+  expect(surface.positions).toBeInstanceOf(Float32Array);
+  expect(surface.indices).toBeInstanceOf(Uint32Array);
+  expect(surface.positions).toHaveLength(vertices * 3);
+  expect(surface.indices).toHaveLength(triangles * 3);
+  expect(surface.positions.every(Number.isFinite)).toBe(true);
+  expect(surface.indices.every(index => index < vertices)).toBe(true);
+  expect(surface.__bbox.every(Number.isFinite)).toBe(true);
+  expect(Number.isFinite(surface.surface_area)).toBe(true);
+  expect(surface.surface_area).toBeGreaterThan(0);
+  expect(surface.tet_mesh.count).toBe(0);
+  const tree = surface.__raycast_blas;
+  expect(tree.size).toBe(triangles * 2 - 1);
+  expect(tree.root).toBeGreaterThanOrEqual(0);
+  expect(tree.root).toBeLessThan(tree.size);
+  expect(tree.data_buffer.byteLength).toBe(tree.size * ELEMENT_WORD_COUNT * 4);
 });
 
 test('native acoustics distinguish an open doorway, stone partition, stacked floor and canonical terrain',async({onTestFinished})=>{

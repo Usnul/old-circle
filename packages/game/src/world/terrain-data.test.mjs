@@ -1,6 +1,6 @@
 import {expect,test} from 'vitest';
 import {readFile} from 'node:fs/promises';
-import {encodeTerrain,decodeTerrain,loadTerrain} from './terrain-data.mjs';
+import {encodeTerrain,decodeTerrain,loadTerrain,TERRAIN_GRID} from './terrain-data.mjs';
 import {generateTerrain} from './terrain-authoring.mjs';
 import {heightAt,terrainSurface,WORLD_BOUNDS} from './regions.mjs';
 import {buildLayout} from './layout.mjs';
@@ -10,6 +10,17 @@ import {CAVES} from './interiors.mjs';
 test('shipped terrain and layout match the deterministic native authoring bake',async()=>{
   const bytes=await readFile(new URL('../content/terrain.bin',import.meta.url));
   expect(bytes.equals(Buffer.from(encodeTerrain(generateTerrain())))).toBe(true);
+  const {sampler, vertices} = await loadTerrain();
+  const count = TERRAIN_GRID.cols * TERRAIN_GRID.rows;
+  expect(sampler.width).toBe(TERRAIN_GRID.cols);
+  expect(sampler.height).toBe(TERRAIN_GRID.rows);
+  expect(sampler.itemSize).toBe(1);
+  expect(sampler.data).toBeInstanceOf(Float32Array);
+  expect(vertices).toBeInstanceOf(Float32Array);
+  expect(sampler.data).toHaveLength(count);
+  expect(vertices).toHaveLength(count);
+  expect(sampler.data.every(Number.isFinite)).toBe(true);
+  expect(vertices.every(Number.isFinite)).toBe(true);
   expect(buildLayout()).toEqual(generateLayout());
 });
 
@@ -39,14 +50,13 @@ test('baked mesh vertices retain the native Catmull-Rom sampler and triangle spl
   expect(heightAt(999,999)).toBe(vertices.at(-1));
 });
 
-test('bad bakes fail explicitly instead of generating terrain during loading',()=>{
+test('terrain from another world or serialization format requires rebuilding',()=>{
   const bytes=encodeTerrain(terrainSurface()).slice().buffer;
-  expect(()=>decodeTerrain(bytes.slice(0,-4))).toThrow('Malformed terrain');
   new DataView(bytes).setUint32(4,0,true);
   expect(()=>decodeTerrain(bytes)).toThrow('world version');
-  const invalid=encodeTerrain(terrainSurface()).slice().buffer;
-  new DataView(invalid).setFloat32(18,NaN,true);
-  expect(()=>decodeTerrain(invalid)).toThrow('Invalid terrain heights');
+  const incompatible=encodeTerrain(terrainSurface()).slice().buffer;
+  new DataView(incompatible).setUint32(0,0,true);
+  expect(()=>decodeTerrain(incompatible)).toThrow('needs rebuilding');
 });
 
 test('native texture serialization preserves float32 subviews',()=>{

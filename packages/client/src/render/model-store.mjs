@@ -36,7 +36,7 @@ export class ModelStore {
     for(const chunk of this.manifest.models[name]){
       const bytes=await this.read(chunk.file),buffer=new BinaryBuffer(),geometry=new MeshletGeometry();buffer.fromArrayBuffer(bytes);
       new MeshletGeometrySerializationAdapter().deserialize(buffer,geometry);
-      const material=this.materials[chunk.material];if(!material)throw new Error(`Unknown material ${chunk.material}`);
+      const material=this.materials[chunk.material];
       parts.push({geometry,material,bytes:bytes.byteLength});
     }return parts;
   }

@@ -10,11 +10,11 @@ import {DUNGEONS,dungeonPoint,dungeonFloors,floorHeight} from './dungeons.mjs';
 import {WORLD_VERSION,heightAt} from './regions.mjs';
 import {SpatialAtlas} from './spatial-atlas.mjs';
 
-function atlasFor(d,geometry){
+function atlasFor(id,geometry){
   const xs=geometry.positions.filter((_,i)=>i%3===0),zs=geometry.positions.filter((_,i)=>i%3===2);
   const atlas=new SpatialAtlas(null,{bounds:[Math.min(...xs)-1,Math.min(...zs)-1,Math.max(...xs)+1,Math.max(...zs)+1],spacing:.5});
   bt_mesh_from_indexed_geometry(atlas.nav.topology,geometry.indices,geometry.positions);bt_mesh_build_face_bvh(atlas.nav.bvh,atlas.nav.topology);
-  atlas.geometry=geometry;atlas.faceCount=geometry.indices.length/3;atlas.id=d.id;return atlas;
+  atlas.geometry=geometry;atlas.faceCount=geometry.indices.length/3;atlas.id=id;return atlas;
 }
 /** Every authored layer is sampled independently; an upper floor never replaces
  * the lower floor at the same X/Z. Meep overlap rejects walls and low ceilings. */
@@ -33,7 +33,7 @@ export function bakeDungeonNavigation(world){
         for(const tri of [[corners[0],corners[1],corners[2]],[corners[1],corners[3],corners[2]]]){const key=[...tri].sort((a,b)=>a-b).join(',');if(!triangles.has(key)){triangles.add(key);indices.push(...tri);}}
       }
     }
-    const atlas=atlasFor(d,{positions,indices}),defects=bt_mesh_validate(atlas.nav.topology);
+    const atlas=atlasFor(d.id,{positions,indices}),defects=bt_mesh_validate(atlas.nav.topology);
     if(defects.length||!bt_mesh_is_manifold(atlas.nav.topology))throw new Error(`Invalid dungeon topology: ${d.id}`);
     result.push(atlas);
   }
@@ -45,15 +45,23 @@ export function encodeDungeonNavigation(atlases){
   for(const atlas of atlases){const {positions,indices}=atlas.geometry;b.writeUTF8String(atlas.id);b.writeUint32(positions.length);b.writeUint32(indices.length);b.writeFloat32Array(Float32Array.from(positions),0,positions.length);b.writeUint32Array(Uint32Array.from(indices),0,indices.length);}
   return new Uint8Array(b.data,0,b.position);
 }
-export function decodeDungeonNavigation(bytes){
-  const b=new BinaryBuffer();b.fromArrayBuffer(bytes);if(b.readUint32()!==1||b.readUint32()!==WORLD_VERSION)throw new Error('Dungeon navigation needs rebuilding');
-  const count=b.readUint32();if(count!==DUNGEONS.length)throw new Error('Dungeon navigation content mismatch');
-  const atlases=new Map();for(let i=0;i<count;i++){
-    const id=b.readUTF8String(),d=DUNGEONS.find(d=>d.id===id),n=b.readUint32(),m=b.readUint32();
-    if(!d||n%3||m%3||n+m>1000000||b.position+4*(n+m)>bytes.byteLength)throw new Error('Malformed dungeon navigation');
-    const positions=new Float32Array(n),indices=new Uint32Array(m);b.readFloat32Array(positions,0,n);b.readUint32Array(indices,0,m);
-    if(!positions.every(Number.isFinite)||!indices.every(v=>v<n/3))throw new Error('Malformed dungeon navigation vertices');
-    atlases.set(id,atlasFor(d,{positions:Array.from(positions),indices:Array.from(indices)}));
+export function decodeDungeonNavigation(bytes) {
+  const buffer = new BinaryBuffer();
+  buffer.fromArrayBuffer(bytes);
+  if (buffer.readUint32() !== 1 || buffer.readUint32() !== WORLD_VERSION) {
+    throw new Error('Dungeon navigation needs rebuilding');
+  }
+  const count = buffer.readUint32();
+  const atlases = new Map();
+  for (let index = 0; index < count; index++) {
+    const id = buffer.readUTF8String();
+    const vertexValues = buffer.readUint32();
+    const indexValues = buffer.readUint32();
+    const positions = new Float32Array(vertexValues);
+    const indices = new Uint32Array(indexValues);
+    buffer.readFloat32Array(positions, 0, vertexValues);
+    buffer.readUint32Array(indices, 0, indexValues);
+    atlases.set(id, atlasFor(id, {positions: Array.from(positions), indices: Array.from(indices)}));
   }
   return atlases;
 }
