@@ -1,4 +1,3 @@
-import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import {aabb3_unsigned_distance_sqr_to_point} from '@woosh/meep-engine/src/core/geom/3d/aabb/aabb3_unsigned_distance_sqr_to_point.js';
 import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
@@ -21,7 +20,7 @@ export function sceneryModel(record,focus,manifest){
  * residency remain native Meep operations. A ready replacement precedes removal. */
 export class WorldStream {
   constructor(view,layout,store,scenery){
-    this.view=view;this.store=store;this.layout=layout;this.manifest=store.manifest;this.groundMeshes=[];this.error=null;this.retry=new Map();this.loading=new Map();this.focus=[0,0,23];this.clock=0;this.refreshAt=0;
+    this.view=view;this.store=store;this.layout=layout;this.manifest=store.manifest;this.groundEntities=[];this.error=null;this.retry=new Map();this.loading=new Map();this.focus=[0,0,23];this.clock=0;this.refreshAt=0;
     this.records=scenery.records.map(record=>({...record,model:null,parts:[],opened:false}));this.lights=layout.lights.map(position=>({position}));
   }
   async start(focus,progress=()=>{}){
@@ -42,7 +41,7 @@ export class WorldStream {
     this.view.remove(r.parts);if(r.model)this.store.release(r.model);
     r.parts=parts;r.model=name;
   }
-  rebuildGround(){this.groundMeshes.length=0;for(const r of this.records)if(r.prop.model.startsWith('terrain_'))for(const part of r.parts)this.groundMeshes.push(this.view.ecd.getComponent(part.id,ShadedGeometry).node);}
+  rebuildGround(){this.groundEntities.length=0;for(const r of this.records)if(r.prop.model.startsWith('terrain_'))for(const part of r.parts)this.groundEntities.push(part.id);}
   update(player,dt){
     this.clock+=dt;const focus=[player.x,player.y,player.z],moved=v3_distance(...focus,...this.focus);
     for(const r of this.records)if(r.prop.relic){const opened=(player.relics??[]).includes(r.prop.relic);if(r.opened!==opened){r.opened=opened;this.refreshAt=0;}}

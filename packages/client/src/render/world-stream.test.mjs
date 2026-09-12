@@ -14,7 +14,10 @@ import {geometry_build_from_meshlet_geometry} from '@woosh/meep-engine/src/shade
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
-import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
+import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
+import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
+import {pack_terrain_row_table} from '@woosh/meep-engine/src/engine/graphics3/terrain/pack_terrain_row_table.js';
+import {row_of_entity} from '@woosh/meep-engine/src/shade/renderer/scene/rows/GPUSceneRows.js';
 
 const base=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',base),'utf8'));
 const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{}]));
@@ -107,13 +110,20 @@ test('native model loading deduplicates requests, bounds I/O and releases only u
 
 test('an in-flight replacement never removes the existing surface and stale travel loads are reclaimed',async()=>{
   const prop={model:'terrain_0_0',position:[0,0,0],scale:[1,1,1],yaw:0},store=new ModelStore({manifest,materials,read});let id=0;const live=new Set();
-  const view={sceneryModel:name=>{expect(store.models.has(name)).toBe(true);const part={id:++id};live.add(part);return [part];},remove:parts=>{for(const p of parts)live.delete(p);},ecd:{getComponent:()=>({node:{}})}};
+  const view={sceneryModel:name=>{expect(store.models.has(name)).toBe(true);const part={id:++id};live.add(part);return [part];},remove:parts=>{for(const p of parts)live.delete(p);}};
   const layout={props:[prop],lights:[]},bytes=encodeScenery(layout,manifest),scenery=await decodeScenery(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),manifest);
   const stream=new WorldStream(view,layout,store,scenery);await stream.start([0,10,0]);
+  const entities=stream.groundEntities,first=stream.records[0].parts[0].id;let rows=new Uint32Array(0);
+  const packedRows=()=>{const packed=pack_terrain_row_table({tiles:entities,table:rows});rows=packed.table;return Array.from(rows.subarray(0,packed.size)).flatMap((value,row)=>value?[row]:[]);};
+  expect(entities).toEqual([first]);expect(packedRows()).toEqual([row_of_entity(first)]);
   stream.update({x:400,y:20,z:400},.1);expect(live.size).toBe(1);expect(stream.records[0].model).toBe(prop.model);
   await Promise.all(stream.loading.values());stream.update({x:400,y:20,z:400},.1);expect(stream.records[0].model).toBe(manifest.lods[prop.model]);expect(live.size).toBe(1);
+  const replacement=stream.records[0].parts[0].id;expect(replacement).not.toBe(first);
+  expect(stream.groundEntities).toBe(entities);expect(entities).toEqual([replacement]);expect(packedRows()).toEqual([row_of_entity(replacement)]);
+  expect(rows[row_of_entity(first)]).toBe(0);
   for(let i=0;i<60;i++)stream.update({x:400,y:20,z:400},.1);
-  expect(store.models.has(prop.model)).toBe(false);expect(stream.groundMeshes).toHaveLength(1);
+  expect(store.models.has(prop.model)).toBe(false);expect(stream.groundEntities).toHaveLength(1);
+  stream.replace(stream.records[0],null);stream.rebuildGround();expect(entities).toEqual([]);expect(packedRows()).toEqual([]);
 });
 
 test('repeated travel reuses registered geometry identities with the append-only native BLAS arena',async()=>{
@@ -124,9 +134,9 @@ test('repeated travel reuses registered geometry identities with the append-only
 });
 
 test('wind-driven banners pause and reuse their native skin when the player travels away',()=>{
-  const ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64,SGMesh,Animation]);
-  const view={ecd,wind:{sample:out=>out.fill(0)},animations:{playbacks_of:()=>[]}},banners=new WorldBanners(view,[{position:[0,0,0],yaw:0,phase:0}]);
+  const ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64,SGMesh,Cloth,ClothRig]);
+  const view={ecd},banners=new WorldBanners(view,[{position:[0,0,0],yaw:0,phase:0}]);
   banners.update(.1,{x:0,y:0,z:0});const first=banners.banners[0].id;expect(ecd.entityExists(first)).toBe(true);
-  banners.update(.1,{x:200,y:0,z:0});expect(ecd.getComponent(first,Animation)).toBeUndefined();expect(banners.banners[0].active).toBe(false);
-  banners.update(.1,{x:0,y:0,z:0});expect(banners.banners[0].id).toBe(first);expect(ecd.getComponent(first,Animation)).toBeDefined();
+  banners.update(.1,{x:200,y:0,z:0});expect(ecd.getComponent(first,Cloth)).toBeUndefined();expect(banners.banners[0].active).toBe(false);
+  banners.update(.1,{x:0,y:0,z:0});expect(banners.banners[0].id).toBe(first);expect(ecd.getComponent(first,Cloth)).toBeDefined();
 });

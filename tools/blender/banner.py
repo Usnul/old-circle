@@ -1,6 +1,5 @@
-"""Pinned hanging cloth, authored as editable Blender armature action loops."""
+"""Pinned hanging cloth, authored for Meep's native cloth joint simulation."""
 import bpy, math
-from mathutils import Vector
 
 def build_banner(export,materials,objects):
     definitions=[('mast',None,(0,0,0),(0,0,3.6),.06,0)]
@@ -24,11 +23,5 @@ def build_banner(export,materials,objects):
             u=max(0,min(4,(3.4-p[2])/.5));lo=int(u);hi=min(4,lo+1)
             groups[lo].add([index],1-(u-lo),'REPLACE')
             if hi!=lo:groups[hi].add([index],u-lo,'REPLACE')
-    def pose(kind,time,duration,weapon):
-        phase=time/duration*math.tau;amplitude={'calm':.14,'breeze':1.8,'reverse':-1.8}[kind]
-        pose={'mast':(Vector((0,0,0)),Vector((0,0,3.6)))};head=Vector((.9,0,3.4))
-        for i in range(5):
-            angle=amplitude*(.12+i*.065+(.065+i*.01)*math.sin(phase-i*.65)+.025*math.sin(phase*2-i*.9))
-            tail=head+Vector((0,math.sin(angle)*.5,-math.cos(angle)*.5));pose['cloth'+str(i)]=(head.copy(),tail.copy());head=tail
-        return pose
-    export('votiveBanner',definitions,mesh_builder,pose,[(kind,kind,3.6,'') for kind in ['calm','breeze','reverse']])
+    # cloth0 remains fixed at the crossbar; ClothRig drives cloth1..cloth4.
+    export('votiveBanner',definitions,mesh_builder,None,[])

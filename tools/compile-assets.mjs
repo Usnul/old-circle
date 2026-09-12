@@ -17,7 +17,7 @@ await mkdir(out, { recursive: true });
 const meshes = JSON.parse(await readFile(resolve(root, '.local/blender/meshes.json'), 'utf8'));
 Object.assign(meshes,JSON.parse(await readFile(resolve(root,'.local/blender/lods.json'),'utf8')));
 Object.assign(meshes,JSON.parse(await readFile(resolve(root,'.local/blender/characters.json'),'utf8')));
-const manifest = { version: 2, engine: '3.20.0', models: {}, bounds:{}, lods:{} };
+const manifest = { version: 2, engine: JSON.parse(await readFile(require.resolve('@woosh/meep-engine/package.json'),'utf8')).version, models: {}, bounds:{}, lods:{} };
 let previous;try{previous=JSON.parse(await readFile(resolve(out,'manifest.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
 const serializer = new MeshletGeometrySerializationAdapter();
 const fingerprint=createHash('sha256');

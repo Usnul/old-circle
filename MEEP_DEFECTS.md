@@ -1,6 +1,6 @@
 # Meep defects encountered by Old Circle
 
-Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.23.0`. Original findings below concern 3.20.0 on Node 24 / Windows, 2026-09-10; entries explicitly identify subsequent verification against 3.22.0. Tests use the published dependency, not a linked engine checkout.
+Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.24.0`. Original findings below concern 3.20.0 on Node 24 / Windows, 2026-09-10; entries explicitly identify subsequent verification against 3.22.0. Tests use the published dependency, not a linked engine checkout.
 
 ## MEEP-001 — shapeCast quaternion contract disagrees with implementation
 

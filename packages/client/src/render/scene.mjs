@@ -1,6 +1,7 @@
 import { EngineHarness } from '@woosh/meep-engine/src/engine/EngineHarness.js';
 import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import { Transform64 } from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
+import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import { t64_look_rotation } from '@woosh/meep-engine/src/engine/ecs/transform/t64_look_rotation.js';
 import { t64_announce_change } from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import { Quaternion } from '@woosh/meep-engine/src/core/geom/Quaternion.js';
@@ -32,6 +33,7 @@ import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
 import {WorldWind} from './wind.mjs';
+import {WorldCloth} from './cloth.mjs';
 import {WorldAmbient} from './ambient.mjs';
 import {WorldBanners} from './banners.mjs';
 import {WorldFootsteps} from './footsteps.mjs';
@@ -61,6 +63,7 @@ export class WorldView {
     this.characterRenderer=new Characters(this);
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
       engine.renderingEnabled=false;
+      config.addSystem(new TransformAttachmentSystem());
       this.scene=EngineHarness.shadeScene(engine);
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
       this.meshSystem=new MeshSystem(engine.graphics,this.scene,async url=>this.characterRenderer.bundle(url));config.addSystem(this.meshSystem);
@@ -72,6 +75,7 @@ export class WorldView {
       this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
+      this.cloth=new WorldCloth(this.wind);config.addSystem(this.cloth);
     }});
     this.ecd=this.engine.entityManager.dataset;
     this.wind.attach(this.ecd);this.wind.follow(0,heightAt(0,23)+1,23);
@@ -132,7 +136,7 @@ export class WorldView {
     await this.streaming.start(position,p=>progress('Loading nearby terrain…',.15+p*.5));
     await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundMeshes);
+    this.ground=new WorldGround();await this.ground.start(this.engine.graphics,this.streaming.groundEntities);
     this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);

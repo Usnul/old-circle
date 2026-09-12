@@ -60,7 +60,7 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     beam((0,0,25.4),(0,0,27.8),.085,'brass',.025)
     finish('bellTower',physical)
 
-    # Votive banner stand. Its cloth has an independent Blender skin and actions.
+    # Votive banner stand. Its independent skin is driven by native Meep cloth.
     physical=[cube((0,0,.12),(.52,.52,.3),'stoneDark',.06),beam((0,0,.1),(0,0,3.8),.06,'iron',.04)]
     beam((0,0,3.5),(1.8,0,3.5),.045,'brass',.028)
     beam((0,0,2.85),(.65,0,3.5),.025,'iron',.025)

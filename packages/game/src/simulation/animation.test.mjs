@@ -6,24 +6,32 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
 
-test('Blender banner loops pin the top edge while the hem billows',()=>{
-  const skeleton=createSimulationSkeleton('votiveBanner'),root=skeleton.joints[1],hem=skeleton.joints.at(-1);
-  const point=(joint,name,time,offset)=>new Vector3(...offset).applyMatrix4(t64_evaluate_world(new Transform64(),skeleton.dataset,joint,[{clip:skeleton.byName.get(name),time,weight:1}]));
-  for(const name of ['calm','breeze','reverse']){
-    const start=point(hem,name,0,[0,.5,0]),end=point(hem,name,3.6,[0,.5,0]);expect(start.distanceTo(end)).toBeLessThan(.0001);
-    for(const time of [0,.9,1.8,2.7,3.6])for(const x of [-.72,.72])expect(point(root,name,time,[x,0,0]).distanceTo(point(root,'calm',0,[x,0,0]))).toBeLessThan(.0001);
+test('the banner has a fixed crossbar attachment and no authored motion competing with native cloth',()=>{
+  const skeleton=createSimulationSkeleton('votiveBanner'),root=skeleton.joints[1];
+  expect([...skeleton.byName.keys()]).toEqual([]);
+  const matrix=t64_evaluate_world(new Transform64(),skeleton.dataset,root,[]);
+  for(const x of [-.72,.72]){
+    const point=new Vector3(x,0,0).applyMatrix4(matrix);
+    expect(point.x).toBeCloseTo(.9+x,5);expect(point.y).toBeCloseTo(3.4,5);expect(point.z).toBeCloseTo(0,5);
   }
-  expect(point(hem,'breeze',0,[0,.5,0]).distanceTo(point(hem,'breeze',1.2,[0,.5,0]))).toBeGreaterThan(.2);
 });
 
 function actor(){return Object.assign(new Actor(),{y:.845,grounded:true});}
-test('Blender idle cycles close and animate head, torso and cloth',()=>{
+test('Blender idle cycles close and animate head and torso',()=>{
   const a=actor(),start=actorJointPoses(a);a.animationTime=1;const middle=actorJointPoses(a);a.animationTime=3.2;const end=actorJointPoses(a);
   const names=rigs.pilgrim.bones.map(b=>b.name);
-  for(const name of ['head','chest','cloak3']){
+  for(const name of ['head','chest']){
     const i=names.indexOf(name);
     expect(Math.hypot(...start[i].position.map((v,j)=>v-middle[i].position[j]))).toBeGreaterThan(.001);
     expect(Math.hypot(...start[i].position.map((v,j)=>v-end[i].position[j]))).toBeLessThan(.0001);
+  }
+});
+test('CPU cloak tracks retain bind-local transforms while native cloth owns presentation motion',()=>{
+  for(const [name,clip] of Object.entries(rigs.pilgrim.clips))for(const [index,bone] of rigs.pilgrim.bones.entries()){
+    if(!bone.name.startsWith('cloak'))continue;
+    for(const [key,width] of [['position',3],['rotation',4],['scale',3]])for(const [sample,value] of clip.tracks[index][key].entries()){
+      expect(value,`${name} ${bone.name} ${key}`).toBeCloseTo(bone[key][sample%width],5);
+    }
   }
 });
 test('a walking support foot stays planted while the body advances',()=>{

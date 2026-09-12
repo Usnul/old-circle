@@ -21,6 +21,8 @@ import {actorRig,actorScale,actorFeet,actorSocket,createSkeleton,animationPlan,r
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 import {armorFor} from '@old-circle/game/content/equipment.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
+import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
+import {clothComponents,unkeyCloth} from './cloth.mjs';
 
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 
@@ -39,6 +41,7 @@ export class Characters {
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);
     const [name,appearance,outfit='pilgrim']=url.split(':'),skeleton=createSkeleton(name),bundle=skeleton.bundle;
+    unkeyCloth(skeleton);
     const model=outfit.startsWith('boss_')?outfit:name==='pilgrim'&&outfit!=='pilgrim'?'armor_'+outfit:name;
         const meshes=this.view.models.get(model).map(c=>{
       let material=c.material;
@@ -70,11 +73,14 @@ export class Characters {
       // The corpse left the joints' offsets where physics put them; the clips the new Animation
       // binds take the joints back for the GPU and pose them from the clips, so nothing is reset.
       rig.animation=new Animation();this.view.ecd.addComponentToEntity(rig.id,rig.animation);
+      if(rig.cloth)this.view.ecd.addComponentToEntity(rig.id,rig.cloth);
       rig.weapon=a.archetype==='hound'?null:this.view.model(a.weapon);rig.weaponName=a.weapon;return rig;
     }
     const mesh=new SGMesh();mesh.url=url;
-    const t=new Transform64(),animation=new Animation(),id=new Entity().add(t).add(mesh).add(animation).build(this.view.ecd);
-    return {id,t,url,animation,clips:new Map(),weapon:a.archetype==='hound'?null:this.view.model(a.weapon),weaponName:a.weapon};
+    const t=new Transform64(),animation=new Animation(),entity=new Entity().add(t).add(mesh).add(animation);
+    const components=clothComponents(actorRig(a));for(const component of components)entity.add(component);
+    const id=entity.build(this.view.ecd),cloth=components.find(c=>c instanceof Cloth);
+    return {id,t,url,animation,cloth,clips:new Map(),weapon:a.archetype==='hound'?null:this.view.model(a.weapon),weaponName:a.weapon};
   }
   update(rig,a){
     const {view}=this,scale=actorScale(a),yaw=a.yaw+Math.PI;
@@ -138,6 +144,7 @@ export class Characters {
     const {view}=this;
     if(!rig.dead){
       this.clearViewAlpha(rig);
+      if(view.ecd.getComponent(rig.id,Cloth))view.ecd.removeComponentFromEntity(rig.id,Cloth);
       view.ecd.removeComponentFromEntity(rig.id,Animation);rig.dead=true;rig.t.makeIdentity();t64_announce_change(view.ecd,rig.id);
       if(rig.telegraph){view.remove(rig.telegraph);delete rig.telegraph;}
       rig.worldPoses=state.joints.map(()=>new Transform64());rig.inverse=new Float64Array(16);rig.matrix=new Float64Array(16);
@@ -168,6 +175,7 @@ export class Characters {
   remove(rig){
     this.clearViewAlpha(rig);
     const {view}=this;if(view.ecd.getComponent(rig.id,Animation))view.ecd.removeComponentFromEntity(rig.id,Animation);
+    if(view.ecd.getComponent(rig.id,Cloth))view.ecd.removeComponentFromEntity(rig.id,Cloth);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
     if(rig.lantern){view.remove(rig.lantern.parts);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
     // Meep 3.22 fixes MEEP-005, but despawning still retains BLAS data (MEEP-012).

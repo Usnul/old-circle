@@ -300,10 +300,6 @@ def human_pose(kind,time,duration,weapon):
     # The handle passes through the glove's palm, rather than the wrist joint.
     grip=right+frames['handR']@v((0,-.038,-.021))
     poses['weapon']=(grip,grip+direction*.2)
-    previous=body((0,.19,.49))
-    for j in range(3):
-        end=previous+v((math.sin(cycle-j*.6)*.018,(.16 if crouch else .06)+(.12 if run else .025)*math.sin(cycle-j*.8),-.29 if crouch else -.39))
-        poses['cloak'+str(j+1)]=(previous,end);previous=end
     for name,frame in frames.items():poses[name]=(*poses[name],frame)
     return poses
 
@@ -392,6 +388,12 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
             poses=pose_builder(kind,time,duration,weapon)
             # Write parents first; Blender resolves pose matrices into editable local keys.
             for b in bones:
+                if b.name.startswith('cloak'):
+                    # Follow the animated chest in bind-local pose. Runtime
+                    # ClothRig owns these joints, so Actions do not key them.
+                    rig.pose.bones[b.name].matrix_basis=Matrix.Identity(4)
+                    bpy.context.view_layer.update()
+                    continue
                 head,tail,*basis=poses[b.name];rest_dir=b.tail_local-b.head_local;direction=tail-head
                 orientation=(basis[0].to_quaternion() if basis else rest_dir.rotation_difference(direction))@b.matrix_local.to_quaternion()
                 pb=rig.pose.bones[b.name];pb.matrix=Matrix.Translation(head)@orientation.to_matrix().to_4x4()
@@ -403,6 +405,12 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
                 # timeline, so the editable Action keeps the runtime duration.
                 pb.keyframe_insert(data_path='location',frame=1+time*30);pb.keyframe_insert(data_path='rotation_quaternion',frame=1+time*30);pb.keyframe_insert(data_path='scale',frame=1+time*30)
             for i,b in enumerate(bones):
+                if b.name.startswith('cloak'):
+                    # Keep dense CPU tracks for ragdoll sampling, without
+                    # exporting procedural cloth motion or floating pose drift.
+                    for key in ['position','rotation','scale']:
+                        tracks[i][key].extend(round(x,6) for x in info['bones'][i][key])
+                    continue
                 pb=rig.pose.bones[b.name];world=C@pb.matrix;local=(C@rig.pose.bones[b.parent.name].matrix).inverted()@world if b.parent else world
                 p,q,s=local.decompose()
                 # Meep blends quaternion components directly. Opposite signs

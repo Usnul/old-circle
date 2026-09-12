@@ -4,5 +4,5 @@
   "private": true,
   "type": "module",
   "exports": { "./*": "./src/*" },
-  "dependencies": { "@woosh/meep-engine": "3.23.0" }
+  "dependencies": { "@woosh/meep-engine": "3.24.0" }
 }

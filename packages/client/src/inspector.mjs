@@ -1,3 +1,4 @@
+import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {LANDMARKS} from '@old-circle/game/world/regions.mjs';
 import {COMPOSITION_VIEWS,compositionPoints} from '@old-circle/game/world/spatial-atlas.mjs';
 
@@ -32,6 +33,6 @@ export function installInspector({send,getView,getSnapshot,playerId}){
       }
       output.textContent=`${data.faces} nav faces · ${data.samples.length} occupancy samples · nine SH coefficients per sample`;
     },
-    update(state){if(!flowVisible&&state&&performance.now()>messageUntil){const p=state.actors.find(a=>a.id===playerId),view=getView(),s=view.streaming?.stats,a=view.audio?.acoustics?.stats;if(p)output.textContent=`${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · HP ${p.hp.toFixed(0)} · tick ${state.tick}${s?` · ${s.props}/${s.totalProps} props · ${s.nearTerrain}/48 detailed terrain · ${(s.bytes/1048576).toFixed(1)} MiB active / ${((s.bytes+s.cachedBytes)/1048576).toFixed(1)} visited · ${(view.gpuGeometry.gpu_memory_usage/1048576).toFixed(1)} MiB GPU geometry · ${view.scene.instance_count} meshes · ${view.fps.toFixed(0)} fps · ${s.loading} loading${a?` · sound ${a.voices}/24 · probe ${a.probe} · shelter ${(a.cover*100).toFixed(0)}% · tail ${a.decay.toFixed(2)} s · solve ${a.ms.toFixed(2)} ms`:''}`:''}`;}}
+    update(state){if(!flowVisible&&state&&performance.now()>messageUntil){const p=state.actors.find(a=>a.id===playerId),view=getView(),s=view.streaming?.stats,a=view.audio?.acoustics?.stats;if(p)output.textContent=`${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · HP ${p.hp.toFixed(0)} · tick ${state.tick}${s?` · ${s.props}/${s.totalProps} props · ${s.nearTerrain}/48 detailed terrain · ${(s.bytes/1048576).toFixed(1)} MiB active / ${((s.bytes+s.cachedBytes)/1048576).toFixed(1)} visited · ${(view.gpuGeometry.gpu_memory_usage/1048576).toFixed(1)} MiB GPU geometry · ${view.ecd.computeComponentCount(ShadedGeometry)} meshes · ${view.fps.toFixed(0)} fps · ${s.loading} loading${a?` · sound ${a.voices}/24 · probe ${a.probe} · shelter ${(a.cover*100).toFixed(0)}% · tail ${a.decay.toFixed(2)} s · solve ${a.ms.toFixed(2)} ms`:''}`:''}`;}}
   };
 }
