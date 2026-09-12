@@ -8,6 +8,7 @@ import {ROAD_PATHS,WORLD_BOUNDS} from './world-definition.mjs';
 import {TERRAIN_GRID} from './terrain-data.mjs';
 import {DUNGEONS} from './dungeons.mjs';
 import {pathDistance} from './roads.mjs';
+import {CAVES} from './interiors.mjs';
 
 // Offline landform authoring. Runtime loads the baked sampler and vertex grid.
 const hills=[
@@ -24,12 +25,29 @@ function naturalHeightAt(x, z) {
   // Preserve the graded road bed while allowing broken terrain beside it.
   y+=roughness*(noise(x*.035,z*.035)+noise(x*.085+41,z*.085)*.22)*smoothStep(0,1,(pathDistance(x,z)-5)/18);
   // The abbey was cut into a level basin. The shoulder eases into the hillside.
-  const abbey=smoothStep(0,1,(Math.hypot(x/1.05,z+48)-19)/17);y=.65+(y-.65)*abbey;
+  const abbey=smoothStep(0,1,(Math.max(Math.abs(x)-24,Math.abs(z+48)-23))/14);y=.65+(y-.65)*abbey;
+  // A broad earth terrace carries the arrival gate and its paved landing.
+  const landing=smoothStep(0,1,Math.max(Math.abs(x-1)-11,Math.abs(z-20)-13)/14);
+  y=8+(y-8)*landing;
   return y;
 }
 let dungeonRoadGrades;
 function sculptedHeightAt(x,z){
   let y=naturalHeightAt(x,z);
+  // Burial chambers were cut with level cross-sections. Grade along the vault
+  // between its mouths so the rock shell never meets a sideways hillside.
+  for(const cave of CAVES){
+    const first=cave.sections[0],last=cave.sections.at(-1);
+    for(let i=1;i<cave.sections.length;i++){
+      const a=cave.sections[i-1],b=cave.sections[i];
+      if(z>Math.max(a[1],b[1])||z<Math.min(a[1],b[1]))continue;
+      const t=(z-a[1])/(b[1]-a[1]),cx=a[0]+(b[0]-a[0])*t,width=a[2]+(b[2]-a[2])*t;
+      const distance=Math.max(0,Math.abs(x-cx)-width-1.5);
+      if(distance>=5)continue;
+      const along=(z-first[1])/(last[1]-first[1]),target=naturalHeightAt(first[0],first[1])+(naturalHeightAt(last[0],last[1])-naturalHeightAt(first[0],first[1]))*along;
+      y=target+(y-target)*smoothStep(0,1,distance/5);
+    }
+  }
   dungeonRoadGrades??=ROAD_PATHS.filter(r=>DUNGEONS.slice(1).some(d=>d.id===r.to)).map(r=>{
     const lengths=[0];for(let i=1;i<r.points.length;i++)lengths.push(lengths[i-1]+Math.hypot(r.points[i][0]-r.points[i-1][0],r.points[i][1]-r.points[i-1][1]));
     const start=naturalHeightAt(...r.points[0]),end=naturalHeightAt(...r.points.at(-1));

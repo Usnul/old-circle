@@ -1,6 +1,6 @@
 import {seededRandom} from '@woosh/meep-engine/src/core/math/random/seededRandom.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
-import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS } from './regions.mjs';
+import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS, ROAD_PATHS } from './regions.mjs';
 import {CAVES,inCaveFootprint} from './interiors.mjs';
 import {DUNGEONS,dungeonPoint,dungeonFootprint} from './dungeons.mjs';
 
@@ -9,15 +9,16 @@ export function generateLayout() {
   const random=seededRandom(4171);
   const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z))=>{
     const s=Array.isArray(scale)?scale:[scale,scale,scale],p={model,position:[x,y,z],scale:s,yaw};props.push(p);
-    if(model==='arch')for(const side of [-1,1]){
-      const fx=x+Math.cos(yaw)*side*2.05*s[0],fz=z-Math.sin(yaw)*side*2.05*s[0],ground=heightAt(fx,fz)-.18;
-      if(y>ground+.2)props.push({model:'block',position:[fx,ground,fz],scale:[.85*s[0],y-ground+.03,1.05*s[2]],yaw});
+    const feet=model==='arch'?[[-2.05,0,.85,1.05],[2.05,0,.85,1.05]]:model==='bellTower'?[-2.5,2.5].flatMap(fx=>[-2.5,2.5].map(fz=>[fx,fz,1.6,1.6])):model==='column'&&y<=heightAt(x,z)+1?[[0,0,1.5,1.5]]:[];
+    for(const [fx,fz,w,d] of feet){
+      const px=x+Math.cos(yaw)*fx*s[0]+Math.sin(yaw)*fz*s[2],pz=z-Math.sin(yaw)*fx*s[0]+Math.cos(yaw)*fz*s[2];
+      const ground=Math.min(...[-.5,.5].flatMap(u=>[-.5,.5].map(v=>heightAt(px+Math.cos(yaw)*u*w*s[0]+Math.sin(yaw)*v*d*s[2],pz-Math.sin(yaw)*u*w*s[0]+Math.cos(yaw)*v*d*s[2]))))-.18;
+      if(y>ground+.2)props.push({model:'block',position:[px,ground,pz],scale:[w*s[0],y-ground+.04,d*s[2]],yaw});
     }
     return p;
   };
-  const box=(x,y,z,w,h,d)=>solids.push({position:[x,y,z],size:[w,h,d]});
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
-  const banner=(x,z,yaw=.6)=>{const p=add('bannerStand',x,z,1,yaw);banners.push({position:p.position,yaw,phase:banners.length*.73});};
+  const banner=(x,z,yaw=.6,y=heightAt(x,z))=>{const p=add('bannerStand',x,z,1,yaw,y);banners.push({position:p.position,yaw,phase:banners.length*.73});};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
   const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&REGIONS.every(r=>Math.hypot(x-r.center[0],z-r.center[1])>23)&&!(z<-284&&z>-356&&x>14&&x<82);
   const slope=(x,z)=>[(heightAt(x+1,z)-heightAt(x-1,z))/2,(heightAt(x,z+1)-heightAt(x,z-1))/2];
@@ -25,7 +26,7 @@ export function generateLayout() {
     const [dx,dz]=slope(x,z),p=add(model,x,z,size,random()*Math.PI*2,heightAt(x,z)-.03);
     // Only non-colliding ground plants tilt to the local surface. Trees and
     // structural props keep the same upright transforms in physics and view.
-    p.up=[-dx,1,-dz];return p;
+    p.up=[-dx||0,1,-dz||0];return p;
   };
   const groves=[];
   // Groves share species and age structure. Meadow openings stay open; conifers
@@ -77,28 +78,34 @@ export function generateLayout() {
     }
     const x=grove.x+5,z=grove.z+2;if(random()<.35&&clear(x,z,8)&&Math.hypot(...slope(x,z))<.2)add('fallenTrunk',x,z,1,random()*Math.PI*2,heightAt(x,z)-.1);
   }
-  // Opening overlook: an architectural frame, a hearth and a low mantle wall.
-  add('arch',-6,25,1.35,.35);
-  lamp(0,20); lamp(-8,24);
-  for(const h of HEARTHS)banner(h.position[0]+3,h.position[2]+1.8);
+  // An arrival court puts the gate across the pilgrim road and leaves a clear
+  // passage from the spawn point to the abbey. Its lamps mark the paving edge.
+  const landing=heightAt(1,20);
+  add('abbeyFloor',1,20,[.56,1,.62],0,landing);
+  const approach=ROAD_PATHS.find(r=>r.from==='hearth'&&r.to==='abbey').points;
+  const gateIndex=approach.reduce((best,p,i)=>Math.abs(p[1]-12)<Math.abs(approach[best][1]-12)?i:best,0),gate=approach[gateIndex],next=approach[gateIndex+1];
+  add('arch',gate[0],gate[1],1.2,Math.atan2(next[0]-gate[0],next[1]-gate[1]),landing+.06);
+  lamp(-5.5,18,landing+.06);lamp(7.5,18,landing+.06);banner(-5.5,24,Math.PI/2,landing+.06);
+  for(const h of HEARTHS.slice(1))banner(h.position[0]+3,h.position[2]+1.8);
   banner(-4,-29,-.5);banner(4,-29,.5);
   for(const hearth of HEARTHS.slice(1)){
     const [x,,z]=hearth.position;lamp(x,z);
     const dx=x-hearth.arrival[0],dz=z-hearth.arrival[1];
     add('arch',x+dx,z+dz,.8,Math.atan2(dx,dz));
   }
-  for(let i=0;i<4;i++) {add('block',8+i,15,[1,.9,1]);box(8+i,heightAt(8+i,15)+.45,15,1,.9,1);}
   // Circular abbey, with south and north gates open to late arrivals.
   const floor=heightAt(0,-48);
-  add('abbeyFloor',0,-48,1,0,floor-.16);
+  add('abbeyFloor',0,-48,1,0,floor);
   for(let i=0;i<20;i++){
     const a=i*Math.PI*2/20,x=Math.sin(a)*16,z=-48+Math.cos(a)*16;
-    if(i%5!==0)add('arch',x,z,1,a,floor);
-    if(i%2===0)lamp(x*.85,-48+(z+48)*.85,floor);
+    if(i%5!==0)add('arch',x,z,1,a,floor+.06);
+    if(i%2===0)lamp(x*.85,-48+(z+48)*.85,floor+.06);
   }
-  add('bellTower',-7,-64,1,0,floor-.3);
-  add('arch',0,-32,1.55,0,floor);
+  add('bellTower',-7,-64,1,0,floor+.06);
+  add('arch',0,-32,1.55,0,floor+.06);
   for(const side of [-1,1])for(let i=0;i<4;i++){
+    // The north-east side opens toward the reliquary's raised burial wing.
+    if(side===1&&i>=2)continue;
     add('abbeyWall',side*18,-40-i*5,1,Math.PI/2,floor-.2);
     add('buttress',side*20,-40-i*5,1,side*Math.PI/2,floor-.2);
   }
@@ -106,14 +113,13 @@ export function generateLayout() {
   for(const cave of CAVES){
     add(cave.model,0,0,1,0,0);
     for(const [x,z] of cave.lights)lamp(x,z);
-    for(const [x,z,yaw] of cave.tombs)add('cryptTomb',x,z,1,yaw);
+    for(const [x,z,yaw] of cave.tombs){
+      const ground=Math.min(...[-.6,.6].flatMap(u=>[-1.25,1.25].map(v=>heightAt(x+Math.cos(yaw)*u+Math.sin(yaw)*v,z-Math.sin(yaw)*u+Math.cos(yaw)*v))));
+      add('cryptTomb',x,z,1,yaw,ground);
+    }
     for(const [x,z,width] of [cave.sections[0],cave.sections.at(-1)])for(const side of [-1,1])for(let i=0;i<3;i++){
       const px=x+side*(width+1.8+i*.65),pz=z+i*.75;
       add(`rock${i}`,px,pz,[1.2-i*.2,.8-i*.1,1.1-i*.15],side*.7+i*.3,heightAt(px,pz)-.5);
-    }
-    for(const [i,[x,z,,h]] of cave.sections.entries())if(i>0&&i<cave.sections.length-1){
-      add('caveFang',x-1,z,1+i%2*.4,0,heightAt(x,z)+h+.3);
-      add('caveFang',x+1.5,z-1,.7,0,heightAt(x,z)+h+.25);
     }
   }
   // Regional monuments share a visual grammar, but never the same silhouette.
@@ -124,11 +130,36 @@ export function generateLayout() {
     const [x,y,z]=dungeonPoint(dungeon,dungeon.treasure.at);add('reliquary',x,z,1,0,y).relic=dungeon.treasure.id;
   }
   const [ox,oy,oz]=landmarkPosition('oak');add('tree',ox,oz-8,3.7,0,heightAt(ox,oz-8));lamp(ox+5,oz+4);
-  for(let i=0;i<9;i++){add('arch',109+i*6,-114,1.5,0);if(i%2===0)lamp(109+i*6,-110);}
+  // A surviving aqueduct arcade carries a continuous open water channel.
+  // Shared springing height and repeated pier spacing keep its load path clear.
+  const span=6.15,aqueduct=Math.max(...Array.from({length:9},(_,i)=>heightAt(109+i*span,-114)))+.05,channel=aqueduct+6.96*1.5;
+  for(let i=0;i<9;i++){
+    const x=109+i*span;add('arch',x,-114,1.5,0,aqueduct);
+    add('aqueductSpandrel',x,-114,1.5,0,aqueduct);
+    add('block',x,-114,[span+.02,.28,1.75],0,channel-.02);
+    for(const side of [-1,1])add('block',x,-114+side*.78,[span+.02,.55,.18],0,channel+.24);
+    if(i%2===0)lamp(x,-110);
+  }
+  // A covered settling head explains the channel's western terminus. Its
+  // shallow chamber rests on a solid pier; a fixed service ladder reaches it.
+  const headX=104.5,headGround=Math.min(heightAt(103,-116),heightAt(106,-112))-.15;
+  add('block',headX,-114,[2.9,channel+.24-headGround,3.3],0,headGround);
+  for(const side of [-1,1])add('block',headX,-114+side*1.48,[2.9,1.25,.35],0,channel+.24);
+  add('block',103.2,-114,[.3,1.25,3.3],0,channel+.24);
+  add('block',headX,-114,[3.15,.3,3.55],0,channel+1.49);
+  for(let y=headGround;y<channel+1.2;y+=1.8)add('serviceLadder',102.91,-114,[1,Math.min(1.8,channel+1.2-y)/1.8,1],-Math.PI/2,y);
+  // The severed eastern channel ends above fallen coping on the dry ground.
+  for(let i=0;i<5;i++){
+    const x=162.3+i*.65,z=-115.5+(i%3)*.8;
+    if(pathDistance(x,z)>3.5)add('block',x,z,[.65+(i%2)*.2,.3,.5],i*.7,heightAt(x,z)-.08);
+  }
   const [sx,sy,sz]=landmarkPosition('spire');
   for(let i=0;i<5;i++)add('column',sx,sz,[2-i*.3,2.5,2-i*.3],0,sy+i*10);
   add('halo',sx,sz,2,0,sy+30);
-  for(let i=0;i<6;i++)add('column',75+i*8,-275,[2,3+i%2,2],0);
+  // Paired votive columns mark a processional approach to the frozen pilgrims.
+  for(let i=0;i<3;i++)for(const side of [-1,1]){
+    const x=95+side*7,z=-262-i*8;add('column',x,z,[1.4,1.8,1.4],0);lamp(x-side*1.8,z);
+  }
   const [cx,,]=landmarkPosition('halo'),cz=-385,cy=heightAt(cx,cz);
   // Open mountain courtyard: keep the naturally walkable slope through the gates.
   for(let i=-2;i<=2;i++){
@@ -146,6 +177,9 @@ export function generateLayout() {
   // Remove cover inside authored rock after scatter, preserving all random
   // sequences and placements elsewhere when a local interior changes.
   const vegetation=new Set(['tree','pine','magicTree','winterTree','groundcover','groundcover1','dryGrass','moorGrass','fern','bracken','fallenTrunk']);
-  for(let i=props.length-1;i>=0;i--){const p=props[i],x=p.position[0],z=p.position[2];if((vegetation.has(p.model)&&inCaveFootprint(x,z,3))||((vegetation.has(p.model)||/^(rock|sandstone|frostRock)/.test(p.model))&&dungeonFootprint(x,z,2)))props.splice(i,1);}
+  for(let i=props.length-1;i>=0;i--){const p=props[i],x=p.position[0],z=p.position[2];
+    const planted=vegetation.has(p.model),landingMargin=3*Math.max(p.scale[0],p.scale[2]);
+    if((planted&&(inCaveFootprint(x,z,3)||(Math.abs(x-1)<8.4+landingMargin&&Math.abs(z-20)<9.3+landingMargin)))||((planted||/^(rock|sandstone|frostRock)/.test(p.model))&&dungeonFootprint(x,z,2)))props.splice(i,1);
+  }
   return {props,solids,lights,banners};
 }

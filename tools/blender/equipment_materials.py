@@ -7,7 +7,7 @@ import bpy,math
 import numpy as np
 from ground_materials import save_image
 
-KINDS=('iron','brass','leather','cloth','cloak')
+KINDS=('iron','brass','bronze','timber','leather','cloth','cloak')
 
 def fields(width,height):
     u,v=np.meshgrid(np.linspace(0,1,width),np.linspace(0,1,height))
@@ -45,6 +45,18 @@ def build_equipment_materials(root):
             k=.79+macro*.13+grain*.025
             rgb=np.stack((k-wear*.15,k-wear*.04,k),axis=-1)
             relief=grain*.025-scratches*.035;rough=.44+wear*.20;metal=.96-wear*.32
+        elif name=='bronze':
+            # Quiet casting grain and broad oxidation, without the diagonal
+            # scratches of forged equipment stamped across a turned bell.
+            patina=np.clip((macro-.25)*.65,0,.32)
+            k=.85+macro*.035+grain*.004
+            rgb=np.stack((k-patina*.65,k-patina*.12,k+patina*.25),axis=-1)
+            relief=grain*.006;rough=.46+patina*.5;metal=.95-patina*.8
+        elif name=='timber':
+            grainline=np.sin((u*19+.10*np.sin(v*math.tau*2))*math.tau)
+            k=.80+grainline*.035+macro*.025
+            rgb=np.stack((k,k*.97,k*.91),axis=-1)
+            relief=grainline*.02;rough=.82+grainline*.015;metal=0
         elif name=='leather':
             k=.78+macro*.12+grain*.055
             rgb=np.stack((k,k*.96,k*.88),axis=-1)

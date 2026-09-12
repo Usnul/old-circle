@@ -13,10 +13,13 @@ def build_cave_materials(root):
         dx=np.minimum(abs(u-x),1-abs(u-x));dy=np.minimum(abs(v-y),1-abs(v-y));d=dx*dx+dy*dy
         second=np.minimum(second,np.maximum(first,d));first=np.minimum(first,d)
     seams=np.exp(-(np.sqrt(second)-np.sqrt(first))/.0018)
-    strata=np.sin((v*7+macro*.38)*math.tau)
-    k=.29+macro*.065+grain*.003+strata*.008-seams*.026
-    rgb=np.stack((k*1.04,k*1.02,k*.93),axis=-1)
-    write_set(root/'packages/client/public/assets/textures','limestone',rgb,macro*.055+grain*.018-seams*.045,.88+seams*.08,0)
+    # Broad bedding planes carry the rock identity. Fine noise must not turn
+    # metres of cliff into the wrinkled, fibrous surface of bark.
+    strata=np.sin((v*5+.035*np.sin(u*math.tau)+macro*.06)*math.tau)
+    bedding=np.maximum(0,strata)**18
+    k=.36+macro*.025+grain*.001+strata*.014-bedding*.026-seams*.012
+    rgb=np.stack((k*1.02,k*1.025,k),axis=-1)
+    write_set(root/'packages/client/public/assets/textures','limestone',rgb,macro*.025+grain*.006-bedding*.035-seams*.018,.91+seams*.04,0)
 
 def build_caves(world,mesh,finish,cube,cone):
     def height(x,z):
@@ -28,29 +31,32 @@ def build_caves(world,mesh,finish,cube,cone):
         for a,b in zip(controls,controls[1:]):
             steps=math.ceil(abs(b[1]-a[1])/1.8)
             for i in range(steps):sections.append([av+(bv-av)*i/steps for av,bv in zip(a,b)])
-        sections.append(controls[-1]);vertices=[];rings=[];surface_uv=[];cross=19
+        sections.append(controls[-1]);vertices=[];rings=[];cross=19
+        # A fractured outcrop has shelves, shoulders and an uneven crown, not
+        # a concentric inflated copy of the passage. Feet extend underground.
+        outcrop=[(1,-.25),(.99,.08),(.94,.25),(.99,.28),(.79,.33),(.76,.58),(.59,.64),(.61,.78),(.29,.94),(-.02,1),(-.31,.94),(-.39,.76),(-.58,.73),(-.69,.53),(-.85,.48),(-.81,.27),(-.98,.22),(-.99,.08),(-1,-.25)]
         for index,(x,z,width,clearance) in enumerate(sections):
-            floor=height(x,z);ring=[];t=index/(len(sections)-1);middle=math.sin(t*math.pi)
+            floor=height(x,z);ring=[];t=index/(len(sections)-1)
             for layer in range(2):
-                points=[];along=0;previous=None
+                points=[]
                 for j in range(cross):
                     angle=max(0,min(16,j-1))/16*math.pi
                     if layer==0:
-                        radius=width;y=1.2+(clearance-1.2)*math.sin(angle)
-                    else:
-                        radius=width+3.4+middle*1.8+.65*math.sin(angle*2.5);y=1.2+(clearance+2.1+middle*1.2)*math.sin(angle)
-                    px=x+radius*math.cos(angle);py=floor+y
-                    if j in [0,cross-1]:py=min(floor,height(px,z))-2.5
-                    else:
-                        rough=noise.noise(Vector((px*.38,z*.30,layer*17)))*(.5 if layer==0 else 1.1)
+                        px=x+width*math.cos(angle)
+                        py=floor+1.2+(clearance-1.2)*math.sin(angle)
+                        rough=noise.noise(Vector((px*.38,z*.30,0)))*.22
                         py+=rough*math.sin(angle);px+=rough*math.cos(angle)
-                    # The mouth exposes an uneven, receding rock lip rather
-                    # than a flat annular facade cut perpendicular to the tunnel.
-                    depth=4*math.sin(angle)+.5*math.sin(angle*3)
+                    else:
+                        lateral,rise=outcrop[j]
+                        fracture=noise.noise(Vector((j*.61,z*.22,17)))
+                        px=x+lateral*(width+4.6)+fracture*.6
+                        py=floor+.65+rise*(clearance+3.6)+fracture*.45
+                    # The broken cliff face recedes above the cut entrance;
+                    # its buried sides keep the outcrop seated on the hillside.
+                    depth=1.3*math.sin(angle)+.35*math.sin(angle*3)
                     pz=z+(math.exp(-((1-t)/.23)**2)-math.exp(-(t/.23)**2))*depth*layer
-                    pz+=noise.noise(Vector((px*.43,py*.37,z*.18)))*(.5 if layer else .22)
-                    if previous is not None:along+=math.hypot(px-previous[0],py-previous[1])
-                    previous=(px,py);surface_uv.append((along*.3,-pz*.3))
+                    pz+=noise.noise(Vector((px*.43,py*.37,z*.18)))*(.55 if layer else .12)
+                    if j in [0,cross-1]:py=min(floor,height(px,pz))-2.5
                     points.append(len(vertices));vertices.append((px,-pz,py))
                 ring.append(points)
             rings.append(ring)
@@ -68,17 +74,29 @@ def build_caves(world,mesh,finish,cube,cone):
             for j in [0,cross-1]:faces.append((a[0][j],a[1][j],b[1][j],b[0][j]))
         for ring in [rings[0],rings[-1]]:
             for j in range(cross-1):faces.append((ring[0][j],ring[0][j+1],ring[1][j+1],ring[1][j]))
-        shell=mesh('Eroded burial vault',vertices,faces,'limestone');bm=bmesh.new();bm.from_mesh(shell.data)
+        shell=mesh('Stratified hillside burial chamber',vertices,faces,'limestone');bm=bmesh.new();bm.from_mesh(shell.data)
         bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces));assert all(e.is_manifold for e in bm.edges),'Rock shell must close around its two open mouths'
         bm.to_mesh(shell.data);bm.free();shell.data.update()
         shell['export_uv']=True;uv=shell.data.uv_layers.new(name='Rock strata unwrap')
         for face in shell.data.polygons:
-            cap=len({vi//(cross*2) for vi in face.vertices})==1
-            bottom=all(vi%cross in [0,cross-1] for vi in face.vertices)
+            # Keep bedding horizontal on every exposed wall. Wrapping UVs
+            # around the arch made the previous stone look bent and stretched.
+            n=face.normal
             for li in face.loop_indices:
                 vi=shell.data.loops[li].vertex_index;p=vertices[vi]
-                uv.data[li].uv=(p[0]*.3,p[2]*.3) if cap else (p[0]*.3,p[1]*.3) if bottom else surface_uv[vi]
-        for face in shell.data.polygons:face.use_smooth=True
+                uv.data[li].uv=(p[0]*.24,p[1]*.24) if abs(n.z)>.75 else (p[1]*.24,p[2]*.24) if abs(n.x)>abs(n.y) else (p[0]*.24,p[2]*.24)
+            face.use_smooth=False
+        # Dressed stone inlays explain the burial chamber's use. Their tops
+        # follow the actual approach instead of making a sideways stair on it.
+        for x,z,width,_ in [controls[0],controls[-1]]:
+            count=max(2,math.floor((width*2-1.4)/1.1));tile=(width*2-1.4)/count
+            for i in range(count):
+                px=x+(i-(count-1)/2)*tile
+                corners=[(px-tile/2,z-.48),(px+tile/2,z-.48),(px+tile/2,z+.48),(px-tile/2,z+.48)]
+                verts=[(sx,-sz,height(sx,sz)+.015-depth) for depth in [0,.6] for sx,sz in corners]
+                # Terrain already supplies their collision surface. The 15mm
+                # inlay relief stays inside the walking motor's contact skin.
+                mesh('Grounded threshold inlay',verts,[(3,2,1,0),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],'stoneLight')
         finish(cave['model'],colliders);collision_collection.hide_render=True;collision_collection.hide_viewport=True
     physical=[cube((0,0,.32),(1.05,2.3,.7),'stoneDark',.1),cube((0,0,.77),(1.18,2.45,.26),'stoneLight',.09)]
     cube((0,0,.94),(.1,1.5,.075),'stoneDark',.018);cube((0,-.3,.94),(.55,.1,.075),'stoneDark',.018)

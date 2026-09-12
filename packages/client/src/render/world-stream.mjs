@@ -3,6 +3,7 @@ import {aabb3_unsigned_distance_sqr_to_point} from '@woosh/meep-engine/src/core/
 import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 import {countTask} from '@woosh/meep-engine/src/core/process/task/util/countTask.js';
 import {runSceneryTask} from './scenery-data.mjs';
+import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 
 const plants=new Set(['groundcover','groundcover1','dryGrass','moorGrass','fern','bracken','grass','flowers']);
 const trees=new Set(['tree','pine','magicTree','winterTree']);
@@ -22,6 +23,7 @@ export class WorldStream {
   constructor(view,layout,store,scenery){
     this.view=view;this.store=store;this.layout=layout;this.manifest=store.manifest;this.groundEntities=[];this.error=null;this.retry=new Map();this.loading=new Map();this.focus=[0,0,23];this.clock=0;this.refreshAt=0;
     this.records=scenery.records.map(record=>({...record,model:null,parts:[],opened:false}));this.lights=layout.lights.map(position=>({position}));
+    this.halos=this.records.filter(r=>r.prop.model==='halo');
   }
   async start(focus,progress=()=>{}){
     this.focus=focus;this.plan();
@@ -59,6 +61,18 @@ export class WorldStream {
       if(++changes>=16||performance.now()-start>3)break;
     }
     if(groundChanged)this.rebuildGround();this.store.update(dt);
+    // Suspended monuments carry their own circulating energy. Move the native
+    // emitter along the authored ring; particles remain behind as fading trails.
+    for(const halo of this.halos){
+      const d=distance(focus,halo.bounds);
+      if(halo.emitters&&d>260){for(const e of halo.emitters)this.view.ecd.removeEntity(e.id);halo.emitters=null;}
+      if(!halo.emitters&&d<220)halo.emitters=Array.from({length:6},()=>this.view.emitter('levitation',halo.transform.translation,30));
+      for(const [i,e] of (halo.emitters??[]).entries()){
+        const angle=this.clock*.18+i*Math.PI/3,t=halo.transform,x=4.62*Math.cos(angle),y=4.62*Math.sin(angle),z=i%2?-.34:.34;
+        e.t.setTranslation(t[0]*x+t[4]*y+t[8]*z+t[12],t[1]*x+t[5]*y+t[9]*z+t[13],t[2]*x+t[6]*y+t[10]*z+t[14]);
+        e.t.updateMatrix();t64_announce_change(this.view.ecd,e.id);
+      }
+    }
     for(const [i,lamp] of this.lights.entries()){
       const d=v3_distance(...lamp.position,...focus);
       if(!lamp.light&&d<75){lamp.light=this.view.light(lamp.position,[1,.48,.13],42,Light.Type.POINT,i%5===0,8);lamp.emitter=this.view.emitter('embers',lamp.position,22);}

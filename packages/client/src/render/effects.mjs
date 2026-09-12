@@ -37,8 +37,8 @@ export function effect(kind='embers',rate=35,scale=1){
   return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${step?.texture??'mote'}.png`,spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color',...(step?{rotation:'rotation'}:{})},prewarm:kind==='motes'?2:0});
 }
 function compile(kind,scale){
-  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],hazard=HAZARD_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave',heal=kind==='heal';
-  const lifetime=step?.life??(hazard?1:profile?.life??(ambient?6:heal?1.4:shock||frost?1:1.9)),color=hazard?.color??step?.color??profile?.color??(heal?[.6,1.5,.35,.8]:frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
+  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],hazard=HAZARD_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave',heal=kind==='heal',levitation=kind==='levitation';
+  const lifetime=step?.life??(levitation?1.4:hazard?1:profile?.life??(ambient?6:heal?1.4:shock||frost?1:1.9)),color=hazard?.color??step?.color??profile?.color??(levitation?[2.4,1.8,.7,.9]:heal?[.6,1.5,.35,.8]:frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
   const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4},...(step?[{name:'rotation',components:1},{name:'normal',components:3}]:[])]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
@@ -48,11 +48,11 @@ function compile(kind,scale){
   const normal=step?op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_UP}):null;
   // Scatter in the contact plane, then lift along its normal, including on slopes.
   const tangent=step?op(init,'sub',{a:signed,b:op(init,'scale',{v:normal,s:op(init,'dot',{a:signed,b:normal})})}):null;
-  const jitter=step?op(init,'scale',{v:tangent,s:[.065*scale]}):op(init,'mul',{a:signed,b:kind==='snow'?[12,4,12]:ambient?[16,2,16]:heal?[.45,.5,.45]:[.2,.1,.2]});
+  const jitter=step?op(init,'scale',{v:tangent,s:[.065*scale]}):op(init,'mul',{a:signed,b:levitation?[.045,.045,.045]:kind==='snow'?[12,4,12]:ambient?[16,2,16]:heal?[.45,.5,.45]:[.2,.1,.2]});
   set(init,'position',op(init,'add',{a:op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_POSITION}),b:jitter}));
-  let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:hazard?.velocity??(ambient?[.15,.10,.15]:heal?[.35,.4,.35]:frost||shock?[7,.2,7]:[.5,1,.5])});
-  velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):hazard?[0,hazard.lift,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
-  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[hazard?.size??profile?.size??(ambient?.035:shock||frost?.09:.11)]);
+  let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:hazard?.velocity??(levitation?[.025,.025,.025]:ambient?[.15,.10,.15]:heal?[.35,.4,.35]:frost||shock?[7,.2,7]:[.5,1,.5])});
+  velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):levitation?[0,0,0]:hazard?[0,hazard.lift,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
+  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[hazard?.size??profile?.size??(levitation?.23:ambient?.035:shock||frost?.09:.11)]);
   if(step){set(init,'normal',normal);set(init,'rotation',op(init,'mul',{a:op(init,'random',{}, {components:1}),b:[Math.PI*2]}));}
   set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});

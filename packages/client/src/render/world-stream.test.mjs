@@ -18,39 +18,143 @@ import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
 import {pack_terrain_row_table} from '@woosh/meep-engine/src/engine/graphics3/terrain/pack_terrain_row_table.js';
 import {row_of_entity} from '@woosh/meep-engine/src/shade/renderer/scene/rows/GPUSceneRows.js';
+import {BVH} from '@woosh/meep-engine/src/core/bvh2/bvh3/BVH.js';
+import {ebvh_build_for_geometry_morton} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_build_for_geometry_morton.js';
+import {ebvh_geometry_query_nearest_triangle_ray} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_geometry_query_nearest_triangle_ray.js';
 
 const base=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',base),'utf8'));
-const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{}]));
+const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{name:c.material}]));
 const read=async file=>{const bytes=await readFile(new URL(file,base));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);};
 
-test.each(['','_distant'])('arch stones expose outward faces and normals at detail %s',async suffix=>{
+function raycastSurfaces(parts){
+  const surfaces=parts.map(part=>{
+    const geometry=geometry_build_from_meshlet_geometry(part.geometry),positions=geometry.getAttribute('position').data,normals=geometry.getAttribute('normal').data,uvs=geometry.getAttribute('uv0').data,indices=geometry.index.data,bvh=new BVH();
+    ebvh_build_for_geometry_morton(bvh,indices,positions);return {positions,normals,uvs,indices,bvh,material:part.material};
+  });
+  return (origin,direction,max=2)=>{
+    let nearest=null;const query=[];
+    for(const s of surfaces){
+      if(!ebvh_geometry_query_nearest_triangle_ray(query,0,s.bvh,s.bvh.root,[...origin,...direction],0,nearest?.distance??max,s.indices,s.positions))continue;
+      const ids=Array.from(s.indices.slice(query[0]*3,query[0]*3+3)),v=ids.map(id=>Array.from(s.positions.slice(id*3,id*3+3))),a=v[1].map((x,k)=>x-v[0][k]),b=v[2].map((x,k)=>x-v[0][k]);
+      const cross=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],length=Math.hypot(...cross);
+      const weights=[1-query[1]-query[2],query[1],query[2]];
+      nearest={distance:query[3],normal:cross.map(v=>v/length),normals:ids.map(id=>Array.from(s.normals.slice(id*3,id*3+3))),material:s.material,
+        uv:[0,1].map(k=>ids.reduce((sum,id,i)=>sum+s.uvs[id*2+k]*weights[i],0))};
+    }
+    return nearest;
+  };
+}
+
+test.each(['','_distant'])('bevelled arches have continuous outward-facing surfaces at detail %s',async suffix=>{
   const store=new ModelStore({manifest,materials,read});
-  const arches=[{name:'arch',center:[0,4.5,0],inner:1.7,outer:2.42,depth:.48,count:13,gap:.02},...DUNGEONS.map(d=>({
-    name:'dungeon_'+d.id,center:[d.origin[0],floorHeight(dungeonFloors(d,heightAt).at(-1),0,-3)+3.9,d.origin[1]+3],inner:2.08,outer:2.6,depth:.35,count:11,gap:0,
+  const arches=[{name:'arch',center:[0,4.55,0],inner:1.69,outer:2.41,depth:.45,count:13},...DUNGEONS.map(d=>({
+    name:'dungeon_'+d.id,center:[d.origin[0],floorHeight(dungeonFloors(d,heightAt).at(-1),0,-3)+4.2,d.origin[1]+3],inner:2.05,outer:2.65,depth:.425,count:11,
   }))];
   for(const arch of arches){
-    const counts=new Array(arch.count).fill(0),parts=await store.load(arch.name+suffix);
-    for(const part of parts){
-      const g=geometry_build_from_meshlet_geometry(part.geometry),p=g.getAttribute('position').data,n=g.getAttribute('normal').data,indices=g.index.data;
-      for(let i=0;i<indices.length;i+=3){
-        const ids=[indices[i],indices[i+1],indices[i+2]],v=ids.map(id=>arch.center.map((c,k)=>p[id*3+k]-c));
-        if(!v.every(([x,y,z])=>y>-.001&&Math.abs(Math.abs(z)-arch.depth)<.001&&[arch.inner,arch.outer].some(r=>Math.abs(Math.hypot(x,y)-r)<.001)))continue;
-        const angles=v.map(([x,y])=>Math.atan2(Math.max(0,y),x));
-        // Adjacent dungeon wedges share their radial end caps. Check the four
-        // exposed surfaces: front, back, the inner soffit and the outer crown.
-        if(Math.max(...angles)-Math.min(...angles)<.001)continue;
-        const stone=Math.min(arch.count-1,Math.floor(angles.reduce((a,b)=>a+b,0)/3*arch.count/Math.PI));
-        const a=stone*Math.PI/arch.count,b=(stone+1)*Math.PI/arch.count-arch.gap,r=(arch.inner+arch.outer)/4;
-        const center=[r*(Math.cos(a)+Math.cos(b)),r*(Math.sin(a)+Math.sin(b)),0];
-        const u=v[1].map((x,k)=>x-v[0][k]),w=v[2].map((x,k)=>x-v[0][k]);
-        const normal=[u[1]*w[2]-u[2]*w[1],u[2]*w[0]-u[0]*w[2],u[0]*w[1]-u[1]*w[0]],length=Math.hypot(...normal);
-        const label=`${arch.name+suffix} stone ${stone} triangle ${i/3}`;
-        expect(normal.reduce((sum,x,k)=>sum+x*(v[0][k]-center[k]),0),label+' winding').toBeGreaterThan(.001);
-        for(const id of ids)expect(normal.reduce((sum,x,k)=>sum+x*n[id*3+k],0)/length,label+' normal').toBeGreaterThan(.99);
-        counts[stone]++;
-      }
+    const cast=raycastSurfaces(await store.load(arch.name+suffix)),half=Math.PI/arch.count/2;
+    const check=(local,direction,expected,label)=>{
+      const hit=cast(local.map((v,k)=>v+arch.center[k]),direction);
+      expect(hit,`${arch.name+suffix} ${label} missing surface`).not.toBeNull();
+      expect(Math.abs(hit.distance-expected),`${arch.name+suffix} ${label} surface depth`).toBeLessThan(.085);
+      expect(hit.normal.reduce((sum,v,k)=>sum+v*direction[k],0),`${arch.name+suffix} ${label} winding`).toBeLessThan(-.1);
+      for(const n of hit.normals)expect(n.reduce((sum,v,k)=>sum+v*hit.normal[k],0),`${arch.name+suffix} ${label} shading normal`).toBeGreaterThan(.65);
+    };
+    // Probe faces and both sides of every joint, including the joint itself.
+    // Bevels may recess a seam but may never leave a ray-sized hole through it.
+    for(let stone=0;stone<arch.count;stone++)for(const f of [0,.005,.5,.995]){
+      if(stone===0&&f===0)continue;
+      const angle=(stone+f)*Math.PI/arch.count,c=Math.cos(angle),s=Math.sin(angle),factor=Math.cos(half)/Math.cos((f-.5)*2*half),radius=(arch.inner+arch.outer)/2;
+      for(const side of [-1,1])check([radius*c,radius*s,side*(arch.depth+.5)],[0,0,-side],.5,`stone ${stone}/${f} ${side<0?'back':'front'}`);
+      check([(arch.outer+.5)*c,(arch.outer+.5)*s,0],[-c,-s,0],arch.outer+.5-arch.outer*factor,`stone ${stone}/${f} crown`);
+      check([(arch.inner-.5)*c,(arch.inner-.5)*s,0],[c,s,0],arch.inner*factor-(arch.inner-.5),`stone ${stone}/${f} soffit`);
     }
-    expect(counts,arch.name+suffix+' exposed faces').toEqual(new Array(arch.count).fill(8));
+  }
+});
+
+test.each(['','_distant'])('the bronze bell has an open mouth, curved waist and supported yoke at detail %s',async suffix=>{
+  const store=new ModelStore({manifest,materials,read}),parts=await store.load('bellTower'+suffix),bronze=parts.filter(p=>p.material===materials.bronze);
+  expect(bronze.length).toBeGreaterThan(0);const bell=raycastSurfaces(bronze),tower=raycastSurfaces(parts);
+  // Rays enter the downward-facing mouth and reach the inner shoulder, rather
+  // than striking a cone cap. Stay off the clapper and its central attachment.
+  for(const angle of [.2,1.7,3.2,4.7]){
+    const c=Math.cos(angle),s=Math.sin(angle),inside=bell([.65*c,15,.65*s],[0,1,0],3);
+    expect(inside).not.toBeNull();expect(inside.distance).toBeGreaterThan(1.3);expect(inside.distance).toBeLessThan(2);
+    expect(inside.normal[1]).toBeLessThan(-.1);
+  }
+  const radiusAt=y=>{const hit=bell([2,y,0],[-1,0,0],2);expect(hit).not.toBeNull();expect(hit.normal[0]).toBeGreaterThan(.2);return 2-hit.distance;};
+  const lip=radiusAt(15.43),waist=radiusAt(16.30),shoulder=radiusAt(17.20);
+  expect(lip).toBeGreaterThan(1.3);expect(waist).toBeGreaterThan(.77);expect(waist).toBeLessThan(.91);expect(shoulder).toBeLessThan(.7);
+  // The frame's axle bears on both side beams, and the maintenance landing
+  // exists beneath it. Those supports must survive the distant representation.
+  for(const x of [-2.5,2.5])expect(tower([x,19.5,0],[0,-1,0],1)?.distance).toBeLessThan(.7);
+  expect(tower([0,13.5,0],[0,-1,0],1)?.distance).toBeLessThan(.6);
+});
+
+test.each(['','_distant'])('reliquary doorways have bearing lintels and complete masonry jamb courses at detail %s',async suffix=>{
+  const dungeon=DUNGEONS.find(d=>d.id==='reliquary'),store=new ModelStore({manifest,materials,read}),cast=raycastSurfaces(await store.load('dungeon_reliquary'+suffix));
+  for(const [index,wall] of dungeon.partitions.entries()){
+    const axis=wall.a[0]!==wall.b[0]?0:1,[center,width]=wall.door,label=`door ${index}${suffix}`;
+    const point=(along,height,offset=0)=>{const p=wall.a.slice();p[axis]=along;p[1-axis]+=offset;return dungeonPoint(dungeon,[...p,wall.level+height]);};
+    const face=(along,height,side=1)=>cast(point(along,height,side),axis===0?[0,0,side]:[-side,0,0],1.5);
+    // Probe the real bearing volume at mid-depth, not a thin decorative strip
+    // above the opening. Its ends must overlap both jambs and carry the header.
+    const soffit=cast(point(center,2.5),[0,1,0],1);
+    expect(soffit,label+' soffit').not.toBeNull();expect(soffit.distance).toBeCloseTo(.4,3);expect(soffit.normal[1]).toBeLessThan(-.9);
+    for(const along of [center-width/2-.15,center,center+width/2+.15])for(const height of [2.94,3.16,3.38])for(const side of [-1,1]){
+      const hit=face(along,height,side);expect(hit,label+' lintel bearing').not.toBeNull();expect(hit.material).toBe(materials.stoneLight);expect(hit.distance).toBeLessThan(.65);
+    }
+    const headerLow=face(center,3.55),headerHigh=face(center,4.25);
+    for(const hit of [headerLow,headerHigh]){expect(hit,label+' supported header').not.toBeNull();expect(hit.material).toBe(materials[dungeon.materials.wall]);}
+    const headerSlope=(headerHigh.uv[1]-headerLow.uv[1])/.7,headerCourseAt=y=>(headerLow.uv[1]+(y-3.55)*headerSlope)*4;
+    expect(headerSlope,label+' upright header courses').toBeGreaterThan(.3);
+    for(const y of [3.42,4.4])expect(Math.abs(headerCourseAt(y)-Math.round(headerCourseAt(y))),label+' complete header end course').toBeLessThan(.005);
+    // The wall must close against each shaft, not stop at the wider capital
+    // footprint and leave a seven-centimetre slot beside the upright masonry.
+    for(const along of [center-width/2-.40,center+width/2+.40])for(const height of [.3,1.45,2.6])for(const side of [-1,1]){
+      const hit=face(along,height,side);expect(hit,label+' closed jamb-to-wall joint').not.toBeNull();expect(hit.material).toBe(materials[dungeon.materials.wall]);expect(hit.distance).toBeCloseTo(.725,3);
+    }
+    for(const along of [center-width/2,center+width/2]){
+      const low=face(along,.5),high=face(along,2.4);
+      for(const hit of [low,high]){expect(hit,label+' masonry jamb').not.toBeNull();expect(hit.material).toBe(materials[dungeon.materials.wall]);expect(hit.distance).toBeCloseTo(.64,3);}
+      // Both dressed caps stand proud of the shaft. The lower cap covers the
+      // floor contact so the masonry does not start with a sliced bottom row.
+      for(const height of [.11,2.79]){const hit=face(along,height);expect(hit,label+' jamb base/capital').not.toBeNull();expect(hit.material).toBe(materials.stoneLight);expect(hit.distance).toBeCloseTo(.57,3);}
+      // The texture has four courses per tile. Extrapolate through the small
+      // edge bevels to the shaft ends: each end must fall on a bed joint.
+      const slope=(high.uv[1]-low.uv[1])/1.9,courseAt=y=>(low.uv[1]+(y-.5)*slope)*4;
+      expect(slope,label+' upright courses').toBeGreaterThan(.3);expect(slope).toBeLessThan(.7);
+      for(const y of [.22,2.68])expect(Math.abs(courseAt(y)-Math.round(courseAt(y))),label+' full end course').toBeLessThan(.005);
+    }
+  }
+});
+
+test.each(['','_distant'])('a freestanding gallery pier has complete courses and bears fully beneath its perimeter beam at detail %s',async suffix=>{
+  const dungeon=DUNGEONS.find(d=>d.id==='reliquary'),bridge=dungeon.rooms.find(r=>r.id==='bridge'),store=new ModelStore({manifest,materials,read}),parts=await store.load('dungeon_reliquary'+suffix),cast=raycastSurfaces(parts),stone=raycastSurfaces(parts.filter(p=>p.material===materials.stoneLight));
+  // The first interior support on the western side of the Bell Walk stands in
+  // the open vestibule, making its floor contact visible from all sides.
+  const beamDepth=.36,beamTop=dungeon.elevation+bridge.level-.30,x=bridge.rect[0],n=3.5,bottom=dungeon.elevation,top=beamTop-beamDepth;
+  const face=y=>cast(dungeonPoint(dungeon,[x-1,n,y-dungeon.elevation]),[1,0,0],1.5);
+  const low=face(bottom+.5),high=face(top-.5);
+  for(const hit of [low,high]){expect(hit).not.toBeNull();expect(hit.material).toBe(materials[dungeon.materials.wall]);expect(hit.distance).toBeCloseTo(.64,3);}
+  for(const y of [bottom+.11,top-.11]){const hit=face(y);expect(hit).not.toBeNull();expect(hit.material).toBe(materials.stoneLight);expect(hit.distance).toBeCloseTo(.57,3);}
+  // A ray beside the narrower shaft lands on the base's top, .22m above the
+  // floor. Without the base it falls straight through to the room pavement.
+  const ledge=cast(dungeonPoint(dungeon,[x-.4,n,.5]),[0,-1,0],1);
+  expect(ledge).not.toBeNull();expect(ledge.material).toBe(materials.stoneLight);expect(ledge.distance).toBeCloseTo(.28,3);
+  const slope=(high.uv[1]-low.uv[1])/(top-bottom-1),courseAt=y=>(low.uv[1]+(y-bottom-.5)*slope)*4;
+  expect(slope).toBeGreaterThan(.3);expect(slope).toBeLessThan(.7);
+  for(const y of [bottom+.22,top-.22])expect(Math.abs(courseAt(y)-Math.round(courseAt(y))),'complete course at plinth/capital').toBeLessThan(.005);
+  // Probe the stone beam independently from the floor slab. All four capital
+  // corners must lie beneath it, including the half outside the walking floor.
+  for(const dx of [-.4,0,.4])for(const dn of [-.4,0,.4]){
+    const hit=stone(dungeonPoint(dungeon,[x+dx,n+dn,beamTop-dungeon.elevation+.1]),[0,-1,0],.8);
+    expect(hit,'full beam coverage above capital').not.toBeNull();expect(hit.distance).toBeCloseTo(.1,3);
+  }
+  // Beyond the capital, the same beam continues to the next support and has
+  // a real soffit at the pier head instead of being a thin decorative ledge.
+  for(const dn of [-.8,.8])for(const dx of [-.4,0,.4]){
+    const hit=stone(dungeonPoint(dungeon,[x+dx,n+dn,top-dungeon.elevation-.2]),[0,1,0],.8);
+    expect(hit,'continuous bearing beam soffit').not.toBeNull();expect(hit.distance).toBeCloseTo(.2,3);expect(hit.normal[1]).toBeLessThan(-.9);
   }
 });
 
@@ -139,4 +243,18 @@ test('wind-driven banners pause and reuse their native skin when the player trav
   banners.update(.1,{x:0,y:0,z:0});const first=banners.banners[0].id;expect(ecd.entityExists(first)).toBe(true);
   banners.update(.1,{x:200,y:0,z:0});expect(ecd.getComponent(first,Cloth)).toBeUndefined();expect(banners.banners[0].active).toBe(false);
   banners.update(.1,{x:0,y:0,z:0});expect(banners.banners[0].id).toBe(first);expect(ecd.getComponent(first,Cloth)).toBeDefined();
+});
+
+test('suspended halo trails follow the placed ring and release their emitters after distant travel',async()=>{
+  const prop={model:'halo',position:[20,45,-10],scale:[2,2,2],yaw:Math.PI/2},store=new ModelStore({manifest,materials,read}),ecd=new EntityComponentDataset();ecd.setComponentTypeMap([Transform64]);
+  const view={ecd,sceneryModel:()=>[],remove:()=>{},emitter:(kind,p,rate)=>{
+    expect(kind).toBe('levitation');expect(rate).toBe(30);const t=new Transform64();t.setTranslation(...p);const id=ecd.createEntity();ecd.addComponentToEntity(id,t);return {id,t};
+  }};
+  const layout={props:[prop],lights:[]},bytes=encodeScenery(layout,manifest),scenery=await decodeScenery(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),manifest),stream=new WorldStream(view,layout,store,scenery);
+  await stream.start(prop.position);stream.update({x:20,y:40,z:-10},.1);
+  const halo=stream.halos[0],emitters=halo.emitters,first=Array.from(emitters[0].t.translation);
+  expect(emitters).toHaveLength(6);expect(ecd.entityCount).toBe(6);
+  for(const e of emitters){const [x,y,z]=e.t.translation;expect(Math.abs(x-20)).toBeCloseTo(.68,3);expect(Math.hypot(y-45,z+10)).toBeCloseTo(9.24,3);}
+  stream.update({x:20,y:40,z:-10},1);expect(Array.from(emitters[0].t.translation)).not.toEqual(first);expect(halo.emitters).toBe(emitters);
+  stream.update({x:1000,y:0,z:0},.1);expect(halo.emitters).toBeNull();expect(ecd.entityCount).toBe(0);
 });

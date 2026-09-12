@@ -5,6 +5,7 @@ import {generateTerrain} from './terrain-authoring.mjs';
 import {heightAt,terrainSurface,WORLD_BOUNDS} from './regions.mjs';
 import {buildLayout} from './layout.mjs';
 import {generateLayout} from './layout-authoring.mjs';
+import {CAVES} from './interiors.mjs';
 
 test('shipped terrain and layout match the deterministic native authoring bake',async()=>{
   const bytes=await readFile(new URL('../content/terrain.bin',import.meta.url));
@@ -53,4 +54,22 @@ test('native texture serialization preserves float32 subviews',()=>{
   padded.set(vertices,5);
   const bytes=encodeTerrain({sampler,vertices:padded.subarray(5)}).slice().buffer;
   expect(decodeTerrain(bytes).vertices).toEqual(vertices);
+});
+
+test('arrival paving and abbey walls stand on level native terrain terraces',()=>{
+  const {sampler}=generateTerrain();
+  const sample=(x,z)=>sampler.sampleChannelCatmullRomUV((x+240)/480,(z+480)/640,0)-15;
+  for(const x of [-6,0,8])for(const z of [12,20,28])expect(sample(x,z)).toBeCloseTo(8,3);
+  for(const x of [-20,0,18])for(const z of [-34,-40])expect(sample(x,z)).toBeCloseTo(.65,2);
+  // The gate's graded departure must remain a walkable approach, not a cliff.
+  for(let z=-8;z<8;z+=2)expect(Math.abs(sample(2,z+2)-sample(2,z))/2).toBeLessThan(.8);
+});
+
+test('the burial passage has level cross-sections beneath the authored rock vault',()=>{
+  const {sampler}=generateTerrain();
+  const sample=(x,z)=>sampler.sampleChannelCatmullRomUV((x+240)/480,(z+480)/640,0)-15;
+  for(const cave of CAVES)for(const [x,z,width] of cave.sections.slice(1,-1)){
+    const ys=[-.6,0,.6].map(t=>sample(x+t*width,z));
+    expect(Math.max(...ys)-Math.min(...ys)).toBeLessThan(.06);
+  }
 });

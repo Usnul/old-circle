@@ -54,10 +54,13 @@ for collection in loaded.collections:
   o=original.copy();o.data=original.data.copy();bpy.context.scene.collection.objects.link(o)
   # Welding is local to each authored object and never crosses material seams.
   bm=bmesh.new();bm.from_mesh(o.data);bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=.0001);bm.to_mesh(o.data);bm.free()
-  # An eight-vertex masonry prism is already a minimal closed solid. Collapsing
-  # it to three triangles removes whole walls and floors from the silhouette.
-  # Bevelled trim and complex organic meshes still benefit from decimation.
-  if o.modifiers or len(o.data.polygons)>12:
+  # Keep contact edges on dressed masonry, stair treads and timber supports.
+  # Collapsing their 54-face bevelled prisms shifts the bearing surfaces and
+  # opens cracks between neighbouring stones (or removes narrow stair tops).
+  # Curved bell shells and organic silhouettes still benefit from decimation.
+  architectural=collection.name in ['arch','abbeyFloor','abbeyWall','bellTower'] or collection.name.startswith('dungeon_')
+  preserve=architectural and len(o.data.polygons)<=80
+  if not preserve and (o.modifiers or len(o.data.polygons)>12):
    mod=o.modifiers.new('Distant silhouette','DECIMATE');mod.ratio=.22 if collection.name in ['tree','pine','magicTree'] else .3
    mod.use_collapse_triangulate=True
   objects.append(o)

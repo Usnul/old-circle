@@ -17,7 +17,7 @@ function particle(kind,{scale=1,seed=73,position=[0,0,0],normal=[0,1,0]}={}){
     update(dt=0){builtins[VM_BUILTIN.DELTA_TIME][0]=dt;return run(program.update);}};
 }
 
-test.each([['heal',1.4],['embers',1.9],['motes',6],['frost',1],['shockwave',1],...Object.entries(AMBIENT_EFFECTS).map(([kind,p])=>[kind,p.life]),...Object.entries(FOOTSTEP_EFFECTS).map(([kind,p])=>[kind,p.life]),...Object.keys(HAZARD_EFFECTS).map(kind=>[kind,1])])('%s fades its visible contribution before its GPU lifetime ends',(kind,life)=>{
+test.each([['heal',1.4],['levitation',1.4],['embers',1.9],['motes',6],['frost',1],['shockwave',1],...Object.entries(AMBIENT_EFFECTS).map(([kind,p])=>[kind,p.life]),...Object.entries(FOOTSTEP_EFFECTS).map(([kind,p])=>[kind,p.life]),...Object.keys(HAZARD_EFFECTS).map(kind=>[kind,1])])('%s fades its visible contribution before its GPU lifetime ends',(kind,life)=>{
   const p=particle(kind),step=FOOTSTEP_EFFECTS[kind],age=p.layout.offsetOf('age');expect(p.read('color',4)).toEqual([0,0,0,0]);
   p.floats[age]=life*.35;p.update();const visible=p.read('color',4);expect(visible[3]).toBeGreaterThan(.1);
   p.floats[age]=life-.001;expect(p.update().killed).toBe(false);const fading=p.read('color',4);expect(fading[3]).toBeLessThan(.0001);
@@ -25,6 +25,13 @@ test.each([['heal',1.4],['embers',1.9],['motes',6],['frost',1],['shockwave',1],.
   else expect(fading.slice(0,3).every(v=>v<.0001)).toBe(true);
   p.floats[age]=life+.001;expect(p.update().killed).toBe(true);expect(p.read('color',4)[3]).toBe(0);
   if(step)expect(p.read('color',3)).toEqual(visible.slice(0,3));else expect(p.read('color',3)).toEqual([0,0,0]);
+});
+
+test('levitation trails stay at the monument instead of blowing away like ambient particles',()=>{
+  const position=[15,40,-20],p=particle('levitation',{position});
+  expect(emitter_flags_blend(p.component.flags)).toBe(EMITTER_BLEND.ADDITIVE);
+  for(let i=0;i<13;i++){p.update(.1);expect(Math.hypot(...p.read('position',3).map((v,k)=>v-position[k]))).toBeLessThan(.15);}
+  expect(p.read('size')[0]).toBeGreaterThan(.2);
 });
 
 test.each(Object.keys(FOOTSTEP_EFFECTS))('%s uses a shipped alpha sprite with lit, soft-depth coverage',(kind)=>{

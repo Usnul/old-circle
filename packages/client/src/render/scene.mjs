@@ -89,7 +89,7 @@ export class WorldView {
     const camera=new Camera();camera.fov.set(57);camera.clip_near=.12;camera.clip_far=1100;
     this.cameraTransform=new Transform64();this.cameraEntity=new Entity().add(camera).add(this.cameraTransform).build(this.ecd);
     this.listenerTransform=new Transform64();this.listenerEntity=new Entity().add(new SoundListener()).add(this.listenerTransform).build(this.ecd);
-    this.materials={};for(const [key,color] of Object.entries({...PALETTE,...Object.fromEntries(Object.entries(DUNGEON_MATERIALS).map(([name,spec])=>[name,spec.color]))})){
+    this.materials={};for(const [key,color] of Object.entries({...PALETTE,bronze:[.43,.27,.12],timber:[.24,.15,.075],...Object.fromEntries(Object.entries(DUNGEON_MATERIALS).map(([name,spec])=>[name,spec.color]))})){
       const m=new StandardShadeMaterial();m.diffuse_color.set(...color);m.roughness_factor=key==='iron'?.43:key==='brass'?.38:.92;m.metallic_factor=key==='iron'?.7:key==='brass'?.78:0;
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
       this.materials[key]=m;
@@ -112,8 +112,8 @@ export class WorldView {
     this.materials.bark.texture_albedo=textures.bark;
     for(const name of ['stone','stoneLight','stoneDark','sand','snow','ice'])this.materials[name].texture_normal=textures['stone-normal'];
     this.materials.landscape.texture_normal=textures['ground-normal'];this.materials.bark.texture_normal=textures['bark-normal'];
-    for(const name of ['iron','brass','leather','cloth','cloak','limestone',...Object.keys(DUNGEON_MATERIALS)]){
-      const material=this.materials[name];material.roughness_factor=1;material.metallic_factor=name==='iron'||name==='brass'?1:0;
+    for(const name of ['iron','brass','bronze','timber','leather','cloth','cloak','limestone',...Object.keys(DUNGEON_MATERIALS)]){
+      const material=this.materials[name];material.roughness_factor=1;material.metallic_factor=['iron','brass','bronze'].includes(name)?1:0;
       for(const [suffix,channel] of [['','albedo'],['-normal','normal'],['-orm','orm']]){
         const texture=(DUNGEON_MATERIALS[name]?.texture??name)+suffix;
         if(!textures[texture]){
