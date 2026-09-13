@@ -12,6 +12,9 @@ import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.j
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
 import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
+import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {CCR_STRIDE,CCR_TX,CCR_QX,CCR_PREV_TX,CCR_PARAM_0,CCR_PARAM_1,CCR_PARAM_2} from '@woosh/meep-engine/src/engine/physics/cloth/collider/ClothColliderRecord.js';
 import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import {WorldCloth} from './cloth.mjs';
 import {clothWorker,stepWorker} from './worker-test-helpers.mjs';
@@ -278,6 +281,46 @@ test('wall contact fades only the local skin and equipment, reuses materials and
   rig.dead=true;renderer.viewAlpha(rig,0);expect(materialOf(body)).toBe(shared);
 });
 
+test('lantern cloth collider follows the rendered cage and resets without sweeping on teleport or resize',async()=>{
+  await withNativeCharacters(async({characters,view})=>{
+    const actor={kind:'player',weapon:'sword',x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true,animationTime:0,gaitPhase:0};
+    const rig=characters.create(actor);await setImmediate();
+    const step=()=>{characters.update(rig,actor,1/144);view.animations.update(0);stepWorker(view.cloth);};
+    step();
+    const {light,chain}=rig.lantern,{ecd}=view,colliders=view.cloth.world.colliders;
+    const record=()=>colliders.index.table.subarray(colliders.handleOf(light.id)*CCR_STRIDE,(colliders.handleOf(light.id)+1)*CCR_STRIDE);
+    const checkPose=()=>{
+      expect(colliders.handleOf(light.id)).toBeDefined();
+      const mesh=rig.lantern.parts[0].t;
+      for(let axis=0;axis<3;axis++)expect(record()[CCR_TX+axis]).toBeCloseTo(mesh[12+axis]-mesh[4+axis]*.222,6);
+      expect(Array.from(record().subarray(CCR_QX,CCR_QX+4))).toEqual(Array.from(mesh.rotation));
+      expect(ecd.getComponent(light.id,Collider).shape).toBe(chain.links[2].c.shape);
+    };
+    checkPose();
+    const original=ecd.getComponent(light.id,Collider),marker=ecd.getComponent(light.id,ClothCollider);
+    expect(marker.inflation).toBeGreaterThan(0);
+    for(let frame=1;frame<=30;frame++){
+      const previous=Array.from(light.t.translation);
+      actor.x=frame*.002;actor.yaw=frame*.02;step();checkPose();
+      expect(ecd.getComponent(light.id,Collider)).toBe(original);
+      expect(Array.from(record().subarray(CCR_PREV_TX,CCR_PREV_TX+3))).toEqual(previous);
+    }
+    // The actual cloak worker receives the lantern box alongside body capsules.
+    const {state}=view.cloth.instanceOf(rig.id);
+    expect(Array.from({length:state.collider_count},(_,i)=>state.collider_table[i*CCR_STRIDE+CCR_PARAM_1])).toContainEqual(expect.closeTo(.14,5));
+    actor.x=100;actor.z=-200;step();checkPose();
+    expect(ecd.getComponent(light.id,Collider)).not.toBe(original);
+    expect(Array.from(record().subarray(CCR_TX,CCR_TX+3))).toEqual(Array.from(record().subarray(CCR_PREV_TX,CCR_PREV_TX+3)));
+    const socket=rig.lantern.socket;socket.setScale(1.85,1.85,1.85);socket.updateMatrix();
+    characters.lanternPose(rig,socket,1);stepWorker(view.cloth);checkPose();
+    for(const [offset,half] of [[CCR_PARAM_0,.095],[CCR_PARAM_1,.14],[CCR_PARAM_2,.095]])expect(record()[offset]).toBeCloseTo(half*1.85,6);
+    expect(Array.from(record().subarray(CCR_TX,CCR_TX+3))).toEqual(Array.from(record().subarray(CCR_PREV_TX,CCR_PREV_TX+3)));
+    characters.remove(rig);
+    expect(ecd.entityExists(light.id)).toBe(false);expect(colliders.handleOf(light.id)).toBeUndefined();
+    expect(colliders.index.query([],-Infinity,-Infinity,-Infinity,Infinity,Infinity,Infinity,1,0xFFFFFFFF)).toBe(0);
+  });
+});
+
 test('newly spawned player corpses create and dispose lantern fixtures',async()=>{
   await withNativeCharacters(async({characters,view})=>{
     const actor={kind:'player',name:'pilgrim',appearance:'player',weapon:'sword',x:1,y:1,z:2,yaw:0.2,vx:0,vy:0,vz:0,grounded:true,scale:1,animationTime:0,gaitPhase:0};
@@ -291,6 +334,7 @@ test('newly spawned player corpses create and dispose lantern fixtures',async()=
     expect(rig.lantern.links.length).toBeGreaterThan(0);
     expect(rig.lantern.light).toBeDefined();
     const lightId=rig.lantern.light.id;
+    expect(view.ecd.getComponent(lightId,ClothCollider)).toBeDefined();
     const lanternParts=[...rig.lantern.parts],lanternLinks=rig.lantern.links.flatMap(link=>[...link]);
     expect(view.ecd.entityExists(lightId)).toBe(true);
     for(const part of lanternParts)expect(view.ecd.entityExists(part.id)).toBe(true);
@@ -303,6 +347,7 @@ test('newly spawned player corpses create and dispose lantern fixtures',async()=
     expect(chain.physics.storage.size).toBe(0);
     expect(rig.lantern).toBeUndefined();
     expect(view.ecd.entityExists(lightId)).toBe(false);
+    expect(view.cloth.world.colliders.handleOf(lightId)).toBeUndefined();
     for(const part of lanternParts)expect(view.ecd.entityExists(part.id)).toBe(false);
     for(const part of lanternLinks)expect(view.ecd.entityExists(part.id)).toBe(false);
   });

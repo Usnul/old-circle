@@ -21,6 +21,8 @@ import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 import {armorFor} from '@old-circle/game/content/equipment.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
+import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {clothComponents,unkeyCloth} from './cloth.mjs';
 import {LanternChain,lanternBodyBones} from './lantern-chain.mjs';
 import {updateWeaponLight,removeWeaponLight} from './weapon-lights.mjs';
@@ -160,7 +162,18 @@ export class Characters {
     links.forEach((meshes,i)=>pose(meshes,i));pose(parts,2);
     // The light originates at the ember, below the attachment hook.
     // Preserve the flame-sized emitter while fading its illumination with the wearer.
-    light.t.setTranslation(...chain.ember);light.t.updateMatrix();t64_announce_change(view.ecd,light.id);light.l.intensity.set(2.4*alpha);
+    light.t.setTranslation(...chain.ember);light.t.setRotation(...poses[2].rotation);light.t.updateMatrix();t64_announce_change(view.ecd,light.id);light.l.intensity.set(2.4*alpha);
+    // The ember entity shares the cage's centre and lifetime. Mirror its shape
+    // into cloth at the presented pose, including the sub-tick belt offset.
+    const cage=chain.links[2].c,previous=view.ecd.getComponent(light.id,Collider);
+    if(previous?.shape!==cage.shape){
+      // Chain resets replace the shape on teleports, resizes and long stalls.
+      // Relinking places it afresh instead of sweeping across the old pose.
+      if(previous){view.ecd.removeComponentFromEntity(light.id,ClothCollider);view.ecd.removeComponentFromEntity(light.id,Collider);}
+      const collider=new Collider();collider.shape=cage.shape;collider.friction=cage.friction;
+      view.ecd.addComponentToEntity(light.id,collider);
+      view.ecd.addComponentToEntity(light.id,ClothCollider.from({inflation:.015*scale,friction_scale:.25}));
+    }
   }
   corpse(rig,state){
     const {view}=this;

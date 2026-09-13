@@ -2,6 +2,7 @@ import {expect,test,vi} from 'vitest';
 import {LanternChain,LanternScenery,lanternBodyBones,lanternMount} from './lantern-chain.mjs';
 import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
 import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
 import {compute_penetration} from '@woosh/meep-engine/src/engine/physics/narrowphase/compute_penetration.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
@@ -137,6 +138,7 @@ test('nearby authored scenery supports a corpse lantern and releases distant sta
 
 test('characters removal disposes lantern bodies and joints',()=>{
   const ecd=new EntityComponentDataset();
+  ecd.registerComponentType(Collider);ecd.registerComponentType(ClothCollider);
   ecd.registerComponentType(Transform64);ecd.registerComponentType(Light);ecd.registerComponentType(ShadedGeometry);
   const model=name=>(name==='pilgrimLantern'?['brass','ember','iron']:['brass']).map(material=>{
     const t=new Transform64(),geometry=new ShadedGeometry();geometry.material=new StandardShadeMaterial();
@@ -193,6 +195,7 @@ test('characters removal disposes lantern bodies and joints',()=>{
 
 test.each(['bow','spear'])('%s arm motion leaves the lamp on the hips belt without light shadows',weapon=>{
   const ecd=new EntityComponentDataset();
+  ecd.registerComponentType(Collider);ecd.registerComponentType(ClothCollider);
   ecd.registerComponentType(Transform64);ecd.registerComponentType(Light);ecd.registerComponentType(ShadedGeometry);
   const events=vi.spyOn(ecd,'sendEvent'),materials={ember:new StandardShadeMaterial(),brass:new StandardShadeMaterial(),iron:new StandardShadeMaterial()};
   const model=name=>(name==='pilgrimLantern'?['brass','ember','iron']:['brass']).map(material=>{
