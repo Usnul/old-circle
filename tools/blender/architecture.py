@@ -16,7 +16,9 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     bpy.data.objects.remove(support,do_unlink=True)
 
     # A low cloister wall: ruin height varies, with a continuous sheltered interior.
-    physical=[cube((0,0,1.18),(5,.69,2.36),'stoneDark',0)]
+    # Recess the mortar on the exposed ends as well as the broad faces. A
+    # full-length core shares the dressed stones' end planes and flickers.
+    physical=[cube((0,0,1.18),(4.97,.69,2.33),'stoneDark',0)]
     for row in range(4):
         # Alternate half blocks at the ends so the wall has a running bond.
         ends=[-2.5,-1.25,0,1.25,2.5] if row%2==0 else [-2.5,-1.875,-.625,.625,1.875,2.5]
@@ -25,7 +27,8 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     for side in [-1,1]:
         physical.append(cube((side*2.14,0,3.38),(.67,.82,1.96),'stoneDark',0))
         for j in range(3):physical.append(cube((side*2.14,0,2.685+j*.65),(.70,.85,.65),'stoneLight',.018))
-    cube((0,0,2.44),(5.15,.86,.18),'stoneLight',.025)
+    # Modules repeat every five metres; coping must meet, not overlap.
+    cube((0,0,2.44),(5,.86,.18),'stoneLight',.025)
     finish('abbeyWall',physical)
 
     physical=[]
@@ -46,7 +49,8 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
         for side in [-1,1]:
             for z in [4.6,8.7,12.8,20.5]:
                 p=(0,side*2.5,z) if axis==0 else (side*2.5,0,z)
-                s=(5.8,1.18,.4) if axis==0 else (1.18,5.8,.4)
+                # One pair owns the corners; the other ends at its inner face.
+                s=(6.18,1.18,.4) if axis==0 else (1.18,3.82,.4)
                 physical.append(cube(p,s,'stoneLight',.018))
             # Solid backing fills the bed joints of the two lancet jambs.
             for sign in [-1,1]:
@@ -128,7 +132,7 @@ def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
             cube((a,side*2.5,13.4),(.07,.07,1.1),'timber',.008)
             cube((side*2.5,a,13.4),(.07,.07,1.1),'timber',.008)
     cube((0,0,20.55),(5.4,.28,.30),'timber',.018)
-    cube((0,0,20.55),(.28,5.4,.30),'timber',.018)
+    for side in [-1,1]:cube((0,side*1.42,20.55),(.28,2.56,.30),'timber',.018)
     roof=cone((0,0,23.1),4.45,.10,4.8,'stoneDark',4);roof.rotation_euler[2]=math.pi/4
     beam((0,0,25.4),(0,0,27.8),.085,'brass',.025)
     finish('bellTower',physical)

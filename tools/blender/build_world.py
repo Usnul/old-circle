@@ -221,8 +221,10 @@ for j in range(13):
  a=j*math.pi/13;b=(j+1)*math.pi/13
  xa,za=2.41*math.cos(b),4.55+2.41*math.sin(b)
  xb,zb=2.41*math.cos(a),4.55+2.41*math.sin(a)
- verts=[(xa,-.45,za-.01),(xb,-.45,zb-.01),(xb,.45,zb-.01),(xa,.45,za-.01),
-        (xa,-.45,6.96),(xb,-.45,6.96),(xb,.45,6.96),(xa,.45,6.96)]
+ # Meet the extrados exactly and recess the web behind the dressed arch face.
+ # Extending it down the arch at the same depth creates coplanar face strips.
+ verts=[(xa,-.43,za),(xb,-.43,zb),(xb,.43,zb),(xa,.43,za),
+        (xa,-.43,6.96),(xb,-.43,6.96),(xb,.43,6.96),(xa,.43,6.96)]
  physical.append(mesh('Aqueduct bearing masonry',verts,[(3,2,1,0),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],'stone'))
 finish('aqueductSpandrel',physical)
 for j in range(28):

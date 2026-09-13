@@ -80,6 +80,84 @@ test.each(['','_distant'])('bevelled arches have continuous outward-facing surfa
   }
 });
 
+test.each(['','_distant'])('abbey wall backing stays behind the exposed dressed ends at detail %s',async suffix=>{
+  const store=new ModelStore({manifest,materials,read}),parts=await store.load('abbeyWall'+suffix);
+  const stone=raycastSurfaces(parts.filter(p=>p.material===materials.stone)),backing=raycastSurfaces(parts.filter(p=>p.material===materials.stoneDark));
+  // Both wall ends are exposed at the cloister entrances. Test each course
+  // separately so a coplanar backing cannot hide behind the renderer's draw order.
+  for(const side of [-1,1])for(const height of [.295,.885,1.475,2.065])for(const depth of [-.22,0,.22]){
+    const origin=[side*3,height,depth],direction=[-side,0,0],face=stone(origin,direction),core=backing(origin,direction);
+    expect(face,'dressed wall end').not.toBeNull();expect(core,'continuous recessed backing').not.toBeNull();
+    expect(core.distance-face.distance,'backing must sit behind the stone end').toBeGreaterThan(.01);
+  }
+});
+
+test.each(['','_distant'])('abbey wall coping fits the repeated five-metre bays at detail %s',async suffix=>{
+  const store=new ModelStore({manifest,materials,read}),cast=raycastSurfaces(await store.load('abbeyWall'+suffix));
+  // The cap projects across the wall's depth, but adjacent five-metre bays
+  // must not place two top or side faces on the same surface at their ends.
+  const left=cast([-3,2.44,0],[1,0,0]),right=cast([3,2.44,0],[-1,0,0]);
+  expect(left).not.toBeNull();expect(right).not.toBeNull();
+  expect(left.material).toBe(materials.stoneLight);expect(right.material).toBe(materials.stoneLight);
+  const min=-3+left.distance,max=3-right.distance;
+  expect(max-min,'coping length must not exceed the authored bay spacing').toBeLessThanOrEqual(5.0001);
+  expect(max-min,'coping still spans the full wall').toBeGreaterThan(4.95);
+});
+
+test.each(['','_distant'])('bell tower string courses have one top surface at each corner at detail %s',async suffix=>{
+  const store=new ModelStore({manifest,materials,read}),parts=await store.load('bellTower'+suffix);
+  const triangles=parts.filter(p=>p.material===materials.stoneLight).flatMap(part=>{
+    const g=geometry_build_from_meshlet_geometry(part.geometry),positions=g.getAttribute('position').data,indices=g.index.data,result=[];
+    for(let i=0;i<indices.length;i+=3)result.push(Array.from(indices.slice(i,i+3),id=>Array.from(positions.slice(id*3,id*3+3))));
+    return result;
+  });
+  for(const level of [4.6,8.7,12.8,20.5])for(const sx of [-1,1])for(const sz of [-1,1]){
+    const x=sx*2.63,z=sz*2.73,top=level+.2;
+    // Sample away from the diagonal corner joint and triangle edges. Two
+    // crossing rectangular courses used to cover this same exposed area.
+    const covering=triangles.filter(([a,b,c])=>{
+      if(![a,b,c].every(p=>Math.abs(p[1]-top)<.0001))return false;
+      const ab=[b[0]-a[0],b[2]-a[2]],ac=[c[0]-a[0],c[2]-a[2]],ap=[x-a[0],z-a[2]],det=ab[0]*ac[1]-ab[1]*ac[0];
+      if(det>=-1e-8)return false;
+      const u=(ap[0]*ac[1]-ap[1]*ac[0])/det,v=(ab[0]*ap[1]-ab[1]*ap[0])/det;
+      return u>1e-6&&v>1e-6&&u+v<1-1e-6;
+    });
+    expect(covering,`single corner surface at ${x},${top},${z}`).toHaveLength(1);
+  }
+});
+
+test('repeated arcade assets meet without overlapping their exterior faces',()=>{
+  const props=buildLayout().props;
+  for(const z of [-114,-373]){
+    const arches=props.filter(p=>p.model==='arch'&&p.position[2]===z).sort((a,b)=>a.position[0]-b.position[0]);
+    expect(arches.length).toBeGreaterThan(1);
+    for(let i=1;i<arches.length;i++){
+      const a=propBounds(arches[i-1],manifest),b=propBounds(arches[i],manifest);
+      expect(b[0]-a[3],`arcade join at ${arches[i].position}`).toBeCloseTo(0,4);
+    }
+    const feet=props.filter(p=>p.model==='block'&&p.position[2]===z&&Math.abs(p.scale[2]-1.575)<1e-6).sort((a,b)=>a.position[0]-b.position[0]);
+    expect(feet.length).toBeGreaterThan(1);
+    for(let i=1;i<feet.length;i++)expect(propBounds(feet[i],manifest)[0]-propBounds(feet[i-1],manifest)[3],`arcade footing at ${feet[i].position}`).toBeGreaterThan(-.0001);
+  }
+  for(const z of [-114,-114-.78,-114+.78]){
+    const channel=props.filter(p=>p.model==='block'&&p.position[2]===z&&p.scale[0]>6&&p.scale[0]<7).sort((a,b)=>a.position[0]-b.position[0]);
+    expect(channel).toHaveLength(9);
+    for(let i=1;i<channel.length;i++)expect(propBounds(channel[i],manifest)[0]-propBounds(channel[i-1],manifest)[3]).toBeCloseTo(0,4);
+  }
+});
+
+test('aqueduct bearing masonry is recessed behind the dressed arch faces',async()=>{
+  const store=new ModelStore({manifest,materials,read});
+  const arch=raycastSurfaces(await store.load('arch')),web=raycastSurfaces(await store.load('aqueductSpandrel'));
+  // The web used to extend down across the arch on exactly the same front
+  // and back planes. Sample either side of their shared extrados edge.
+  for(const side of [-1,1])for(const x of [-1.3,-.7,.7,1.3]){
+    const stone=arch([x,6.3,side],[0,0,-side]),backing=web([x,6.91,side],[0,0,-side]);
+    expect(stone).not.toBeNull();expect(backing).not.toBeNull();
+    expect(backing.distance-stone.distance).toBeGreaterThan(.015);
+  }
+});
+
 test.each(['','_distant'])('the bronze bell has an open mouth, curved waist and supported yoke at detail %s',async suffix=>{
   const store=new ModelStore({manifest,materials,read}),parts=await store.load('bellTower'+suffix),bronze=parts.filter(p=>p.material===materials.bronze);
   expect(bronze.length).toBeGreaterThan(0);const bell=raycastSurfaces(bronze),tower=raycastSurfaces(parts);

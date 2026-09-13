@@ -7,9 +7,9 @@ import {DUNGEONS,dungeonPoint,dungeonFootprint} from './dungeons.mjs';
 export function generateLayout() {
   const props=[], solids=[], lights=[], banners=[];
   const random=seededRandom(4171);
-  const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z))=>{
+  const add=(model,x,z,scale=1,yaw=0,y=heightAt(x,z),archFootWidth=.85)=>{
     const s=Array.isArray(scale)?scale:[scale,scale,scale],p={model,position:[x,y,z],scale:s,yaw};props.push(p);
-    const feet=model==='arch'?[[-2.05,0,.85,1.05],[2.05,0,.85,1.05]]:model==='bellTower'?[-2.5,2.5].flatMap(fx=>[-2.5,2.5].map(fz=>[fx,fz,1.6,1.6])):model==='column'&&y<=heightAt(x,z)+1?[[0,0,1.5,1.5]]:[];
+    const feet=model==='arch'?[[-2.05,0,archFootWidth,1.05],[2.05,0,archFootWidth,1.05]]:model==='bellTower'?[-2.5,2.5].flatMap(fx=>[-2.5,2.5].map(fz=>[fx,fz,1.6,1.6])):model==='column'&&y<=heightAt(x,z)+1?[[0,0,1.5,1.5]]:[];
     for(const [fx,fz,w,d] of feet){
       const px=x+Math.cos(yaw)*fx*s[0]+Math.sin(yaw)*fz*s[2],pz=z-Math.sin(yaw)*fx*s[0]+Math.cos(yaw)*fz*s[2];
       const ground=Math.min(...[-.5,.5].flatMap(u=>[-.5,.5].map(v=>heightAt(px+Math.cos(yaw)*u*w*s[0]+Math.sin(yaw)*v*d*s[2],pz-Math.sin(yaw)*u*w*s[0]+Math.cos(yaw)*v*d*s[2]))))-.18;
@@ -131,13 +131,15 @@ export function generateLayout() {
   }
   const [ox,oy,oz]=landmarkPosition('oak');add('tree',ox,oz-8,3.7,0,heightAt(ox,oz-8));lamp(ox+5,oz+4);
   // A surviving aqueduct arcade carries a continuous open water channel.
-  // Shared springing height and repeated pier spacing keep its load path clear.
+  // Fit the complete 4.82 m arch width into each bay. Spacing by the pier
+  // centres duplicated both piers and the faces of neighbouring vaults.
   const span=6.15,aqueduct=Math.max(...Array.from({length:9},(_,i)=>heightAt(109+i*span,-114)))+.05,channel=aqueduct+6.96*1.5;
   for(let i=0;i<9;i++){
-    const x=109+i*span;add('arch',x,-114,1.5,0,aqueduct);
-    add('aqueductSpandrel',x,-114,1.5,0,aqueduct);
-    add('block',x,-114,[span+.02,.28,1.75],0,channel-.02);
-    for(const side of [-1,1])add('block',x,-114+side*.78,[span+.02,.55,.18],0,channel+.24);
+    // Paired foundations also stop at the pier edges at these shared joins.
+    const x=109+i*span,scale=[span/4.82,1.5,1.5];add('arch',x,-114,scale,0,aqueduct,.72);
+    add('aqueductSpandrel',x,-114,scale,0,aqueduct);
+    add('block',x,-114,[span,.28,1.75],0,channel-.02);
+    for(const side of [-1,1])add('block',x,-114+side*.78,[span,.55,.18],0,channel+.24);
     if(i%2===0)lamp(x,-110);
   }
   // A covered settling head explains the channel's western terminus. Its
@@ -164,7 +166,7 @@ export function generateLayout() {
   // Open mountain courtyard: keep the naturally walkable slope through the gates.
   for(let i=-2;i<=2;i++){
     add('bellTower',cx+i*8,cz,[1,1.6-Math.abs(i)*.3,1],0,heightAt(cx+i*8,cz)-1);
-    add('arch',cx+i*6,cz+12,1.5,0,heightAt(cx+i*6,cz+12)-.1);
+    add('arch',cx+i*6,cz+12,[6/4.82,1.5,1.5],0,heightAt(cx+i*6,cz+12)-.1,.72);
   }
   add('halo',0,-385,6,0,cy+40);
   for(let i=0;i<8;i++)lamp(-14+i*4,-351);
