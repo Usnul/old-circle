@@ -163,6 +163,12 @@ test('shipped scenery contains every authored placement and static collider in o
   expect(layout.props).toHaveLength(3719);
   expect(dataset.entityCount).toBe(10812);
   expect(dataset.computeComponentCount(RigidBody)).toBe(0);
+  // Presentation deliberately strips rigid bodies; lanterns must index the
+  // remaining native colliders, including terrain, before animated proxies exist.
+  const {LanternScenery}=await import('./lantern-chain.mjs');
+  const lanternScenery=new LanternScenery(dataset);
+  expect(lanternScenery.colliders).toHaveLength(assets.bindings.length);
+  expect(lanternScenery.nearby([0,1,23],4).length).toBeGreaterThan(0);
   const placements=[];
   dataset.traverseEntities([Scenery,Transform64,SGMesh],(scenery,transform,mesh)=>placements.push({scenery,transform,mesh}));
   expect(placements).toHaveLength(layout.props.length);

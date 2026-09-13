@@ -27,6 +27,7 @@ import {GPUStateAuthorityFlags} from '@woosh/meep-engine/src/engine/ecs/gpu/GPUS
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import {MeshletGeometrySerializationAdapter} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometrySerializationAdapter.js';
 import {StandardShadeMaterial} from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
+import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {actorJointPoses,createSimulationSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {Characters} from './characters.mjs';
@@ -66,6 +67,11 @@ async function withNativeCharacters(run){
     const facade={set_scene:()=>{},scene_context:()=>context};
     const view={ecd,models:new Map(),materials:{},model:()=>{
       const id=ecd.createEntity(),t=new Transform64();ecd.addComponentToEntity(id,t);return [{id,t}];
+    },light:(position,color,intensity,type,shadow,distance,radius)=>{
+      const t=new Transform64(),l=new Light(),id=ecd.createEntity();
+      ecd.addComponentToEntity(id,t);ecd.addComponentToEntity(id,l);
+      t.setTranslation(...position);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(radius);l.color.set(...color);l.type.set(type);l.castShadow.set(shadow);
+      return {id,t,l};
     },remove:parts=>{for(const {id} of parts)ecd.removeEntity(id);}};
     const characters=new Characters(view);
     view.meshSystem=new MeshSystem(facade,scene,async url=>characters.bundle(url));
@@ -73,6 +79,7 @@ async function withNativeCharacters(run){
     // a model's primitives are entities, and the system that owns primitives is what puts them in the scene
     em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(view.animations);
     em.addSystem(new TransformAttachmentSystem());em.addSystem(new ClothColliderSystem());view.cloth=new WorldCloth({sample:out=>{out.fill(0);return out;},varies:()=>false},{worker_factory:clothWorker});em.addSystem(view.cloth);em.attachDataset(ecd);
+    ecd.registerComponentType(Light);
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
     for(const [name,file] of [['pilgrim','pilgrim-0.meep'],['briarHound','briarHound-0.meep']]){
       const bytes=await readFile(new URL(`../../public/assets/geometry/${file}`,import.meta.url));
@@ -190,7 +197,7 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
         expect(materialOf().diffuse_color.a).toBe(1);
       }
       if(mode==='pool'){
-        rig.telegraph=view.model();rig.lantern={parts:view.model(),light:{id:ecd.createEntity()}};
+        rig.telegraph=view.model();rig.lantern={parts:view.model(),chain:{dispose(){}},light:{id:ecd.createEntity()}};
       }
       for(const rig of instances){
         if(mode==='pool')characters.remove(rig);
@@ -269,4 +276,34 @@ test('wall contact fades only the local skin and equipment, reuses materials and
   renderer.viewAlpha(rig,.5);expect(materialOf(body)).toBe(faded);
   renderer.clearViewAlpha(rig);expect(materialOf(body)).toBe(shared);expect(rig.viewMaterials).toBeNull();expect(materialOf(weapon)).toBe(shared);
   rig.dead=true;renderer.viewAlpha(rig,0);expect(materialOf(body)).toBe(shared);
+});
+
+test('newly spawned player corpses create and dispose lantern fixtures',async()=>{
+  await withNativeCharacters(async({characters,view})=>{
+    const actor={kind:'player',name:'pilgrim',appearance:'player',weapon:'sword',x:1,y:1,z:2,yaw:0.2,vx:0,vy:0,vz:0,grounded:true,scale:1,animationTime:0,gaitPhase:0};
+    const rig=characters.create(actor);
+    await setImmediate();
+    expect(rig.lantern).toBeUndefined();
+    const state={name:'pilgrim',appearance:'player',weapon:'sword',scale:1,age:0,joints:actorJointPoses(actor)};
+    characters.corpse(rig,state);
+    expect(rig.lantern).toBeDefined();
+    expect(rig.lantern.parts.length).toBeGreaterThan(0);
+    expect(rig.lantern.links.length).toBeGreaterThan(0);
+    expect(rig.lantern.light).toBeDefined();
+    const lightId=rig.lantern.light.id;
+    const lanternParts=[...rig.lantern.parts],lanternLinks=rig.lantern.links.flatMap(link=>[...link]);
+    expect(view.ecd.entityExists(lightId)).toBe(true);
+    for(const part of lanternParts)expect(view.ecd.entityExists(part.id)).toBe(true);
+    for(const part of lanternLinks)expect(view.ecd.entityExists(part.id)).toBe(true);
+    const chain=rig.lantern.chain,bodies=chain.links.slice(),anchorX=chain.anchor.t.translation[0];
+    actor.x+=.05;state.age=1/60;state.joints=actorJointPoses(actor);characters.corpse(rig,state);
+    expect(chain.anchor.t.translation[0]-anchorX).toBeCloseTo(.05,5);
+    expect(chain.links).toEqual(bodies);
+    characters.remove(rig);
+    expect(chain.physics.storage.size).toBe(0);
+    expect(rig.lantern).toBeUndefined();
+    expect(view.ecd.entityExists(lightId)).toBe(false);
+    for(const part of lanternParts)expect(view.ecd.entityExists(part.id)).toBe(false);
+    for(const part of lanternLinks)expect(view.ecd.entityExists(part.id)).toBe(false);
+  });
 });

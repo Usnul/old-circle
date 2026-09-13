@@ -14,7 +14,6 @@ import {gpu_authority_revoke} from '@woosh/meep-engine/src/engine/ecs/gpu/gpu_au
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {shaded_geometry_announce_change} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/shaded_geometry_announce_change.js';
 import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
-import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {m4_invert} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_invert.js';
 import {m4_multiply} from '@woosh/meep-engine/src/core/geom/3d/mat4/m4_multiply.js';
 import {actorRig,actorScale,actorFeet,actorSocket,createSkeleton,animationPlan,rigs} from '@old-circle/game/simulation/animation.mjs';
@@ -23,7 +22,7 @@ import {armorFor} from '@old-circle/game/content/equipment.mjs';
 import {BOSSES} from '@old-circle/game/content/catalog.mjs';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {clothComponents,unkeyCloth} from './cloth.mjs';
-import {LanternChain,hangingRotation} from './lantern-chain.mjs';
+import {LanternChain,lanternBodyBones} from './lantern-chain.mjs';
 import {updateWeaponLight,removeWeaponLight} from './weapon-lights.mjs';
 
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
@@ -103,8 +102,10 @@ export class Characters {
     }
     updateWeaponLight(view,rig);
     if(a.kind==='player'){
-      rig.lantern??={parts:view.model('pilgrimLantern'),links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(),light:view.light([a.x,a.y,a.z],[1,.62,.30],2.4,Light.Type.POINT,false,7,.045),socket:new Transform64(),position:new Vector3()};
-      actorSocket(rig.lantern.socket,a,'hips');this.lanternPose(rig,rig.lantern.socket,1,dt);
+      this.createLantern(rig,[a.x,a.y,a.z]);
+      rig.lantern.bodyPoses??=lanternBodyBones.map(()=>new Transform64());
+      lanternBodyBones.forEach((bone,i)=>actorSocket(rig.lantern.bodyPoses[i],a,bone.name));
+      actorSocket(rig.lantern.socket,a,'hips');this.lanternPose(rig,rig.lantern.socket,1,dt,rig.lantern.bodyPoses);
     }
   }
   viewAlpha(rig,alpha){
@@ -135,14 +136,31 @@ export class Characters {
     if(fading)for(const {faded,material} of rig.viewMaterials)faded.diffuse_color.setA(material.diffuse_color.a*alpha);
   }
   clearViewAlpha(rig){this.viewAlpha(rig,1);rig.viewMaterials=null;}
-  lanternPose(rig,socket,alpha,dt=0){
-    const {view}=this,{parts,links,chain,light,position}=rig.lantern;
-    position.set(-.40,.13,-.08).applyMatrix4(socket);
-    const scale=socket.scale[0],points=chain.update(Array.from(position),scale,dt);
-    const pose=(meshes,index,twist=0)=>{for(const {id,t} of meshes){t.setScale(scale,scale,scale);t.setRotation(...hangingRotation(points[index],points[index+1],twist));t.setTranslation(...points[index]);t.updateMatrix();t64_announce_change(view.ecd,id);}};
-    links.forEach((meshes,i)=>pose(meshes,i,i*Math.PI/2));pose(parts,2);
+  createLantern(rig,position){
+    const {view}=this;
+    if(!rig.lantern){
+      const parts=view.model('pilgrimLantern');
+      for(const {id} of parts){
+        const geometry=view.ecd.getComponent(id,ShadedGeometry);
+        // Shade's shadow pass includes opaque/alpha-tested material buckets;
+        // ShadedGeometry.CastShadow is not forwarded to that renderer. Give
+        // only the luminous core a translucent volume material so it cannot
+        // enclose and occlude its own light. The metal cage remains opaque.
+        if(geometry&&geometry.material===view.materials.ember){
+          geometry.material=geometry.material.clone();geometry.material.transparency_mode=TransparencyMode.Transparent;geometry.material.diffuse_color.setA(.85);shaded_geometry_announce_change(view.ecd,id);
+        }
+      }
+      rig.lantern={parts,links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(view.lanternScenery),light:view.light(position,[1,.62,.30],2.4,Light.Type.POINT,true,7,.045),socket:new Transform64()};
+    }
+  }
+  lanternPose(rig,socket,alpha,dt=0,bodyPoses=[]){
+    const {view}=this,{parts,links,chain,light}=rig.lantern;
+    const scale=socket.scale[0],poses=chain.update(socket,dt,bodyPoses);
+    const pose=(meshes,index)=>{for(const {id,t} of meshes){t.setScale(scale,scale,scale);t.setRotation(...poses[index].rotation);t.setTranslation(...poses[index].position);t.updateMatrix();t64_announce_change(view.ecd,id);}};
+    links.forEach((meshes,i)=>pose(meshes,i));pose(parts,2);
     // The light originates at the ember, below the attachment hook.
-    light.t.setTranslation(...points[3]);light.t.updateMatrix();t64_announce_change(view.ecd,light.id);light.l.intensity.set(2.4*alpha);
+    // Preserve the flame-sized emitter while fading its illumination with the wearer.
+    light.t.setTranslation(...chain.ember);light.t.updateMatrix();t64_announce_change(view.ecd,light.id);light.l.intensity.set(2.4*alpha);
   }
   corpse(rig,state){
     const {view}=this;
@@ -175,7 +193,8 @@ export class Characters {
     // Each joint's offset is announced on the joint, parents first; the mesh system carries the
     // announcement to the joint's row, and the GPU composes the chain from the offsets.
     for(let i=0;i<bones.length;i++)ecd.sendEvent(skin.joints[i],TRANSFORM_ATTACHMENT_EVENT_CHANGE);
-    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],clamp01((45-state.age)/4),Math.max(0,state.age-(rig.lantern.age??state.age)));
+    if(state.appearance==='player')this.createLantern(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')].translation);
+    if(rig.lantern)this.lanternPose(rig,rig.worldPoses[bones.findIndex(b=>b.name==='hips')],clamp01((45-state.age)/4),Math.max(0,state.age-(rig.lantern.age??state.age)),lanternBodyBones.map(bone=>rig.worldPoses[bones.findIndex(b=>b.name===bone.name)]));
     if(rig.lantern)rig.lantern.age=state.age;
   }
   remove(rig){
@@ -184,7 +203,7 @@ export class Characters {
     if(view.ecd.getComponent(rig.id,Cloth))view.ecd.removeComponentFromEntity(rig.id,Cloth);
     removeWeaponLight(view,rig);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
-    if(rig.lantern){view.remove(rig.lantern.parts);for(const link of rig.lantern.links??[])view.remove(link);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
+    if(rig.lantern){rig.lantern.chain.dispose();view.remove(rig.lantern.parts);for(const link of rig.lantern.links??[])view.remove(link);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
     // Meep 3.22 fixes MEEP-005, but despawning still retains BLAS data (MEEP-012).
     // Retain the registered instance offstage and reuse it on the next spawn.
     rig.t.makeIdentity();rig.t.setTranslation(0,-10000,0);rig.t.updateMatrix();t64_announce_change(view.ecd,rig.id);

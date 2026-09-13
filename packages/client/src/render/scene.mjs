@@ -33,6 +33,7 @@ import {WorldVFX} from './particle-vfx.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
+import {LanternScenery} from './lantern-chain.mjs';
 import {WorldWind} from './wind.mjs';
 import {WorldCloth} from './cloth.mjs';
 import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
@@ -85,6 +86,7 @@ export class WorldView {
     this.vfx=new WorldVFX(this);
     const manifest = await fetch('/assets/geometry/manifest.json').then(response => response.json());
     await loadScenery(manifest, this.ecd);
+    this.lanternScenery=new LanternScenery(this.ecd);
     await this.vfx.prepare(this.engine.assetManager);
     this.wind.attach(this.ecd);this.wind.follow(0,heightAt(0,23)+1,23);
     this.engine.viewStack.el.classList.add('meep-world');
