@@ -19,6 +19,7 @@ import { ParticipatingMedia } from '@woosh/meep-engine/src/engine/graphics3/Part
 import {VolumetricsParticleSpec} from '@woosh/meep-engine/src/shade/renderer/volumetrics/ParticipatingMediaVolume.js';
 import {MIE_PARTICLES_STANDARD_PRECOMPUTED} from '@woosh/meep-engine/src/core/math/physics/mie/MIE_PARTICLES_STANDARD_PRECOMPUTED.js';
 import { StandardShadeMaterial } from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
+import { ShadeDrawSide } from '@woosh/meep-engine/src/shade/renderer/material/ShadeDrawSide.js';
 import {TransparencyMode} from '@woosh/meep-engine/src/shade/renderer/material/TransparencyMode.js';
 import { ShadeTexture } from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import { ShadeImage } from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
@@ -104,6 +105,8 @@ export class WorldView {
       if(key==='ember')m.emissive_factor.set(4,1,.08);if(key==='magic')m.emissive_factor.set(.02,.17,.25);
       this.materials[key]=m;
     }
+    // Hoods and shoulder cowls are open cloth shells shared by player and enemy outfits.
+    this.materials.cloth.draw_side=ShadeDrawSide.Double;
     for(const [name,color] of Object.entries({grass:[.16,.24,.075],grassLight:[.30,.34,.12],grassDark:[.075,.13,.055],grassDry:[.24,.22,.105],fernLeaf:[.12,.20,.085]})){
       this.materials[name]??=new StandardShadeMaterial();this.materials[name].diffuse_color.set(...color);this.materials[name].roughness_factor=.92;
     }
