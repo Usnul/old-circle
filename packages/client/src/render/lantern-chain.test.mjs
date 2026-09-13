@@ -191,7 +191,7 @@ test('characters removal disposes lantern bodies and joints',()=>{
   expect(rig.lantern).toBeUndefined();
 });
 
-test.each(['bow','spear'])('%s arm motion leaves the shadow-casting lamp on the hips belt',weapon=>{
+test.each(['bow','spear'])('%s arm motion leaves the lamp on the hips belt without light shadows',weapon=>{
   const ecd=new EntityComponentDataset();
   ecd.registerComponentType(Transform64);ecd.registerComponentType(Light);ecd.registerComponentType(ShadedGeometry);
   const events=vi.spyOn(ecd,'sendEvent'),materials={ember:new StandardShadeMaterial(),brass:new StandardShadeMaterial(),iron:new StandardShadeMaterial()};
@@ -218,7 +218,7 @@ test.each(['bow','spear'])('%s arm motion leaves the shadow-casting lamp on the 
     handOffsets.push(new Vector3(...hand.translation).applyMatrix4(inverse));
   }
   expect(Math.max(...handOffsets.map(p=>p.distanceTo(handOffsets[0])))).toBeGreaterThan(.1);
-  expect(rig.lantern.light.l.castShadow.getValue()).toBe(true);expect(rig.lantern.light.l.radius.getValue()).toBe(.045);expect(rig.lantern.light.l.distance.getValue()).toBe(7);
+  expect(rig.lantern.light.l.castShadow.getValue()).toBe(false);expect(rig.lantern.light.l.radius.getValue()).toBe(.045);expect(rig.lantern.light.l.distance.getValue()).toBe(7);
   const chunks=[...rig.lantern.parts,...rig.lantern.links.flat()].map(({id})=>ecd.getComponent(id,ShadedGeometry).material);
   const ember=rig.lantern.parts[1],core=ecd.getComponent(ember.id,ShadedGeometry).material,shadowCasters=[];
   // The real point shadow job draws exactly opaque and alpha-tested buckets;

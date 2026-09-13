@@ -150,7 +150,7 @@ export class Characters {
           geometry.material=geometry.material.clone();geometry.material.transparency_mode=TransparencyMode.Transparent;geometry.material.diffuse_color.setA(.85);shaded_geometry_announce_change(view.ecd,id);
         }
       }
-      rig.lantern={parts,links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(view.lanternScenery),light:view.light(position,[1,.62,.30],2.4,Light.Type.POINT,true,7,.045),socket:new Transform64()};
+      rig.lantern={parts,links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(view.lanternScenery),light:view.light(position,[1,.62,.30],2.4,Light.Type.POINT,false,7,.045),socket:new Transform64()};
     }
   }
   lanternPose(rig,socket,alpha,dt=0,bodyPoses=[]){
