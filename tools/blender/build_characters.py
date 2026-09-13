@@ -103,7 +103,7 @@ for suffix,side in [('L',-1),('R',1)]:
 # cape fold across its width and resolve body contacts along the whole hem.
 CAPE_COLUMNS=5;CAPE_ROWS=8
 CAPE_MESH_COLUMNS=25;CAPE_MESH_ROWS=33
-def cape_point(s,t):return ((s-.5)*(.48+t*.28),.30+t*.13,1.43-t*1.17)
+def cape_point(s,t):return ((s-.5)*(.48+t*.28),.185+t*.18,1.43-t*1.17)
 def cape_joint(col,row):return 'cloak'+str(2+(row-1)*CAPE_COLUMNS+col)
 HUMAN.append(('cloak1','chest',cape_point(.5,0),cape_point(.5,1/CAPE_ROWS),0,0))
 for row in range(1,CAPE_ROWS+1):

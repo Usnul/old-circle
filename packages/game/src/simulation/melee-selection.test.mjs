@@ -51,6 +51,44 @@ test.each(Object.keys(MELEE_ATTACKS))('%s selection follows translated, turned a
   }
 });
 
+test.each(Object.keys(MELEE_ATTACKS))('%s changes trajectory for the same enemy when either actor changes elevation',weapon=>{
+  const actor=fighter({weapon}),target=enemy(),clips=[];
+  for(const rise of [-.5,.65]){
+    // These are the same relative arrangement: target on a ledge versus player
+    // in a hollow, or target below a ledge versus player on higher ground.
+    const movedTarget={...target,y:target.y+rise},movedActor={...actor,y:actor.y-rise};
+    const clip=selectMeleeAttack(actor,[movedTarget]);clips.push(clip);
+    expect(selectMeleeAttack(movedActor,[target])).toBe(clip);
+    expect(bladeDistance(actor,clip,centre(movedTarget))).toBeLessThan(.47);
+    expect(bladeDistance(movedActor,clip,centre(target))).toBeLessThan(.47);
+  }
+  expect(clips[0]).not.toBe(clips[1]);
+  expect(clips[1]).toBe(weapon+'_high');
+});
+
+test.each(Object.keys(MELEE_ATTACKS))('%s can choose a high swing for the same hound on a ledge',weapon=>{
+  const actor=fighter({weapon}),hound=enemy({archetype:'hound'}),raised={...hound,y:hound.y+1};
+  const groundClip=selectMeleeAttack(actor,[hound]),ledgeClip=selectMeleeAttack(actor,[raised]);
+  expect(groundClip).not.toBe(ledgeClip);expect(ledgeClip).toBe(weapon+'_high');
+  expect(bladeDistance(actor,groundClip,centre(hound))).toBeLessThan(.41);
+  expect(bladeDistance(actor,ledgeClip,centre(raised))).toBeLessThan(.41);
+});
+
+test.each(Object.keys(MELEE_ATTACKS))('%s elevation and camera choices are invariant when the whole encounter changes altitude',weapon=>{
+  const low=enemy({id:'low',x:.2,y:.345}),high=enemy({id:'high',x:-.5,y:1.495});
+  for(let attackId=0;attackId<4;attackId++)for(const pitch of [.8,-.5]){
+    const actor=fighter({weapon,attackId,intent:{pitch}}),targets=[low,high];
+    const expected=selectMeleeAttack(actor,targets),intended=pitch>0?low:high;
+    expect(expected).toBe(selectMeleeAttack(actor,[intended]));
+    expect(bladeDistance(actor,expected,centre(intended))).toBeLessThan(.47);
+    for(const altitude of [-120,35,450]){
+      const shiftedActor={...actor,y:actor.y+altitude},shiftedTargets=targets.map(t=>({...t,y:t.y+altitude}));
+      expect(selectMeleeAttack(shiftedActor,shiftedTargets)).toBe(expected);
+      expect(selectMeleeAttack(shiftedActor,shiftedTargets.reverse())).toBe(expected);
+    }
+  }
+});
+
 test.each(Object.keys(MELEE_ATTACKS))('%s ignores dead, allied, distant, behind and occluded targets',weapon=>{
   const actor=fighter({weapon}),target=enemy({y:1.495}),expected=selectMeleeAttack(actor,[target]);
   const ignored=[enemy({id:'dead',hp:0}),enemy({id:'friend',kind:'player'}),enemy({id:'far',z:-20}),enemy({id:'behind',z:1}),enemy({id:'occluded',archetype:'hound'})];

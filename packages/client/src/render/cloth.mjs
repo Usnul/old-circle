@@ -3,6 +3,7 @@ import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig
 import {WorkerClothSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/WorkerClothSystem.js';
 import {makeClothWorker} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/makeClothWorker.js';
 import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
+import {ClothDynamicsFlags} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothDynamicsFlags.js';
 import {AbstractClothWind} from '@woosh/meep-engine/src/engine/physics/cloth/wind/AbstractClothWind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
@@ -21,10 +22,15 @@ const clothJoint=name=>/^(cloak|cloth)\d+$/.test(name);
 // Damage capsules follow the anatomy, while cloth must clear the coat, armour
 // and shoulder pads as well. Add a small contact margin for the skinned surface
 // between solver particles, not just for the particles themselves.
-const clothedRadius={hips:.20,spine:.215,chest:.23,head:.17,upperArmL:.12,upperArmR:.12,forearmL:.095,forearmR:.095,thighL:.12,thighR:.12,calfL:.09,calfR:.09};
+const clothedRadius={hips:.20,spine:.19,chest:.20,head:.17,upperArmL:.12,upperArmR:.12,forearmL:.095,forearmR:.095,thighL:.145,thighR:.145,calfL:.10,calfR:.10};
 const bodyBones=rigs.pilgrim.bones.flatMap((bone,index)=>bone.radius>0?[{...bone,radius:clothedRadius[bone.name]??bone.radius,index}]:[]);
 const capeDynamics=CLOTH_COTTON.clone();
-capeDynamics.stretch=.96;capeDynamics.bend=.10;capeDynamics.slack=.24;capeDynamics.damping=.16;
+// A travelling coat should hold a fold and settle after a stride. Inertia is
+// the fraction of anchor motion felt by the cloth, not particle mass; drag is
+// air coupling. Cotton's full inertia/high drag made these short strips whip.
+capeDynamics.stretch=.96;capeDynamics.bend=.62;capeDynamics.slack=.12;capeDynamics.damping=.5;
+capeDynamics.inertia=.25;capeDynamics.drag=.055;
+capeDynamics.flags|=ClothDynamicsFlags.StrainLimit;
 // Short links need finer collision sweeps during a gust or a fast body turn.
 capeDynamics.substeps=4;
 Object.freeze(capeDynamics);
@@ -102,7 +108,10 @@ export class WorldCloth extends WorkerClothSystem {
         t.setTranslation(pose[12]+pose[4]*half,pose[13]+pose[5]*half,pose[14]+pose[6]*half);
         t.setRotation(...pose.rotation);t.updateMatrix();
         if(!part){
-          const collider=new Collider();collider.shape=CapsuleShape3D.from(bone.radius*scale,Math.max(.02,bone.length-2*bone.radius)*scale);collider.friction=.3;
+          // Cover the full trouser leg, including the hip and knee seams. A
+          // capsule shortened by its two radii tapers to nothing at each joint.
+          const leg=/^(thigh|calf)/.test(bone.name),length=leg?bone.length:Math.max(.02,bone.length-2*bone.radius);
+          const collider=new Collider();collider.shape=CapsuleShape3D.from(bone.radius*scale,length*scale);collider.friction=.3;
           const marker=ClothCollider.from({inflation:.035*scale,friction_scale:.25});
           const id=new Entity().add(t).add(collider).add(marker).build(ecd);
           bodies.parts.push({id,t,bone:bone.index});

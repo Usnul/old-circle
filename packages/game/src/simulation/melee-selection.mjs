@@ -34,7 +34,9 @@ export function selectMeleeAttack(actor,targets,visible=()=>true){
   for(const target of targets){
     if(!canDamage(actor,target))continue;
     const targetScale=actorScale(target),base=actorFeet(target),hound=target.archetype==='hound';
-    // Aim for visible flesh/armour, including the low body of the hound.
+    // Rig proportions locate the target's body in world space; subtracting the
+    // attacker's feet below makes selection respond to either actor's elevation.
+    // A hound on a ledge can therefore require a high swing.
     const center=[target.x,base[1]+(hound?.65:target.crouch?.6:1.05)*targetScale,target.z];
     const dx=center[0]-feet[0],dz=center[2]-feet[2],forward=-s*dx-c*dz,distance=Math.hypot(dx,dz);
     if(forward<.05||distance>WEAPONS[actor.weapon].reach*scale+.5)continue;
