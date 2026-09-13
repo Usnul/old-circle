@@ -18,7 +18,16 @@ import {createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 
 const proxies=new Map();
 const clothJoint=name=>/^(cloak|cloth)\d+$/.test(name);
-const bodyBones=rigs.pilgrim.bones.flatMap((bone,index)=>bone.radius>0?[{...bone,index}]:[]);
+// Damage capsules follow the anatomy, while cloth must clear the coat, armour
+// and shoulder pads as well. Add a small contact margin for the skinned surface
+// between solver particles, not just for the particles themselves.
+const clothedRadius={hips:.20,spine:.215,chest:.23,head:.17,upperArmL:.12,upperArmR:.12,forearmL:.095,forearmR:.095,thighL:.12,thighR:.12,calfL:.09,calfR:.09};
+const bodyBones=rigs.pilgrim.bones.flatMap((bone,index)=>bone.radius>0?[{...bone,radius:clothedRadius[bone.name]??bone.radius,index}]:[]);
+const capeDynamics=CLOTH_COTTON.clone();
+capeDynamics.stretch=.96;capeDynamics.bend=.10;capeDynamics.slack=.24;capeDynamics.damping=.16;
+// Short links need finer collision sweeps during a gust or a fast body turn.
+capeDynamics.substeps=4;
+Object.freeze(capeDynamics);
 
 /** Cloth owns these offsets; even constant clip channels would reclaim them
  * when a new locomotion/action clip binds. The top joint stays in its bind pose. */
@@ -40,7 +49,7 @@ export function clothComponents(name){
     if(!proxy)throw new Error(error);
     proxies.set(name,proxy);
   }
-  return [ClothRig.from(proxies.get(name)),Cloth.from(name==='votiveBanner'?CLOTH_SILK:CLOTH_COTTON)];
+  return [ClothRig.from(proxies.get(name)),Cloth.from(name==='votiveBanner'?CLOTH_SILK:capeDynamics)];
 }
 
 /** Native fluid drag plus body capsules posed from the same playbacks as the
@@ -94,7 +103,7 @@ export class WorldCloth extends WorkerClothSystem {
         t.setRotation(...pose.rotation);t.updateMatrix();
         if(!part){
           const collider=new Collider();collider.shape=CapsuleShape3D.from(bone.radius*scale,Math.max(.02,bone.length-2*bone.radius)*scale);collider.friction=.3;
-          const marker=ClothCollider.from({inflation:.015*scale,friction_scale:.25});
+          const marker=ClothCollider.from({inflation:.035*scale,friction_scale:.25});
           const id=new Entity().add(t).add(collider).add(marker).build(ecd);
           bodies.parts.push({id,t,bone:bone.index});
         }

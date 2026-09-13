@@ -1,14 +1,19 @@
 """Masonry at metre scale, with explicit collision pieces and usable openings."""
-import math,random
+import bpy,math,random
 from mathutils import Vector,noise
 
 def build_architecture(cube,cone,beam,ico,mesh,finish,_current):
     random.seed(813)
-    base=cube((0,0,-.16),(30,30,.30),'stoneDark',.03)
+    cube((0,0,-.16),(30,30,.30),'stoneDark',.03)
     for y in range(15):
         for x in range(15):
             cube((-14+x*2,-14+y*2,.018+random.uniform(-.006,.006)),(1.985,1.985,.09),'stoneDark' if (x+y)%5==0 else 'stone',.016)
-    finish('abbeyFloor',[base])
+    # The buried foundation ends below terrain. Support the visible paving at
+    # its walking surface, or foot contacts and the character capsule hit grass.
+    support=cube((0,0,-.125),(30,30,.37),'stoneDark',0)
+    _current.remove(support)
+    finish('abbeyFloor',[support])
+    bpy.data.objects.remove(support,do_unlink=True)
 
     # A low cloister wall: ruin height varies, with a continuous sheltered interior.
     physical=[cube((0,0,1.18),(5,.69,2.36),'stoneDark',0)]

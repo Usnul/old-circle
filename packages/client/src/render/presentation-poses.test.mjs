@@ -1,5 +1,11 @@
 import {expect,test} from 'vitest';
 import {PresentationPoses} from './presentation-poses.mjs';
+
+test('attack variant follows the same delayed timeline as its age and ID',()=>{
+  const poses=new PresentationPoses(),a={id:'player',x:0,y:1,z:0,yaw:0,attackKind:'weapon',attackId:1,attackAge:.4,attackVariant:'sword_low'};
+  poses.accept({actors:[a]},0);const b={...a,attackId:2,attackAge:.02,attackVariant:'sword_high'};poses.accept({actors:[b]},1/30);
+  expect(poses.sample(b,.05)).toMatchObject({attackId:1,attackAge:.4,attackVariant:'sword_low'});
+});
 test('Meep pose interpolation gives continuous travel and shortest-arc facing',()=>{
   const poses=new PresentationPoses(),a={id:'player',x:0,y:1,z:0,yaw:Math.PI-.05};
   poses.accept({actors:[a]},0);const b={...a,x:.12,yaw:-Math.PI+.05};poses.accept({actors:[b]},1/30);

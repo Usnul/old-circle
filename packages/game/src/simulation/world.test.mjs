@@ -33,6 +33,32 @@ test('native foot rays ignore characters and identify the contacted floor and it
   const plank=w.footSurface([180,y+1.2,50]);expect(plank.surface).toBe('wood');expect(plank.position[1]).toBeCloseTo(y+1.2,3);
   expect(w.footSurface([180,y+5,50])).toBeNull();
 });
+test('spawn court footsteps contact the visible stone paving above the terrain',async()=>{
+  const w=await setup(),y=heightAt(1,20);
+  for(const z of [14,20,26])for(const x of [-4,1,6]){
+    const hit=w.footSurface([x,y+.06,z]);
+    expect(hit?.surface,`paving at ${x}, ${z}`).toBe('stone');
+    expect(hit.position[1]).toBeCloseTo(y+.06,3);
+    expect(hit.normal[1]).toBeGreaterThan(.99);
+  }
+  // Outside the court the same query still finds the exposed terrain.
+  const x=12,z=20,ground=heightAt(x,z),hit=w.footSurface([x,ground,z]);
+  expect(hit.surface).toBe('terrain');expect(hit.position[1]).toBeCloseTo(ground,3);
+});
+test.each(['sword','spear'])('selected %s swings physically hit lower and elevated enemies through native blade sweeps',async weapon=>{
+  const w=await setup(),a=w.addPlayer('attacker');a.weapon=weapon;a.grounded=true;
+  w.teleport(a,[100,15,30]);
+  for(const rise of [-.5,.65]){
+    const target=w.spawnActor('target-'+rise,{hp:1000,healthMax:1000},[100,15+rise,28.5]);
+    for(let attackId=0;attackId<4;attackId++){
+      target.hp=1000;a.stamina=100;a.attackId=attackId;w.attack(a);
+      for(let tick=0;tick<30;tick++)w.advanceAttack(a,1/60);
+      expect(target.hp,`${a.attackVariant} at height offset ${rise}`).toBeLessThan(1000);
+      expect(a.hitIds).toEqual([target.id]);
+    }
+    target.hp=0;w.syncActorCollider(target);
+  }
+});
 test('armor protects differently against physical blows and magic and reduces knockback',async()=>{
   const w=await setup(),p=w.addPlayer('armored'),enemy=w.spawnActor('attacker',{},[p.x+3,p.y,p.z]);
   p.inventory.armor='sentinel';const hp=p.hp;
@@ -221,7 +247,8 @@ test('native enemy blade hits use encounter level once, with armor applied after
   w.teleport(p,[100,15,28.5]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='sentinel';
   for(const level of [1,28]){
     a.level=level;a.stamina=a.staminaMax;p.hp=p.healthMax;const hp=p.hp;w.attack(a);
-    for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
+    // Reverse swings cross the target late in the same authored active window.
+    for(let age=WEAPONS[a.weapon].active[0];age<=WEAPONS[a.weapon].active[1];age+=1/60){a.attackAge=age;w.melee(a);}
     expect(hp-p.hp).toBeCloseTo(enemyDamage(a)*(1-ARMOR.sentinel.physical));
     expect(a.hitIds).toEqual([p.id]);
   }
@@ -309,7 +336,7 @@ test('character handoff preserves velocity, crouch and action phase without rest
   const local=await setup(),server=await setup(),p=local.addPlayer('moving');server.addPlayer(p.id);
   local.setCrouch(p,true);local.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});run(local,45);local.attack(p);local.advanceAttack(p,.2);
   p.sprintExhausted=true;const saved=local.exportCharacter(p.id);server.importCharacter(p.id,saved);const returning=server.actor(p.id);
-  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId','sprintExhausted'])expect(returning[key],key).toBe(p[key]);
+  for(const key of ['vx','vy','vz','yaw','crouch','animationTime','gaitPhase','attackAge','attackId','attackVariant','sprintExhausted'])expect(returning[key],key).toBe(p[key]);
   server.input(p.id,{x:1,z:0,yaw:.6,buttons:BUTTON.CROUCH});server.step();expect(returning.vx).toBeGreaterThan(1);expect(returning.attackAge).toBeGreaterThan(.2);
 });
 test('a fast arrow hits a thin wall before the actor behind it',async()=>{

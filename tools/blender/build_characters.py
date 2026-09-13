@@ -99,12 +99,18 @@ for suffix,side in [('L',-1),('R',1)]:
       ('calf'+suffix,'thigh'+suffix,(side*.14,-.02,.51),(side*.14,0,.10),.065,3),
       ('foot'+suffix,'calf'+suffix,(side*.14,0,.10),(side*.14,-.21,.07),.06,1),
     ])
-HUMAN.extend([
- ('cloak1','chest',(0,.19,1.43),(0,.25,1.03),0,0),
- ('cloak2','cloak1',(0,.25,1.03),(0,.31,.64),0,0),
- ('cloak3','cloak2',(0,.31,.64),(0,.38,.26),0,0),
- ('weapon','handR',(.5,-.03,.90),(.60,-.02,.72),0,0),
-])
+# The solver samples joints, not render vertices: several short strips let the
+# cape fold across its width and resolve body contacts along the whole hem.
+CAPE_COLUMNS=5;CAPE_ROWS=8
+CAPE_MESH_COLUMNS=25;CAPE_MESH_ROWS=33
+def cape_point(s,t):return ((s-.5)*(.48+t*.28),.30+t*.13,1.43-t*1.17)
+def cape_joint(col,row):return 'cloak'+str(2+(row-1)*CAPE_COLUMNS+col)
+HUMAN.append(('cloak1','chest',cape_point(.5,0),cape_point(.5,1/CAPE_ROWS),0,0))
+for row in range(1,CAPE_ROWS+1):
+    for col in range(CAPE_COLUMNS):
+        s=col/(CAPE_COLUMNS-1)
+        HUMAN.append((cape_joint(col,row),'cloak1' if row==1 else cape_joint(col,row-1),cape_point(s,row/CAPE_ROWS),cape_point(s,(row+1)/CAPE_ROWS),0,0))
+HUMAN.append(('weapon','handR',(.5,-.03,.90),(.60,-.02,.72),0,0))
 
 def make_rig(name,definitions):
     arm=bpy.data.armatures.new(name);rig=bpy.data.objects.new(name,arm);bpy.context.collection.objects.link(rig)
@@ -137,28 +143,40 @@ def human_mesh(variant='pilgrim'):
     if variant=='wayfarer':
         plate((.23,-.09,1.02),(.13,.13,.20),'hips','leather',.035)
         plate((-.22,.10,1.04),(.15,.13,.14),'hips','leather',.03)
-    # Cloth spans several joints, with a frayed silhouette and a centre split.
+    # Four neighboring simulated joints skin each patch; the complete top edge
+    # belongs to the fixed shoulder joint. Extra mesh rows keep folds smooth.
     verts=[];faces=[]
-    for row in range(17):
-        t=row/16
-        for col in range(13):
-            s=col/12;z=1.43-t*(.78 if variant=='wayfarer' else 1.17)
-            if row==16:z+=.04*math.sin(col*2.7)+(.12 if col==6 else 0)
-            verts.append(((s-.5)*(.48+t*.28),.19+t*.19+math.sin(s*TAU*3)*.025,z))
-    for row in range(16):
-        for col in range(12):
-            a=row*13+col;faces.extend([(a,a+13,a+1),(a+1,a+13,a+14),(a+1,a+13,a),(a+14,a+13,a+1)])
+    for row in range(CAPE_MESH_ROWS):
+        t=row/(CAPE_MESH_ROWS-1)
+        for col in range(CAPE_MESH_COLUMNS):
+            s=col/(CAPE_MESH_COLUMNS-1);x,y,z=cape_point(s,t*(2/3 if variant=='wayfarer' else 1))
+            y+=math.sin(s*TAU*3)*.018
+            if row==CAPE_MESH_ROWS-1:z+=.04*math.sin(s*12*2.7)+.12*max(0,1-abs(s-.5)*24)
+            verts.append((x,y,z))
+    for row in range(CAPE_MESH_ROWS-1):
+        for col in range(CAPE_MESH_COLUMNS-1):
+            a=row*CAPE_MESH_COLUMNS+col;b=a+CAPE_MESH_COLUMNS
+            faces.extend([(a,b,a+1),(a+1,b,b+1),(a+1,b,a),(b+1,b,a+1)])
     mesh=bpy.data.meshes.new('Weighted travelling cloak');mesh.from_pydata(verts,[],faces);mesh.update()
     obj=bpy.data.objects.new('Travelling cloak',mesh);bpy.context.collection.objects.link(obj);obj.data.materials.append(MATERIALS['cloak']);objects.append(obj)
+    obj['cloth_columns']=CAPE_MESH_COLUMNS;obj['cloth_rows']=CAPE_MESH_ROWS
     uv=mesh.uv_layers.new(name='Travelling cloth atlas')
-    for loop in mesh.loops:uv.data[loop.index].uv=(loop.vertex_index%13/12,1-(loop.vertex_index//13)/16)
-    groups=[obj.vertex_groups.new(name='cloak'+str(i+1)) for i in range(3)]
+    for loop in mesh.loops:uv.data[loop.index].uv=(loop.vertex_index%CAPE_MESH_COLUMNS/(CAPE_MESH_COLUMNS-1),1-(loop.vertex_index//CAPE_MESH_COLUMNS)/(CAPE_MESH_ROWS-1))
+    groups={name:obj.vertex_groups.new(name=name) for name,*_ in HUMAN if name.startswith('cloak')}
     for index,vert in enumerate(verts):
-        u=max(0,min(2,(1.43-vert[2])/.4));lo=int(u);hi=min(2,lo+1)
-        groups[lo].add([index],1-(u-lo),'REPLACE')
-        if hi!=lo:groups[hi].add([index],u-lo,'REPLACE')
+        # Use the authored row rather than the frayed edge's height for weights.
+        u=(index//CAPE_MESH_COLUMNS)/(CAPE_MESH_ROWS-1)*CAPE_ROWS*(2/3 if variant=='wayfarer' else 1)
+        across=index%CAPE_MESH_COLUMNS/(CAPE_MESH_COLUMNS-1)*(CAPE_COLUMNS-1)
+        lo=min(CAPE_ROWS-1,int(u));left=min(CAPE_COLUMNS-2,int(across));weights={}
+        for r,rw in [(lo,1-(u-lo)),(lo+1,u-lo)]:
+            for c,cw in [(left,1-(across-left)),(left+1,across-left)]:
+                name='cloak1' if r==0 else cape_joint(c,r);weights[name]=weights.get(name,0)+rw*cw
+        for name,weight in weights.items():
+            if weight>0:groups[name].add([index],weight,'REPLACE')
 
 def human_pose(kind,time,duration,weapon):
+    variant=kind.split('_',1)[1] if kind.startswith(('sword_','spear_')) else ''
+    if variant:kind=kind.split('_',1)[0]
     direction=(0,-1)
     for suffix,angle in [('forward_right',45),('back_right',135),('back_left',225),('forward_left',315),('right',90),('back',180),('left',270)]:
         if kind.endswith('_'+suffix):
@@ -278,6 +296,22 @@ def human_pose(kind,time,duration,weapon):
         right=body((.31,-.23,.14+.66*amount));left=body((-.31,-.23,.14+.66*amount));direction=v((0,0,-1))
     elif kind=='jump':
         tuck=math.sin(math.pi*phase);right=body((.39,-.1,.12+.28*tuck));left=body((-.39,-.2,.10+.24*tuck))
+    # Different authored hand paths and blade elevations share the same leg
+    # plant and recovery. Both the exported skin and damage socket use these.
+    if variant:
+        active=smooth(time/.18)*(1-smooth((time-(duration-.25))/.25))
+        if variant=='low':
+            right.z-=.22*active;left.z-=.14*active
+            direction=direction.lerp(v((direction.x,-1,-.62)).normalized(),active).normalized()
+        elif variant=='high':
+            right.z+=.13*active;left.z+=.08*active
+            direction=direction.lerp(v((direction.x,-1,.52)).normalized(),active).normalized()
+        elif variant=='reverse':
+            right.x-=.40*active
+            direction.x=-direction.x
+        elif variant=='sweep':
+            arc=keypose([(0,(0,0,0)),(.24,(-.85,0,0)),(.46,(.85,0,0)),(.85,(0,0,0))],time,flow=True).x
+            right.x+=arc*.16;direction=v((arc,-1,-.10)).normalized()
     direction=(thorax@direction).normalized()
     definitions={d[0]:d for d in HUMAN}
     for suffix,side,shoulder,hand in [('R',1,shoulderR,right),('L',-1,shoulderL,left)]:
@@ -359,7 +393,9 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
                 for vi,li in zip(triangle.vertices,triangle.loops):
                     vert=mesh.vertices[vi];p=C@(obj.matrix_world@vert.co);n=C.to_3x3()@(nm@(triangle.normal if mat=='cloak' else vert.normal)).normalized()
                     chunk['indices'].append(len(chunk['positions'])//3);chunk['positions'].extend(p);chunk['normals'].extend(n)
-                    if mat=='cloak':uv=(vi%13/12,(vi//13)/16)
+                    if mat=='cloak':
+                        columns=obj.get('cloth_columns',13);rows=obj.get('cloth_rows',17)
+                        uv=(vi%columns/(columns-1),(vi//columns)/(rows-1))
                     elif abs(face.y)>.65:uv=(p.x*2,p.z*2)
                     elif abs(face.x)>abs(face.z):uv=(p.z*2,p.y*2)
                     else:uv=(p.x*2,p.y*2)
@@ -392,7 +428,6 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
                     # Follow the animated chest in bind-local pose. Runtime
                     # ClothRig owns these joints, so Actions do not key them.
                     rig.pose.bones[b.name].matrix_basis=Matrix.Identity(4)
-                    bpy.context.view_layer.update()
                     continue
                 head,tail,*basis=poses[b.name];rest_dir=b.tail_local-b.head_local;direction=tail-head
                 orientation=(basis[0].to_quaternion() if basis else rest_dir.rotation_difference(direction))@b.matrix_local.to_quaternion()
@@ -443,6 +478,8 @@ for weapon in ['sword','spear','bow','staff']:
         for direction in ['forward_right','right','back_right','back','back_left','left','forward_left']:
             name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
+for weapon,duration,variants in [('sword',.72,['reverse','low','high']),('spear',.85,['sweep','low','high'])]:
+    for variant in variants:clips.append((weapon+'_'+variant,weapon+'_'+variant,duration,weapon))
 for name,windup,recovery in [('bell_slam',1.2,1.45),('root_call',1.05,1.4),('cinder_volley',.95,1.1),('mirror_prayer',1.1,1.3),('winter_sweep',1.15,1.5),('king_judgment',1.45,1.7)]:clips.append((name,name,windup+recovery,'spear'))
 export('pilgrim',HUMAN,human_mesh,human_pose,clips)
 for variant in ['wayfarer','keeper','sentinel','winter']:

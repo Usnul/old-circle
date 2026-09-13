@@ -77,7 +77,7 @@ export class PresentationPoses {
       for(const key of ['animationTime','gaitPhase','vx','vy','vz'])if(Number.isFinite(a[key])&&Number.isFinite(b[key]))result[key]=lerp(a[key],b[key],alpha);
       if(!a.grounded&&!b.grounded&&Number.isFinite(a.airTime)&&Number.isFinite(b.airTime))result.airTime=lerp(a.airTime,b.airTime,alpha);
       if(a.landingAge>=0&&b.landingAge>=a.landingAge)result.landingAge=lerp(a.landingAge,b.landingAge,alpha);
-      for(const key of ['attackKind','bossMove','attackId','attackAge','windup'])result[key]=state[key];
+      for(const key of ['attackKind','attackVariant','bossMove','attackId','attackAge','windup'])result[key]=state[key];
       if(a.attackId===b.attackId&&a.attackAge>=0&&b.attackAge>=0)result.attackAge=lerp(a.attackAge,b.attackAge,alpha);
       if(a.bossMove===b.bossMove&&a.windup>0&&b.windup>0)result.windup=lerp(a.windup,b.windup,alpha);
     }

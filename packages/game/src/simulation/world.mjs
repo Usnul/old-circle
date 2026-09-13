@@ -14,6 +14,8 @@ import { PhysicsSurfacePoint } from '@woosh/meep-engine/src/engine/physics/queri
 import { Actor, Projectile } from './components.mjs';
 import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
+import {selectMeleeAttack} from './melee-selection.mjs';
+import {MELEE_ATTACKS} from '../content/melee-attacks.mjs';
 import {rangedSightOrigin} from './aim.mjs';
 import {loadStaticScene} from '../world/static-scene-data.mjs';
 import {EnemyMind,enemySeed,BOSS_ARENA_RADIUS} from './enemy-mind.mjs';
@@ -230,8 +232,9 @@ export class GameWorld {
   attack(a){
     const w=WEAPONS[a.weapon],mana=focusCost(a,w.mana??0);if(a.stamina<w.stamina||a.mana<mana)return;
     if(a.kind==='player'&&a.weapon==='bow'){if(a.inventory.arrows<=0)return;a.inventory.arrows--;}
+    a.attackVariant=selectMeleeAttack(a,[...this.actors.keys()].map(id=>this.actor(id)),(target,center)=>this.lineOfSight([a.x,a.y+.15,a.z],center,this.actors.get(a.id),this.actors.get(target.id)));
     a.stamina-=w.stamina;a.mana-=mana;a.cooldown=w.cooldown;a.attackAge=0;a.attackId++;a.hitIds=[];a.attackKind='weapon';a.projectileReleased=false;
-    this.event('attack',a,{weapon:a.weapon});
+    this.event('attack',a,{weapon:a.weapon,attackVariant:a.attackVariant});
   }
   advanceAttack(a,dt){
     a.attackAge+=dt;const w=WEAPONS[a.weapon];
@@ -423,7 +426,7 @@ export class GameWorld {
     const a=this.actor(id);if(!a)return null;const {origin,weapon,stats,level,embers,flasks,pvp,seals,hp,stamina,mana,x,y,z,checkpoint,checkpointId,hearths,inventory}=a;
     const motion=Object.fromEntries(motionFields.map(key=>[key,a[key]]));
     for(const key of Object.keys(optionalMotion))motion[key]=a[key];
-    Object.assign(motion,{crouch:a.crouch,grounded:a.grounded,sprintExhausted:a.sprintExhausted,attackKind:a.attackKind,hitIds:[...a.hitIds],projectileReleased:a.projectileReleased,mantle:structuredClone(a.mantle),deathVelocity:[...a.deathVelocity]});
+    Object.assign(motion,{crouch:a.crouch,grounded:a.grounded,sprintExhausted:a.sprintExhausted,attackKind:a.attackKind,attackVariant:a.attackVariant,hitIds:[...a.hitIds],projectileReleased:a.projectileReleased,mantle:structuredClone(a.mantle),deathVelocity:[...a.deathVelocity]});
     return {version:1,contentVersion:WORLD_VERSION,origin,weapon,stats:{...stats},level,embers,flasks,pvp,seals:[...seals],relics:[...a.relics],hp,stamina,mana,x,y,z,checkpoint:[...checkpoint],checkpointId,hearths:[...hearths],inventory:structuredClone(inventory),motion};
   }
   importCharacter(id,s){
@@ -448,6 +451,7 @@ export class GameWorld {
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
     Object.assign(a,optionalMotion);
     a.sprintExhausted=!!s.motion?.sprintExhausted;
+    a.attackVariant=MELEE_ATTACKS[a.weapon]?.includes(s.motion?.attackVariant)?s.motion.attackVariant:'';
     if(s.motion){
       for(const key of motionFields)a[key]=s.motion[key];
       for(const [key,fallback] of Object.entries(optionalMotion))a[key]=s.motion[key]??fallback;

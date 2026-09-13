@@ -17,6 +17,7 @@ import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
 import {euclidean_modulo} from '@woosh/meep-engine/src/core/math/euclidean_modulo.js';
 import rigs from '../content/rigs.json' with {type:'json'};
 import {BOSS_MOVES} from '../content/boss-moves.mjs';
+import {meleeClip} from '../content/melee-attacks.mjs';
 
 export {rigs};
 export const actorRig=a=>a.archetype==='hound'?'briarHound':'pilgrim';
@@ -71,8 +72,8 @@ export function animationPlan(a){
     actionWeight=smoothStep(0,1,actionTime/.12)*(1-smoothStep(0,1,(actionTime-move.windup-move.recovery+.15)/.15));
   }
   else if(a.attackAge>=0){
-    action=a.attackKind==='nova'?'nova':a.weapon;actionTime=a.attackAge;
-    const length=data.clips[action]?.duration??.7,blendIn=!hound&&(action==='sword'||action==='spear')?.12:.09;
+    action=a.attackKind==='nova'?'nova':meleeClip(a);actionTime=a.attackAge;
+    const length=data.clips[action]?.duration??.7,blendIn=!hound&&(a.weapon==='sword'||a.weapon==='spear')?.12:.09;
     // Settle the running arms into the windup before the active blade window.
     actionWeight=smoothStep(0,1,actionTime/blendIn)*(1-smoothStep(0,1,(actionTime-length+.12)/.12));
   }

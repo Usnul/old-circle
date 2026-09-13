@@ -55,7 +55,18 @@ test('Meep ragdoll joints retain their anchors as the body falls and settles',as
     const a=new Vector3(...joint.localAnchorA).applyMatrix4(ta),b=new Vector3(...joint.localAnchorB).applyMatrix4(tb);
     expect(a.distanceTo(b)).toBeLessThan(.07);
   }
-  expect(corpse.joints.every(j=>j.position.every(Number.isFinite)&&j.position[1]>heightAt(j.position[0],j.position[2])-.35)).toBe(true);
+  for(const [i,joint] of corpse.joints.entries()){
+    expect([...joint.position,...joint.rotation].every(Number.isFinite)).toBe(true);
+    if(record.bodies.has(i))expect(joint.position[1],record.data.bones[i].name).toBeGreaterThan(heightAt(joint.position[0],joint.position[2])-.35);
+    else{
+      // Decorative cloth/socket joints follow their parent without owning a
+      // rigid body. A full-length hem can extend below a settled chest; assert
+      // its retained attachment instead of treating it as a physics capsule.
+      const parent=corpse.joints[record.data.bones[i].parent],local=record.locals[i],rotation=new Quaternion();rotation.set(...parent.rotation);
+      const attached=new Vector3(...local.position).applyQuaternion(rotation).add(new Vector3(...parent.position));
+      expect(attached.distanceTo(new Vector3(...joint.position)),record.data.bones[i].name).toBeLessThan(.00001);
+    }
+  }
   expect(sim.snapshot()).toHaveLength(1);
 });
 test('physics budget freezes older corpses while preserving their visible bodies',async()=>{

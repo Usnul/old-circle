@@ -137,7 +137,7 @@ export class WorldView {
     this.geometryCache=new GeometryCache(manifest);
     this.modelStore=new ModelStore({manifest,materials:this.materials,models:this.models,read:file=>this.geometryCache.read(file),residentCache:true,dispose:geometry=>gpuGeometry.remove(geometry)});
     const core=Object.keys(manifest.models).filter(name=>name==='pilgrim'||name==='briarHound'||name==='votiveBanner'||name.startsWith('armor_')||name.startsWith('boss_'));
-    core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','dangerRing','frostRing','reliquary','reliquarySpent');
+    core.push('sword','spear','bow','staff','arrow','spell','pilgrimLantern','lanternLink','dangerRing','frostRing','reliquary','reliquarySpent');
     await Promise.all(core.map(name=>this.modelStore.load(name,{pin:true})));
     const layout = buildLayout();
     this.streaming = new WorldStream(this, layout, this.modelStore);
@@ -180,8 +180,8 @@ export class WorldView {
     for(const {id,t} of parts){t.setTranslation(...p);t.setScale(scale,scale,scale);t.setRotation(...quat);t.updateMatrix();t64_announce_change(this.ecd,id);}
   }
   remove(parts){for(const {id} of parts)this.ecd.removeEntity(id);}
-  light(p,color,intensity,type,shadow=false,distance=15){
-    const l=new Light();l.type.set(type);l.color.set(...color);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(.15);l.castShadow.set(shadow);l.maxShadowDistance.set(130);
+  light(p,color,intensity,type,shadow=false,distance=15,radius=.15){
+    const l=new Light();l.type.set(type);l.color.set(...color);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(radius);l.castShadow.set(shadow);l.maxShadowDistance.set(130);
     const t=new Transform64();t.setTranslation(...p);const id=new Entity().add(l).add(t).build(this.ecd);return {id,t,l};
   }
   emitter(kind,p,rate,life=0){const t=new Transform64();t.setTranslation(...p);t.updateMatrix();const c=effect(kind,rate),id=new Entity().add(c).add(t).build(this.ecd);if(life)this.transients.push({id,c,life,age:0});return {id,t,c};}
@@ -204,7 +204,7 @@ export class WorldView {
       if(a.windup>0&&a.attackKind==='nova'){
         rig.telegraph??=this.model('dangerRing');this.pose(rig.telegraph,[a.x,heightAt(a.x,a.z)+.13,a.z],8);
       }else if(rig.telegraph){this.remove(rig.telegraph);delete rig.telegraph;}
-      this.characterRenderer.update(rig,a);
+      this.characterRenderer.update(rig,a,dt);
       if(a.id!==playerId&&rig.viewFaded)this.characterRenderer.viewAlpha(rig,1);
     }
     const dead=new Set();
@@ -259,6 +259,9 @@ export class WorldView {
     // independent engine ticker. Publish the matching camera and skeletal poses
     // before drawing, without advancing animation clocks a second time.
     this.animations.update(0);
+    // Register new emitter rows before the scene build. FrameStart drains bursts
+    // after that build, too late to publish a newly created emitter's GPU row.
+    this.particles.update(0);
     this.engine.entityManager.getSystem(CameraSystem).update(0);
   }
 }

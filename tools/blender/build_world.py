@@ -309,6 +309,11 @@ bpy.ops.mesh.primitive_torus_add(major_radius=.035,minor_radius=.006,major_segme
 keep(bpy.context.object,'brass')
 finish('pilgrimLantern')
 
+# Two short, interlocked articulation links; the renderer poses each pivot.
+bpy.ops.mesh.primitive_torus_add(major_radius=.023,minor_radius=.005,major_segments=16,minor_segments=6,location=(0,0,-.022),rotation=(math.pi/2,0,0))
+keep(bpy.context.object,'brass')
+finish('lanternLink')
+
 # Armour pieces are authored around their attachment pivots for procedural joint animation.
 ico((0,0,1.15),(.32,.21,.48),'iron',2)
 cube((0,0,.9),(.58,.40,.13),'brass',.02)

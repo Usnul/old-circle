@@ -18,7 +18,7 @@ import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {cloth_collider_signed_distance,cloth_collider_pose_at} from '@woosh/meep-engine/src/engine/physics/cloth/collider/cloth_collider_sdf.js';
 import {CCR_STRIDE,CCR_TX,CCR_TY,CCR_TZ,CCR_PREV_TX,CCR_PREV_TY,CCR_PREV_TZ} from '@woosh/meep-engine/src/engine/physics/cloth/collider/ClothColliderRecord.js';
-import {createSkeleton} from '@old-circle/game/simulation/animation.mjs';
+import {createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 import {WorldCloth,clothComponents,unkeyCloth} from './cloth.mjs';
 import {clothWorker,stepWorker} from './worker-test-helpers.mjs';
 
@@ -98,6 +98,22 @@ test('teleport and pooled removal/re-add reset native cloth without carrying sta
   });
 });
 
+test('cape cloth resolves five strips from shoulder to hem instead of bending as one central ribbon',async()=>{
+  await garment('pilgrim',({system,wind,step,pose})=>{
+    const instance=system.instances[0],{proxy}=clothComponents('pilgrim')[0];
+    expect(instance.state.particle_count).toBe(41);
+    expect(Array.from(proxy.joint_parent).filter(parent=>parent===-1)).toHaveLength(5);
+    const top=Array.from(pose('cloak1'));
+    const left=translation(pose('cloak37')),right=translation(pose('cloak41'));
+    expect(right[0]-left[0]).toBeGreaterThan(.5);
+    wind[0]=6;step(180);
+    expect(Array.from(pose('cloak1'))).toEqual(top);
+    expect(distance(left,translation(pose('cloak37')))).toBeGreaterThan(.01);
+    expect(distance(right,translation(pose('cloak41')))).toBeGreaterThan(.01);
+    bounded(instance);
+  });
+});
+
 test('worker cloth advances the full actor and banner budget beyond the engine default of 32',async()=>{
   await garment('votiveBanner',({ecd,system,wind,step,prefab,models})=>{
     for(let i=1;i<104;i++){
@@ -142,11 +158,15 @@ test('client clip filtering gives native cloth exclusive joint ownership and kee
 
 test.each([1,1.85])('body capsules prevent cloak penetration under headwind at scale %s',async scale=>{
   const run=async enabled=>{
-    let nearest=Infinity;
+    let nearest=Infinity,worst;
     await garment('pilgrim',({ecd,system,wind,step,cloth})=>{
       const bodies=system.bodies.values().next().value;
       expect(bodies.parts).toHaveLength(16);
-      for(const part of bodies.parts)expect(ecd.getComponent(part.id,ClothCollider)).toBeDefined();
+      for(const part of bodies.parts){
+        const marker=ecd.getComponent(part.id,ClothCollider),shape=ecd.getComponent(part.id,Collider).shape;
+        expect(marker.inflation).toBeCloseTo(.035*scale);
+        expect(shape.radius).toBeGreaterThanOrEqual(rigs.pilgrim.bones[part.bone].radius*scale);
+      }
       const {state}=system.instances[0],table=state.collider_table.slice(),count=state.collider_count;
       expect(count).toBeGreaterThan(0);cloth_collider_pose_at(table,count,1);
       if(!enabled)cloth.mask=0;
@@ -157,15 +177,15 @@ test.each([1,1.85])('body capsules prevent cloak penetration under headwind at s
         for(let c=0;c<count;c++)for(let p=0;p<state.particle_count;p++){
           if(state.mass_inverse[p]===0)continue;
           const d=cloth_collider_signed_distance(gradient,0,table,c,...state.position.subarray(p*3,p*3+3));
-          nearest=Math.min(nearest,d);
+          if(d<nearest){nearest=d;worst={frame,particle:p,collider:c,position:Array.from(state.position.subarray(p*3,p*3+3))};}
         }
       }
     },{scale});
-    return nearest;
+    return {nearest,worst};
   };
   const protectedDistance=await run(true),unprotectedDistance=await run(false);
-  expect(protectedDistance).toBeGreaterThan(-.005*scale);
-  expect(unprotectedDistance).toBeLessThan(protectedDistance-.005*scale);
+  expect(protectedDistance.nearest,JSON.stringify(protectedDistance.worst)).toBeGreaterThan(-.005*scale);
+  expect(unprotectedDistance.nearest).toBeLessThan(protectedDistance.nearest-.005*scale);
 });
 
 test('body colliders resize, teleport without sweeping, and are removed on pooling',async()=>{

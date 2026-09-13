@@ -13,6 +13,8 @@ import {Scene} from '@woosh/meep-engine/src/shade/renderer/scene/Scene.js';
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import {StandardShadeMaterial} from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {WorldView} from './scene.mjs';
+import {GPUParticleEmitterSystem} from '@woosh/meep-engine/src/engine/graphics3/GPUParticleEmitterSystem.js';
+import {layerEffect} from './particle-layers.mjs';
 
 // Exercise presentation and the real camera/mesh bridges without booting a browser or GPU.
 vi.mock('@woosh/meep-engine/src/engine/EngineHarness.js',()=>({EngineHarness:class{}}));
@@ -30,7 +32,10 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
   const em=new EntityManager(),ecd=new EntityComponentDataset(),scene=new Scene(),camera=new RenderCamera();
   // no device: the systems that place rows ask for a scene context and get none
   const graphics={isGraphicsEngine:true,camera:{camera},renderer:{},scene_context:()=>null};
-  em.addSystem(new CameraSystem(graphics));em.addSystem(new ShadedGeometrySystem(graphics,scene));em.attachDataset(ecd);
+  const emitterRows=new Set(),emitters=new Set(),particleContext={rows:{acquire:id=>emitterRows.add(id),release:id=>emitterRows.delete(id)}};
+  const particleRenderer={add_emitter:emitter=>emitters.add(emitter),remove_emitter:emitter=>emitters.delete(emitter),registry:{context:emitter=>emitters.has(emitter)?{}:undefined}};
+  const particles=new GPUParticleEmitterSystem({scene_context:()=>particleContext,renderer:{particles:()=>particleRenderer},add_extension(){},remove_extension(){}},scene,{hasLoaderForType:()=>true});
+  em.addSystem(new CameraSystem(graphics));em.addSystem(new ShadedGeometrySystem(graphics,scene));em.addSystem(particles);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
   try{
     const view=new WorldView();view.engine={entityManager:em,graphics};view.ecd=ecd;
@@ -41,7 +46,7 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
     view.sky={update:()=>({nightBlend:0,intensity:1,color:[1,1,1],direction:[0,-1,0]})};
     for(const name of ['streaming','ambient','banners','audio','footsteps','bossHazards','combatTrails','vfx'])view[name]={update(){}};
     view.streaming.updateView=()=>{};
-    view.combatFeedback={update(){},cameraKick:()=>({pitch:0,roll:0})};view.animations={update:vi.fn()};
+    view.combatFeedback={update(){},cameraKick:()=>({pitch:0,roll:0})};view.animations={update:vi.fn()};view.particles=particles;
     view.characterRenderer={
       appearance:()=> 'player',
       create(){
@@ -65,7 +70,16 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
       if(frame%4===0)em.simulate(1/30);
       // Callback workload varies even though display timestamps remain evenly spaced.
       clock.mockReturnValue((time+[.001,.005,.002,.004][frame%4])*1000);
+      // A native contact emitter created between engine ticks needs its GPU row
+      // before the upcoming draw builds the scene and drains its one-shot burst.
+      let contact;
+      view.vfx.update=()=>{
+        if(frame%4!==1)return;
+        const effect=layerEffect('hit-flash');effect.texture=null;
+        contact=new Entity().add(new Transform64()).add(effect).build(ecd);particles.burst(contact,1);
+      };
       view.update(snapshot,actor.id,1/refresh,time);
+      if(contact!==undefined){expect(emitterRows.has(contact)).toBe(true);expect(emitters.has(particles.emitter_of(contact))).toBe(true);ecd.removeEntity(contact);}
       const body=view.characters.get(actor.id).t;
       expect(camera.transform.translation_x).toBeCloseTo(body.translation_x,10);
       expect(camera.transform.translation_z-body.translation_z).toBeCloseTo(5.8,10);

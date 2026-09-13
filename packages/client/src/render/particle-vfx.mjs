@@ -6,6 +6,10 @@ import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 import {PARTICLE_LAYERS,EFFECT_LAYERS,layerEffect} from './particle-layers.mjs';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
+import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
+
+// Source radius is the physical emitting sphere, separate from illumination range.
+const FLASH_LIGHTS={physical:[1,.64,.30],flesh:[1,.48,.25],arcane:[.24,.62,1],frost:[.45,.78,1],cinder:[1,.27,.045],roots:[.55,.70,.20]};
 
 export function impactKind(event){
   if(['cinder','frost','stars','roots'].includes(event.effect))return event.effect==='stars'?'arcane':event.effect;
@@ -48,9 +52,15 @@ export class WorldVFX {
     }
     return g;
   }
-  move(g,position){g.t.setTranslation(...position);g.t.updateMatrix();t64_announce_change(this.view.ecd,g.id);}
-  stop(g){if(!g?.continuous||!this.groups.has(g))return;g.continuous=false;g.age=0;for(const layer of g.layers)layer.c.emitting=false;}
-  remove(g){if(!g||!this.groups.delete(g))return;for(const layer of g.layers)this.view.ecd.removeEntity(layer.id);this.view.ecd.removeEntity(g.id);}
+  illuminate(g,color,intensity,distance,radius,life=Infinity){
+    g.light={...this.view.light(Array.from(g.t.translation),color,intensity,Light.Type.POINT,false,distance,radius),intensity,life,age:0};
+  }
+  move(g,position){
+    g.t.setTranslation(...position);g.t.updateMatrix();t64_announce_change(this.view.ecd,g.id);
+    if(g.light){g.light.t.setTranslation(...position);g.light.t.updateMatrix();t64_announce_change(this.view.ecd,g.light.id);}
+  }
+  stop(g){if(!g?.continuous||!this.groups.has(g))return;g.continuous=false;g.age=0;if(g.light){g.light.age=0;g.light.life=.12;}for(const layer of g.layers)layer.c.emitting=false;}
+  remove(g){if(!g||!this.groups.delete(g))return;if(g.light)this.view.ecd.removeEntity(g.light.id);for(const layer of g.layers)this.view.ecd.removeEntity(layer.id);this.view.ecd.removeEntity(g.id);}
   groundBurst(kind,position,radius,{wave=false,countScale=1,continuous=false}={}){
     const recipe=kind==='frost'?'frost-ground':kind;
     // Sample the actual footprint, with independent upward jets. A central
@@ -72,6 +82,11 @@ export class WorldVFX {
     // Age existing groups before spawning, so a long frame cannot consume a
     // contact flash before its first render.
     for(const g of this.groups){
+      if(g.light&&Number.isFinite(g.light.life)){
+        const light=g.light;light.age+=dt;
+        if(light.age>=light.life){this.view.ecd.removeEntity(light.id);delete g.light;}
+        else light.l.intensity.set(light.intensity*(1-light.age/light.life)**2);
+      }
       if(g.follow){const actor=actors.find(a=>a.id===g.follow);if(actor&&actor.hp>0)this.move(g,[actor.x,actor.y,actor.z]);}
       if(!g.continuous&&(g.age+=dt)>g.life)this.remove(g);
     }
@@ -81,7 +96,9 @@ export class WorldVFX {
         if(event.type==='hit'||event.type==='impact'){
           // The outward contact normal keeps debris on the visible struck face.
           const normal=event.normal??event.direction??[0,1,0],position=event.position.map((v,i)=>v+normal[i]*.025);
-          this.create(impactKind(event),position,{direction:normal,scale:Math.min(1.4,.85+(event.damage??20)/120)});
+          const kind=impactKind(event),scale=Math.min(1.4,.85+(event.damage??20)/120);
+          const g=this.create(kind,position,{direction:normal,scale});
+          this.illuminate(g,FLASH_LIGHTS[kind],2.4*scale,3.2,.12*scale,.16);
         }
         if(event.type==='nova'){
           const kind=event.effect==='frost'?'frost':'shockwave';
@@ -100,7 +117,10 @@ export class WorldVFX {
     for(const p of spells){
       const key=p.key??p.id;live.add(key);let g=this.missiles.get(key);
       if(g&&(p.age<g.projectileAge-.04||Math.hypot(...p.position.map((v,i)=>v-g.t.translation[i]))>3)){this.stop(g);this.missiles.delete(key);g=null;}
-      if(!g){g=this.create(p.effect==='cinder'?'cinder-trail':'spell-trail',p.position,{continuous:true});this.missiles.set(key,g);}
+      if(!g){
+        const cinder=p.effect==='cinder';g=this.create(cinder?'cinder-trail':'spell-trail',p.position,{continuous:true});
+        this.illuminate(g,cinder?[1,.28,.06]:[.20,.58,1],cinder?1.8:1.2,4,cinder?.20:.13);this.missiles.set(key,g);
+      }
       this.move(g,p.position);g.projectileAge=p.age;
     }
     for(const [key,g] of this.missiles)if(!live.has(key)){this.stop(g);this.missiles.delete(key);}

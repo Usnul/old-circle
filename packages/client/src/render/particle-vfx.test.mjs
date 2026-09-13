@@ -6,6 +6,8 @@ import {TransformAttachment} from '@woosh/meep-engine/src/engine/ecs/transform-a
 import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import {ParticleEffect} from '@woosh/meep-engine/src/engine/graphics/ecs/particles/ParticleEffect.js';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
+import {Light} from '@woosh/meep-engine/src/engine/graphics/ecs/light/Light.js';
+import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 import {WorldVFX} from './particle-vfx.mjs';
 import {PARTICLE_LAYERS} from './particle-layers.mjs';
@@ -13,9 +15,12 @@ import {PARTICLE_LAYERS} from './particle-layers.mjs';
 const snapshot=(events=[],projectiles=[],presentationEpoch=1)=>({events,projectiles,presentationEpoch});
 async function withVFX(run){
   const em=new EntityManager(),ecd=new EntityComponentDataset(),attachments=new TransformAttachmentSystem();
-  em.addSystem(attachments);em.attachDataset(ecd);ecd.registerComponentType(ParticleEffect);
+  em.addSystem(attachments);em.attachDataset(ecd);ecd.registerComponentType(ParticleEffect);ecd.registerComponentType(Light);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
-  const burst=vi.fn(),vfx=new WorldVFX({ecd,particles:{burst}});vfx.update(snapshot(),[],'self',0);
+  const burst=vi.fn(),vfx=new WorldVFX({ecd,particles:{burst},light(position,color,intensity,type,shadow,distance,radius){
+    const t=new Transform64();t.setTranslation(...position);const l=new Light();l.type.set(type);l.color.set(...color);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(radius);
+    return {id:new Entity().add(t).add(l).build(ecd),t,l};
+  }});vfx.update(snapshot(),[],'self',0);
   const position=id=>Array.from(ecd.getComponent(id,Transform64).translation);
   const update=(state=snapshot(),actors=[],dt=0)=>{vfx.update(state,actors,'self',dt);attachments.update(dt);};
   try{await run({vfx,ecd,attachments,burst,position,update});}
@@ -112,4 +117,23 @@ test('ground bursts distribute wave jets on the radius and trap jets within the 
     }
     if(!wave)expect(Math.max(...radii)-Math.min(...radii)).toBeGreaterThan(radius*.4);
   }
+}));
+
+test.each(['hound','sentinel','mage'])('%s hit feedback emits every contact layer and a brief finite sphere light',archetype=>withVFX(({vfx,ecd,burst,update})=>{
+  const event={type:'hit',key:`hit:${archetype}`,id:archetype,weapon:'sword',damage:30,targetMaterial:archetype==='hound'?'flesh':'armor',position:[1,2,3],normal:[0,0,1]};
+  update(snapshot([event]),[{id:archetype,archetype,x:1,y:2,z:3,hp:20}],3);
+  const g=[...vfx.groups][0],light=g.light;expect(g.kind).toBe(archetype==='hound'?'flesh':'physical');
+  expect(burst).toHaveBeenCalledTimes(g.layers.length);expect(light.l.type.getValue()).toBe(Light.Type.POINT);
+  expect(light.l.radius.getValue()).toBeGreaterThan(.1);expect(light.l.radius.getValue()).toBeLessThan(.2);expect(light.l.distance.getValue()).toBe(3.2);
+  const brightness=light.l.intensity.getValue();expect(brightness).toBeGreaterThan(0);
+  update(snapshot([event]),[],.08);expect(light.l.intensity.getValue()).toBeLessThan(brightness);expect(burst).toHaveBeenCalledTimes(g.layers.length);
+  update(snapshot(),[],.081);expect(ecd.entityExists(light.id)).toBe(false);expect(vfx.groups.has(g)).toBe(true);
+}));
+
+test.each([undefined,'cinder'])('projectile %s lights follow the sphere, fade on impact and clean up on epoch changes',effect=>withVFX(({vfx,ecd,position,update})=>{
+  const projectile={id:1,key:'spell:light',weapon:'staff',position:[2,4,6],age:.1,effect};update(snapshot([],[projectile]));
+  const g=vfx.missiles.get(projectile.key),light=g.light;expect(light.l.radius.getValue()).toBe(effect==='cinder'?.20:.13);
+  expect(light.l.distance.getValue()).toBe(4);projectile.position=[4,5,6];projectile.age=.2;update(snapshot([],[projectile]),[],.1);expect(position(light.id)).toEqual(projectile.position);
+  update(snapshot(),[],.01);update(snapshot(),[],.13);expect(ecd.entityExists(light.id)).toBe(false);expect(vfx.groups.has(g)).toBe(true);
+  update(snapshot([],[{...projectile,key:'next'}]));const next=vfx.missiles.get('next').light;update(snapshot([],[],2));expect(ecd.entityExists(next.id)).toBe(false);
 }));
