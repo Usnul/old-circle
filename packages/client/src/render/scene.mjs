@@ -35,6 +35,7 @@ import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
 import {WorldWind} from './wind.mjs';
 import {WorldCloth} from './cloth.mjs';
+import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
 import {WorldAmbient} from './ambient.mjs';
 import {WorldBanners} from './banners.mjs';
 import {WorldFootsteps} from './footsteps.mjs';
@@ -78,6 +79,7 @@ export class WorldView {
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
       this.cloth = new WorldCloth(this.wind);
+      config.addSystem(new ClothColliderSystem());
     }});
     this.ecd=this.engine.entityManager.dataset;
     this.vfx=new WorldVFX(this);

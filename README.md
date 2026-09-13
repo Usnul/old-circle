@@ -1,6 +1,6 @@
 # Old Circle
 
-An original dark fantasy action RPG built on **Meep 3.23.0**, with a shared persistent world and a reproducible Blender content pipeline. The game is under active development; the current playable world still needs substantial content and art work before release.
+An original dark fantasy action RPG built on **Meep 3.25.0**, with a shared persistent world and a reproducible Blender content pipeline. The game is under active development; the current playable world still needs substantial content and art work before release.
 
 ![Old Circle concept and title-screen artwork](packages/client/public/assets/art/old-circle-concept.png)
 

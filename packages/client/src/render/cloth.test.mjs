@@ -12,14 +12,20 @@ import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/pre
 import {prefab_instantiate} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_instantiate.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
+import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
+import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
+import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {cloth_collider_signed_distance,cloth_collider_pose_at} from '@woosh/meep-engine/src/engine/physics/cloth/collider/cloth_collider_sdf.js';
+import {CCR_STRIDE,CCR_TX,CCR_TY,CCR_TZ,CCR_PREV_TX,CCR_PREV_TY,CCR_PREV_TZ} from '@woosh/meep-engine/src/engine/physics/cloth/collider/ClothColliderRecord.js';
 import {createSkeleton} from '@old-circle/game/simulation/animation.mjs';
 import {WorldCloth,clothComponents,unkeyCloth} from './cloth.mjs';
 
 async function garment(name,run,{scale=1,yaw=0}={}){
   const em=new EntityManager(),ecd=new EntityComponentDataset(),attachments=new TransformAttachmentSystem();
-  const wind=[0,0,0],system=new WorldCloth({sample:(out)=>{out.set(wind);return out;}}),models=new Map();
+  const wind=[0,0,0],system=new WorldCloth({source:{wind}}),models=new Map();
   system.models={instance_of:id=>models.get(id)??null};
-  em.addSystem(attachments);em.addSystem(system);em.attachDataset(ecd);
+  em.addSystem(attachments);em.addSystem(new ClothColliderSystem());em.addSystem(system);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
   try{
     const skeleton=createSkeleton(name);unkeyCloth(skeleton);
@@ -94,4 +100,57 @@ test('client clip filtering gives native cloth exclusive joint ownership and kee
     for(const clip of skeleton.bundle.clips)expect(clip.channels.every(channel=>!clothTargets.has(channel.target))).toBe(true);
     if(name==='pilgrim')expect(skeleton.bundle.clips.every(clip=>clip.channels.length>0)).toBe(true);
   }
+});
+
+test.each([1,1.85])('body capsules prevent cloak penetration under headwind at scale %s',async scale=>{
+  const run=async enabled=>{
+    let nearest=Infinity;
+    await garment('pilgrim',({ecd,system,wind,step,cloth})=>{
+      const bodies=system.bodies.values().next().value;
+      expect(bodies.parts).toHaveLength(16);
+      for(const part of bodies.parts)expect(ecd.getComponent(part.id,ClothCollider)).toBeDefined();
+      const {state}=system.instances[0],table=state.collider_table.slice(),count=state.collider_count;
+      expect(count).toBeGreaterThan(0);cloth_collider_pose_at(table,count,1);
+      if(!enabled)cloth.mask=0;
+      wind[2]=12;
+      const gradient=new Float64Array(3);
+      for(let frame=0;frame<360;frame++){
+        step();bounded(system.instances[0]);
+        for(let c=0;c<count;c++)for(let p=0;p<state.particle_count;p++){
+          if(state.mass_inverse[p]===0)continue;
+          const d=cloth_collider_signed_distance(gradient,0,table,c,...state.position.subarray(p*3,p*3+3));
+          nearest=Math.min(nearest,d);
+        }
+      }
+    },{scale});
+    return nearest;
+  };
+  const protectedDistance=await run(true),unprotectedDistance=await run(false);
+  expect(protectedDistance).toBeGreaterThan(-.005*scale);
+  expect(unprotectedDistance).toBeLessThan(protectedDistance-.005*scale);
+});
+
+test('body colliders resize, teleport without sweeping, and are removed on pooling',async()=>{
+  await garment('pilgrim',({ecd,system,id,t,step,cloth})=>{
+    const first=system.bodies.get(id),radius=ecd.getComponent(first.parts[0].id,Collider).shape.radius;
+    t.setScale(1.85,1.85,1.85);t.updateMatrix();t64_announce_change(ecd,id);step();
+    const larger=system.bodies.get(id);
+    expect(larger).not.toBe(first);expect(ecd.getComponent(larger.parts[0].id,Collider).shape.radius).toBeCloseTo(radius*1.85);
+    t.setTranslation(300,0,-200);t.updateMatrix();t64_announce_change(ecd,id);step();
+    expect(system.bodies.get(id)).not.toBe(larger);
+    const index=system.world.colliders.index;
+    // The entire collider index is this character; no previous pose spans the teleport.
+    for(let handle=0;handle<index.count;handle++){
+      if(!index.isLive(handle))continue;
+      const o=handle*CCR_STRIDE;
+      for(const [current,previous] of [[CCR_TX,CCR_PREV_TX],[CCR_TY,CCR_PREV_TY],[CCR_TZ,CCR_PREV_TZ]])expect(index.table[o+current]).toBe(index.table[o+previous]);
+    }
+    ecd.removeComponentFromEntity(id,Cloth);expect(system.bodies.size).toBe(0);
+    expect(index.query([],-Infinity,-Infinity,-Infinity,Infinity,Infinity,Infinity,1,0xFFFFFFFF)).toBe(0);
+    ecd.addComponentToEntity(id,cloth);step();expect(system.bodies.get(id).parts).toHaveLength(16);
+    const rig=ecd.getComponent(id,ClothRig);
+    ecd.removeComponentFromEntity(id,ClothRig);step();expect(system.bodies.size).toBe(0);
+    ecd.addComponentToEntity(id,rig);step();expect(system.bodies.get(id).parts).toHaveLength(16);
+    ecd.removeEntity(id);expect(system.bodies.size).toBe(0);expect(index.query([],-Infinity,-Infinity,-Infinity,Infinity,Infinity,Infinity,1,0xFFFFFFFF)).toBe(0);
+  });
 });

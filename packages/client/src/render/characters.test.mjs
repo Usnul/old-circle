@@ -4,12 +4,14 @@ import {expect,test,vi} from 'vitest';
 import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
+import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
 import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
 import {ShadedGeometrySystem} from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
 import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
+import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
 import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import {WorldCloth} from './cloth.mjs';
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
@@ -69,7 +71,7 @@ async function withNativeCharacters(run){
     view.animations=new AnimationSystem(facade,view.meshSystem);
     // a model's primitives are entities, and the system that owns primitives is what puts them in the scene
     em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(view.animations);
-    em.addSystem(new TransformAttachmentSystem());view.cloth=new WorldCloth({sample:out=>out.fill(0)});em.addSystem(view.cloth);em.attachDataset(ecd);
+    em.addSystem(new TransformAttachmentSystem());em.addSystem(new ClothColliderSystem());view.cloth=new WorldCloth({source:{wind:[0,0,0]}});em.addSystem(view.cloth);em.attachDataset(ecd);
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
     for(const [name,file] of [['pilgrim','pilgrim-0.meep'],['briarHound','briarHound-0.meep']]){
       const bytes=await readFile(new URL(`../../public/assets/geometry/${file}`,import.meta.url));
@@ -115,6 +117,29 @@ test('presentation updates publish manual animation and gait samples without an 
         }
       }
     }finally{publishTime.mockRestore();}
+  });
+});
+
+test.each([1,1.85])('cloth body capsules follow GPU clip poses and release on death at scale %s',async scale=>{
+  await withNativeCharacters(async({characters,view})=>{
+    const actor={kind:'enemy',archetype:'hollow',weapon:'sword',x:3,y:1,z:2,yaw:.7,vx:0,vy:0,vz:-3,grounded:true,animationTime:.8,gaitPhase:.28};
+    const rig=characters.create(actor);await setImmediate();
+    characters.update(rig,actor);rig.t.setScale(scale,scale,scale);rig.t.updateMatrix();view.animations.update(0);
+    view.cloth.fixedUpdate(1/60);
+    const bodies=view.cloth.bodies.get(rig.id),playbacks=[];view.animations.write_pose_playbacks(playbacks,rig.id);
+    expect(bodies.parts).toHaveLength(16);
+    let differsFromRest=false;
+    for(const part of bodies.parts){
+      const joint=bodies.skin.joints[part.bone],half=rigs.pilgrim.bones[part.bone].length/2;
+      const pose=t64_evaluate_world(new Transform64(),view.ecd,joint,playbacks),rest=t64_evaluate_world(new Transform64(),view.ecd,joint,[]);
+      const center=m=>[m[12]+m[4]*half,m[13]+m[5]*half,m[14]+m[6]*half];
+      for(let axis=0;axis<3;axis++)expect(part.t.translation[axis]).toBeCloseTo(center(pose)[axis],6);
+      differsFromRest||=Math.hypot(...center(pose).map((v,i)=>v-center(rest)[i]))>.05;
+    }
+    expect(differsFromRest).toBe(true);
+    characters.corpse(rig,{name:'pilgrim',scale,age:0,joints:actorJointPoses(actor)});
+    expect(view.cloth.bodies.size).toBe(0);
+    for(const part of bodies.parts)expect(view.ecd.entityExists(part.id)).toBe(false);
   });
 });
 

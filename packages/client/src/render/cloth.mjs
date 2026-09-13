@@ -1,15 +1,24 @@
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
 import {ClothSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothSystem.js';
+import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
+import {ClothFluidWind} from '@woosh/meep-engine/src/engine/physics/cloth/wind/ClothFluidWind.js';
+import {AbstractClothWind} from '@woosh/meep-engine/src/engine/physics/cloth/wind/AbstractClothWind.js';
+import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
+import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
+import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
+import {T64WorldCache} from '@woosh/meep-engine/src/engine/ecs/transform/T64WorldCache.js';
+import {collect_entity_playbacks} from '@woosh/meep-engine/src/engine/graphics3/pose/collect_entity_playbacks.js';
 import {CLOTH_COTTON,CLOTH_SILK} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/cloth_dynamics_library.js';
 import {cloth_proxy_from_joints} from '@woosh/meep-engine/src/engine/physics/cloth/build/cloth_proxy_from_joints.js';
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
-import {v3_quaternion_apply_inverse} from '@woosh/meep-engine/src/core/geom/vec3/v3_quaternion_apply_inverse.js';
-import {createSkeleton} from '@old-circle/game/simulation/animation.mjs';
+import {createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
 
 const proxies=new Map();
 const clothJoint=name=>/^(cloak|cloth)\d+$/.test(name);
+const bodyBones=rigs.pilgrim.bones.flatMap((bone,index)=>bone.radius>0?[{...bone,index}]:[]);
 
 /** Cloth owns these offsets; even constant clip channels would reclaim them
  * when a new locomotion/action clip binds. The top joint stays in its bind pose. */
@@ -34,25 +43,57 @@ export function clothComponents(name){
   return [ClothRig.from(proxies.get(name)),Cloth.from(name==='votiveBanner'?CLOTH_SILK:CLOTH_COTTON)];
 }
 
-/** Meep 3.24 supplies the solver and joint write-back, but not fluid coupling.
- * Feed world wind into its particle velocities in the previous anchor frame;
- * the native step then carries that frame forward and handles all constraints. */
+/** Native fluid drag plus body capsules posed from the same playbacks as the
+ * cloth anchor. GPU-animated joints' CPU Transform64 components can be stale,
+ * so evaluate the pose before Meep refreshes its cloth collider index. */
 export class WorldCloth extends ClothSystem {
-  constructor(wind){super();this.wind=wind;this.velocity=new Float64Array(3);}
+  constructor(wind){
+    super();this.bodies=new Map();this.playbacks=[];this.pose=new Transform64();this.poses=new T64WorldCache();
+    this.wind=new ClothFluidWind();this.wind.ambient=new AbstractClothWind();
+    this.wind.ambient.sample=out=>{out.set(wind.source.wind);return out;};
+  }
+  removeBodies(entity){
+    const bodies=this.bodies.get(entity);if(!bodies)return;
+    this.bodies.delete(entity);
+    for(const {id} of bodies.parts)if(bodies.ecd.entityExists(id))bodies.ecd.removeEntity(id);
+  }
+  unlink(cloth,transform,entity){this.removeBodies(entity);super.unlink(cloth,transform,entity);}
+  async shutdown(){for(const entity of this.bodies.keys())this.removeBodies(entity);}
   fixedUpdate(dt){
     if(!Number.isFinite(dt)||dt<=0)return;
+    const ecd=this.entityManager.dataset;if(!ecd)return;
     for(const instance of this.instances){
-      if(!instance.seeded||instance.refused||!instance.anchor_valid)continue;
-      const {state,anchor_translation,anchor_rotation,cloth}=instance;
-      this.wind.sample(this.velocity,...anchor_translation);
-      v3_quaternion_apply_inverse(this.velocity,0,...this.velocity,...anchor_rotation);
-      const drag=1-Math.exp(-cloth.dynamics.drag*dt);
-      if(Math.hypot(...this.velocity)>1e-5)this.wake(instance.entity);
-      for(let p=0;p<state.particle_count;p++){
-        if(state.mass_inverse[p]===0)continue;
-        for(let axis=0;axis<3;axis++)state.velocity[p*3+axis]+=(this.velocity[axis]-state.velocity[p*3+axis])*drag;
+      const entity=instance.entity,rig=ecd.getComponent(entity,ClothRig);
+      if(rig?.proxy?.name!=='pilgrim'){this.removeBodies(entity);continue;}
+      const model=this.models?.instance_of(entity),skin=model?.skins[rig.skin];
+      if(!skin){this.removeBodies(entity);continue;}
+      // The collider index reads position/rotation only. Bake actor scale into
+      // its immutable shapes, including the larger keeper rigs.
+      const root=ecd.getComponent(entity,Transform64),scale=Math.max(...root.scale);
+      let bodies=this.bodies.get(entity);
+      // A teleport places colliders afresh; sweeping their old poses across
+      // the map would hit unrelated garments along the journey.
+      if(bodies&&(bodies.skin!==skin||bodies.scale!==scale||Math.hypot(...root.translation.map((v,i)=>v-bodies.position[i]))>2)){this.removeBodies(entity);bodies=null;}
+      this.playbacks.length=0;collect_entity_playbacks(this.playbacks,this.entityManager,entity);
+      this.poses.invalidate();
+      if(!bodies){bodies={ecd,skin,scale,position:new Float64Array(3),parts:[]};this.bodies.set(entity,bodies);}
+      bodies.position.set(root.translation);
+      for(let i=0;i<bodyBones.length;i++){
+        const bone=bodyBones[i];
+        const pose=this.poses.evaluate(this.pose,ecd,skin.joints[bone.index],this.playbacks),half=bone.length/2;
+        const part=bodies.parts[i];
+        const t=part?.t??new Transform64();
+        t.setTranslation(pose[12]+pose[4]*half,pose[13]+pose[5]*half,pose[14]+pose[6]*half);
+        t.setRotation(...pose.rotation);t.updateMatrix();
+        if(!part){
+          const collider=new Collider();collider.shape=CapsuleShape3D.from(bone.radius*scale,Math.max(.02,bone.length-2*bone.radius)*scale);collider.friction=.3;
+          const marker=ClothCollider.from({inflation:.015*scale,friction_scale:.25});
+          const id=new Entity().add(t).add(collider).add(marker).build(ecd);
+          bodies.parts.push({id,t,bone:bone.index});
+        }
       }
     }
+    this.playbacks.length=0;
     super.fixedUpdate(dt);
   }
 }
