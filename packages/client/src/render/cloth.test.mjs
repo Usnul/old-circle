@@ -20,10 +20,12 @@ import {cloth_collider_signed_distance,cloth_collider_pose_at} from '@woosh/meep
 import {CCR_STRIDE,CCR_TX,CCR_TY,CCR_TZ,CCR_PREV_TX,CCR_PREV_TY,CCR_PREV_TZ} from '@woosh/meep-engine/src/engine/physics/cloth/collider/ClothColliderRecord.js';
 import {createSkeleton} from '@old-circle/game/simulation/animation.mjs';
 import {WorldCloth,clothComponents,unkeyCloth} from './cloth.mjs';
+import {clothWorker,stepWorker} from './worker-test-helpers.mjs';
 
 async function garment(name,run,{scale=1,yaw=0}={}){
   const em=new EntityManager(),ecd=new EntityComponentDataset(),attachments=new TransformAttachmentSystem();
-  const wind=[0,0,0],system=new WorldCloth({source:{wind}}),models=new Map();
+  let worker;
+  const wind=[0,0,0],system=new WorldCloth({sample:out=>{out.set(wind);return out;},varies:()=>false},{worker_factory:()=>worker=clothWorker()}),models=new Map();
   system.models={instance_of:id=>models.get(id)??null};
   em.addSystem(attachments);em.addSystem(new ClothColliderSystem());em.addSystem(system);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
@@ -31,14 +33,19 @@ async function garment(name,run,{scale=1,yaw=0}={}){
     const skeleton=createSkeleton(name);unkeyCloth(skeleton);
     skeleton.bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes:[]})];
     const t=new Transform64();t.setScale(scale,scale,scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();
-    const id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab_compile(skeleton.bundle),ecd,id);models.set(id,model);
+    const prefab=prefab_compile(skeleton.bundle),id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab,ecd,id);models.set(id,model);
     const components=clothComponents(name);for(const component of components)ecd.addComponentToEntity(id,component);
     const joints=Object.fromEntries(skeleton.data.bones.map((b,i)=>[b.name,model.skins[0].joints[i]]));
-    const step=(count=1)=>{for(let i=0;i<count;i++){system.fixedUpdate(1/60);attachments.update(1/60);}};
+    const step=(count=1)=>{for(let i=0;i<count;i++){stepWorker(system);attachments.update(1/60);}};
     const pose=name=>t64_evaluate_world(new Transform64(),ecd,joints[name],[]);
-    step();expect(system.instances[0].seeded).toBe(true);expect(system.instances[0].refused).toBe(false);
-    await run({ecd,system,id,t,wind,joints,step,pose,cloth:components.find(c=>c instanceof Cloth)});
-  }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
+    // The seed is registered on the first tick and solved after its acknowledgement.
+    step(2);expect(system.instances[0].seeded).toBe(true);expect(system.instances[0].refused).toBe(false);
+    expect(system.instances[0].state.isSharedMemory()).toBe(true);
+    await run({ecd,system,id,t,wind,joints,step,pose,prefab,models,worker,cloth:components.find(c=>c instanceof Cloth)});
+  }finally{
+    await new Promise((resolve,reject)=>em.shutdown(resolve,reject));
+    expect(worker.terminated).toBe(true);expect(system.bodies.size).toBe(0);
+  }
 }
 
 function bounded(instance){
@@ -83,11 +90,42 @@ test('teleport and pooled removal/re-add reset native cloth without carrying sta
     expect(distance(translation(pose('cloth0')),Array.from(previous.anchor_translation))).toBeLessThan(.00001);
     ecd.removeComponentFromEntity(id,Cloth);expect(system.instances).toHaveLength(0);
     t.setTranslation(-200,0,40);t.updateMatrix();t64_announce_change(ecd,id);step(30);
-    wind.fill(0);ecd.addComponentToEntity(id,cloth);step();const restored=system.instances[0];
+    wind.fill(0);ecd.addComponentToEntity(id,cloth);step(2);const restored=system.instances[0];
     expect(restored).not.toBe(previous);expect(restored.seeded).toBe(true);expect(restored.teleport_count).toBe(0);bounded(restored);
     expect(distance(translation(pose('cloth0')),Array.from(restored.anchor_translation))).toBeLessThan(.00001);
     const fresh=Array.from(restored.state.position);step(180);bounded(restored);
     expect(distance(fresh,Array.from(restored.state.position))).toBeLessThan(.1);
+  });
+});
+
+test('worker cloth advances the full actor and banner budget beyond the engine default of 32',async()=>{
+  await garment('votiveBanner',({ecd,system,wind,step,prefab,models})=>{
+    for(let i=1;i<104;i++){
+      const t=new Transform64();t.setTranslation(i*4,0,0);t.updateMatrix();
+      const id=new Entity().add(t).build(ecd);models.set(id,prefab_instantiate(prefab,ecd,id));
+      for(const component of clothComponents('votiveBanner'))ecd.addComponentToEntity(id,component);
+    }
+    step(2);expect(system.instances).toHaveLength(104);
+    const positions=system.instances.map(instance=>Array.from(instance.state.position));
+    wind[0]=8;step(60);
+    for(const [i,instance] of system.instances.entries()){
+      expect(instance.state.isSharedMemory()).toBe(true);bounded(instance);
+      expect(distance(positions[i],Array.from(instance.state.position)),`garment ${i} did not advance`).toBeGreaterThan(.001);
+    }
+  });
+});
+
+test('pooling a garment during an outstanding solve cannot write the retired pose into its replacement',async()=>{
+  await garment('votiveBanner',({ecd,system,id,wind,step,pose,worker,cloth})=>{
+    wind[0]=8;
+    const previous=system.instanceOf(id),before=Array.from(pose('cloth4'));
+    system.entityManager.fixedStepTick++;system.fixedUpdate(1/60);
+    expect(system.is_step_in_flight).toBe(true);
+    ecd.removeComponentFromEntity(id,Cloth);ecd.addComponentToEntity(id,cloth);
+    const replacement=system.instanceOf(id);expect(replacement).not.toBe(previous);
+    worker.host.runPendingStep();system.fixedUpdate(0);
+    expect(Array.from(pose('cloth4'))).toEqual(before);
+    step(2);expect(replacement.seeded).toBe(true);expect(replacement.state).not.toBe(previous.state);bounded(replacement);
   });
 });
 

@@ -14,6 +14,7 @@ import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig
 import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
 import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import {WorldCloth} from './cloth.mjs';
+import {clothWorker,stepWorker} from './worker-test-helpers.mjs';
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
 import {SoftwareGPUDevice} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUDevice.js';
 import {SoftwareGPUBuffer} from '@woosh/meep-engine/src/shade/device/mock/SoftwareGPUBuffer.js';
@@ -71,7 +72,7 @@ async function withNativeCharacters(run){
     view.animations=new AnimationSystem(facade,view.meshSystem);
     // a model's primitives are entities, and the system that owns primitives is what puts them in the scene
     em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(view.animations);
-    em.addSystem(new TransformAttachmentSystem());em.addSystem(new ClothColliderSystem());view.cloth=new WorldCloth({source:{wind:[0,0,0]}});em.addSystem(view.cloth);em.attachDataset(ecd);
+    em.addSystem(new TransformAttachmentSystem());em.addSystem(new ClothColliderSystem());view.cloth=new WorldCloth({sample:out=>{out.fill(0);return out;},varies:()=>false},{worker_factory:clothWorker});em.addSystem(view.cloth);em.attachDataset(ecd);
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
     for(const [name,file] of [['pilgrim','pilgrim-0.meep'],['briarHound','briarHound-0.meep']]){
       const bytes=await readFile(new URL(`../../public/assets/geometry/${file}`,import.meta.url));
@@ -125,7 +126,7 @@ test.each([1,1.85])('cloth body capsules follow GPU clip poses and release on de
     const actor={kind:'enemy',archetype:'hollow',weapon:'sword',x:3,y:1,z:2,yaw:.7,vx:0,vy:0,vz:-3,grounded:true,animationTime:.8,gaitPhase:.28};
     const rig=characters.create(actor);await setImmediate();
     characters.update(rig,actor);rig.t.setScale(scale,scale,scale);rig.t.updateMatrix();view.animations.update(0);
-    view.cloth.fixedUpdate(1/60);
+    stepWorker(view.cloth);
     const bodies=view.cloth.bodies.get(rig.id),playbacks=[];view.animations.write_pose_playbacks(playbacks,rig.id);
     expect(bodies.parts).toHaveLength(16);
     let differsFromRest=false;

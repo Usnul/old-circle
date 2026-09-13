@@ -1,8 +1,8 @@
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
-import {ClothSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothSystem.js';
+import {WorkerClothSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/WorkerClothSystem.js';
+import {makeClothWorker} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/makeClothWorker.js';
 import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
-import {ClothFluidWind} from '@woosh/meep-engine/src/engine/physics/cloth/wind/ClothFluidWind.js';
 import {AbstractClothWind} from '@woosh/meep-engine/src/engine/physics/cloth/wind/AbstractClothWind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {CapsuleShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/CapsuleShape3D.js';
@@ -46,11 +46,15 @@ export function clothComponents(name){
 /** Native fluid drag plus body capsules posed from the same playbacks as the
  * cloth anchor. GPU-animated joints' CPU Transform64 components can be stale,
  * so evaluate the pose before Meep refreshes its cloth collider index. */
-export class WorldCloth extends ClothSystem {
-  constructor(wind){
-    super();this.bodies=new Map();this.playbacks=[];this.pose=new Transform64();this.poses=new T64WorldCache();
-    this.wind=new ClothFluidWind();this.wind.ambient=new AbstractClothWind();
-    this.wind.ambient.sample=out=>{out.set(wind.source.wind);return out;};
+export class WorldCloth extends WorkerClothSystem {
+  constructor(wind,{worker_factory=makeClothWorker}={}){
+    // Up to 96 visible actors plus the world's eight banners exceed the
+    // engine's default 32 slots. Leave room for all of them to keep simulating.
+    super({worker_factory,max_cloth_count:128});this.bodies=new Map();this.playbacks=[];this.pose=new Transform64();this.poses=new T64WorldCache();
+    // Sample the published velocity snapshot, never the fluid worker's buffers.
+    this.wind=new AbstractClothWind();
+    this.wind.sample=(out,x,y,z)=>wind.sample(out,x,y,z);
+    this.wind.varies=(...bounds)=>wind.varies(...bounds);
   }
   removeBodies(entity){
     const bodies=this.bodies.get(entity);if(!bodies)return;
@@ -58,10 +62,13 @@ export class WorldCloth extends ClothSystem {
     for(const {id} of bodies.parts)if(bodies.ecd.entityExists(id))bodies.ecd.removeEntity(id);
   }
   unlink(cloth,transform,entity){this.removeBodies(entity);super.unlink(cloth,transform,entity);}
-  async shutdown(){for(const entity of this.bodies.keys())this.removeBodies(entity);}
-  fixedUpdate(dt){
-    if(!Number.isFinite(dt)||dt<=0)return;
-    const ecd=this.entityManager.dataset;if(!ecd)return;
+  async shutdown(entityManager){
+    await super.shutdown(entityManager);
+    for(const entity of this.bodies.keys())this.removeBodies(entity);
+  }
+  collect(command,tick,dt){
+    if(!Number.isFinite(dt)||dt<=0)return false;
+    const ecd=this.entityManager.dataset;if(!ecd)return false;
     for(const instance of this.instances){
       const entity=instance.entity,rig=ecd.getComponent(entity,ClothRig);
       if(rig?.proxy?.name!=='pilgrim'){this.removeBodies(entity);continue;}
@@ -94,6 +101,6 @@ export class WorldCloth extends ClothSystem {
       }
     }
     this.playbacks.length=0;
-    super.fixedUpdate(dt);
+    return super.collect(command,tick,dt);
   }
 }
