@@ -175,6 +175,9 @@ def human_mesh(variant='pilgrim'):
             if weight>0:groups[name].add([index],weight,'REPLACE')
 
 def human_pose(kind,time,duration,weapon):
+    aim=0
+    if kind.startswith('bow_aim_'):
+        aim=float(kind.removeprefix('bow_aim_'));kind='bow'
     variant=kind.split('_',1)[1] if kind.startswith(('sword_','spear_')) else ''
     if variant:kind=kind.split('_',1)[0]
     direction=(0,-1)
@@ -212,7 +215,7 @@ def human_pose(kind,time,duration,weapon):
         hip_yaw=.14*load-.15*drive;chest_yaw=.22*load-.26*drive
     elif kind=='bow':
         draw=smooth(time/.36)*(1-smooth((time-.50)/.30))
-        hip_yaw=.09*draw;chest_yaw=.26*draw;lean-=.07*draw;offset.z=-.025*draw
+        hip_yaw=.09*draw;chest_yaw=0;lean=0;offset.z=-.025*draw
     elif kind in ['staff','nova']:
         cast=math.sin(math.pi*phase)**2;lean+=.12*cast;offset=v((0,-.07*cast,-.055*cast));chest_yaw=-.16*cast
     root+=offset
@@ -272,7 +275,7 @@ def human_pose(kind,time,duration,weapon):
         thrust=keypose([(0,(0,0,0)),(.23,(0,.18,0)),(.38,(0,-.32,.08)),(.48,(0,-.32,.08)),(.85,(0,0,0))],time)
         right=body(v((.29,-.13,.22))+thrust);direction=v((0,-1,-.02)).normalized();left=right+direction*.42+v((-.18,0,0))
     elif kind=='bow':
-        right=body((.13,-.50,.43));left=body(keypose([(0,(-.17,-.32,.38)),(.36,(-.21,-.01,.45)),(.50,(-.22,.08,.45)),(.8,(-.25,-.22,.26))],time));direction=v((0,0,1))
+        right=body((.13,-.50,.43));left=body(keypose([(0,(.13,-.37,.43)),(.36,(.13,-.19,.43)),(.46,(.13,-.19,.43)),(.53,(.13,-.08,.43)),(.8,(-.25,-.22,.26))],time));direction=v((0,0,1))
     elif kind in ['staff','nova']:
         lift=math.sin(math.pi*phase);right=body((.32,-.27,.15+.42*lift));left=body((-.30,-.25,.15+.36*lift));direction=v((.06,-.35,1)).normalized()
     elif ritual:
@@ -313,6 +316,21 @@ def human_pose(kind,time,duration,weapon):
             arc=keypose([(0,(0,0,0)),(.24,(-.85,0,0)),(.46,(.85,0,0)),(.85,(0,0,0))],time,flow=True).x
             right.x+=arc*.16;direction=v((arc,-1,-.10)).normalized()
     direction=(thorax@direction).normalized()
+    bow_frame=thorax@Matrix(((0,0,-1),(-1,0,0),(0,1,0)))
+    if aim:
+        # Let the arms provide most elevation. Bending the entire chest by
+        # the shot angle makes steep shots fold the character at the waist.
+        tilt=Matrix.Rotation(aim,3,'X');torso_tilt=Matrix.Rotation(aim*.35,3,'X')
+        right=chest+tilt@(right-chest);left=chest+tilt@(left-chest)
+        shoulderR=chest+torso_tilt@(shoulderR-chest);shoulderL=chest+torso_tilt@(shoulderL-chest)
+        for name in ['chest','head']:
+            head,tail=poses[name];poses[name]=(chest+torso_tilt@(head-chest),chest+torso_tilt@(tail-chest))
+            frames[name]=torso_tilt@frames[name]
+        # Look along the shot as the arms rise, keeping the hood behind the
+        # string instead of leaving the face in its elevated sweep.
+        look_tilt=Matrix.Rotation(aim*.65,3,'X');head,tail=poses['head']
+        poses['head']=(head,head+look_tilt@(tail-head));frames['head']=look_tilt@frames['head']
+        thorax=torso_tilt@thorax;direction=tilt@direction;bow_frame=tilt@bow_frame
     definitions={d[0]:d for d in HUMAN}
     for suffix,side,shoulder,hand in [('R',1,shoulderR,right),('L',-1,shoulderL,left)]:
         reach=hand-shoulder
@@ -335,6 +353,10 @@ def human_pose(kind,time,duration,weapon):
     grip=right+frames['handR']@v((0,-.038,-.021))
     poses['weapon']=(grip,grip+direction*.2)
     for name,frame in frames.items():poses[name]=(*poses[name],frame)
+    if weapon=='bow':
+        # The bow's native +X points downrange, +Y follows its limbs. Author
+        # the complete frame so the string (-X) faces the drawing hand.
+        poses['weapon']=(grip,grip+direction*.2,bow_frame)
     return poses
 
 HOUND=[('hips',None,(0,.35,.68),(0,0,.71),.17,9),('chest','hips',(0,0,.71),(0,-.40,.72),.18,10),
@@ -431,6 +453,7 @@ def export(name,definitions,mesh_builder,pose_builder,clips):
                     continue
                 head,tail,*basis=poses[b.name];rest_dir=b.tail_local-b.head_local;direction=tail-head
                 orientation=(basis[0].to_quaternion() if basis else rest_dir.rotation_difference(direction))@b.matrix_local.to_quaternion()
+                if b.name=='weapon' and weapon=='bow':orientation=basis[0].to_quaternion()
                 pb=rig.pose.bones[b.name];pb.matrix=Matrix.Translation(head)@orientation.to_matrix().to_4x4()
                 bpy.context.view_layer.update()
                 index=indices[b.name]
@@ -478,6 +501,8 @@ for weapon in ['sword','spear','bow','staff']:
         for direction in ['forward_right','right','back_right','back','back_left','left','forward_left']:
             name=kind+'_'+direction;clips.append((weapon+'_'+name,name,duration,weapon))
 for kind,duration in [('sword',.72),('spear',.85),('bow',.8),('staff',.65),('nova',1),('jump',.6),('hang',1.6),('mantle',.52),('hurt',.3),('land',.22)]:clips.append((kind,kind,duration,kind if kind in ['sword','spear','bow','staff'] else 'sword'))
+for aim in [-1.35,-.9,-.45,.45,.9,1.35]:
+    name='bow_aim_'+str(aim);clips.append((name,name,.8,'bow'))
 for weapon,duration,variants in [('sword',.72,['reverse','low','high']),('spear',.85,['sweep','low','high'])]:
     for variant in variants:clips.append((weapon+'_'+variant,weapon+'_'+variant,duration,weapon))
 for name,windup,recovery in [('bell_slam',1.2,1.45),('root_call',1.05,1.4),('cinder_volley',.95,1.1),('mirror_prayer',1.1,1.3),('winter_sweep',1.15,1.5),('king_judgment',1.45,1.7)]:clips.append((name,name,windup+recovery,'spear'))

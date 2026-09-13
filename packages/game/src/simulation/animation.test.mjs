@@ -17,6 +17,28 @@ test('the banner has a fixed crossbar attachment and no authored motion competin
 });
 
 function actor(){return Object.assign(new Actor(),{y:.845,grounded:true});}
+
+test.each([-1.35,-.9,-.63,-.45,0,.225,.45,.9,1.35])('bow grip, string and drawing hand share the aimed plane at pitch %s',pitch=>{
+  const a=actor();Object.assign(a,{weapon:'bow',attackKind:'weapon',attackAge:.46,intent:{pitch},yaw:.73});
+  const poses=actorJointPoses(a),hand=name=>poses[rigs.pilgrim.bones.findIndex(b=>b.name===name)].position;
+  const socket=actorSocket(new Transform64(),a,'weapon'),grip=weaponPose(a).origin;
+  const forward=new Vector3(1,0,0).applyQuaternion({x:socket.rotation[0],y:socket.rotation[1],z:socket.rotation[2],w:socket.rotation[3]});
+  const up=new Vector3(0,1,0).applyQuaternion({x:socket.rotation[0],y:socket.rotation[1],z:socket.rotation[2],w:socket.rotation[3]});
+  const string=new Vector3(-.293,0,0).applyMatrix4(socket);
+  expect(Math.hypot(...grip.map((v,i)=>v-hand('handR')[i]))).toBeLessThan(.06);
+  expect(Math.hypot(...hand('handL').map((v,i)=>v-string[i]))).toBeLessThan(.13);
+  expect(forward.y).toBeCloseTo(-Math.sin(pitch),2);
+  expect(up.y).toBeCloseTo(Math.cos(pitch),2);
+  const expected=[-Math.sin(a.yaw)*Math.cos(pitch),-Math.sin(pitch),-Math.cos(a.yaw)*Math.cos(pitch)];
+  expect(forward.x*expected[0]+forward.y*expected[1]+forward.z*expected[2]).toBeGreaterThan(.995);
+  const chest=actorSocket(new Transform64(),a,'chest'),neck=new Vector3(0,.17,0).applyMatrix4(chest);
+  expect((neck.y-chest.translation[1])/.17).toBeGreaterThan(.85);
+  for(const side of ['R','L']){
+    const shoulder=hand('upperArm'+side),elbow=hand('forearm'+side),wrist=hand('hand'+side);
+    expect(Math.hypot(...elbow.map((v,i)=>v-shoulder[i]))).toBeCloseTo(.327,2);
+    expect(Math.hypot(...wrist.map((v,i)=>v-elbow[i]))).toBeCloseTo(.255,2);
+  }
+});
 test('Blender idle cycles close and animate head and torso',()=>{
   const a=actor(),start=actorJointPoses(a);a.animationTime=1;const middle=actorJointPoses(a);a.animationTime=3.2;const end=actorJointPoses(a);
   const names=rigs.pilgrim.bones.map(b=>b.name);

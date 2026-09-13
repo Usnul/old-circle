@@ -406,6 +406,25 @@ test('world input defaults invalid or omitted pitch to level aim and clamps fini
   }
 });
 
+test.each([['archer',4.8],['archer',-4.8],['archer',0],['mage',4.8],['mage',-4.8]])('%s aims at and hits a target %s metres above its platform',async(archetype,rise)=>{
+  const w=await setup(),target=w.spawnActor('roof-target',{kind:'player'},[100,80+rise,20]);
+  const a=w.spawnActor('ranged-guard',{archetype,weapon:ENEMIES[archetype].weapon,grounded:true},[100,80,30]);
+  a.home=[a.x,a.y,a.z];
+  // The roof ends in front of the elevated target. A flat shot strikes its
+  // edge or passes underneath; an elevated shot clears it and hits the torso.
+  if(rise>0)w.body([100,target.y-1,20],BoxShape3D.from_size(4,.3,2),BodyKind.Static);
+  w.think(a,1/60);expect(a.targetId).toBe(target.id);
+  w.think(a,.7);expect(a.attackAge).toBe(0);
+  for(let i=0;i<40&&!a.projectileReleased;i++){w.think(a,1/60);a.yaw=a.intent.yaw;w.advanceAttack(a,1/60);}
+  const shot=w.snapshot().projectiles.at(-1),hp=target.hp;
+  expect(Math.hypot(...shot.velocity)).toBeCloseTo(WEAPONS[a.weapon].speed);
+  if(rise!==0){expect(Math.sign(shot.velocity[1])).toBe(Math.sign(rise));expect(Math.sign(a.intent.pitch)).toBe(-Math.sign(rise));}
+  const saved=w.snapshot();w.replaceSnapshot(saved);
+  for(let i=0;i<90&&w.projectiles.size;i++)w.stepProjectiles(1/60);
+  expect(w.actor(target.id).hp).toBeLessThan(hp);
+  expect(w.events.some(e=>e.type==='hit'&&e.id===target.id)).toBe(true);
+});
+
 test('nova damages nearby visible actors and excludes distant actors',async()=>{
   const w=await setup(),a=w.addPlayer('caster');w.teleport(a,[100,15,30]);
   const near=w.spawnActor('near',{hp:100},[102,15,30]),far=w.spawnActor('far',{hp:100},[110,15,30]);

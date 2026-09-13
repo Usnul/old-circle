@@ -16,7 +16,7 @@ import { sphereSweep } from './sphere-sweep.mjs';
 import { weaponPose } from './weapon-pose.mjs';
 import {selectMeleeAttack} from './melee-selection.mjs';
 import {MELEE_ATTACKS} from '../content/melee-attacks.mjs';
-import {rangedSightOrigin} from './aim.mjs';
+import {rangedSightOrigin,rangedVelocity} from './aim.mjs';
 import {loadStaticScene} from '../world/static-scene-data.mjs';
 import {EnemyMind,enemySeed,BOSS_ARENA_RADIUS} from './enemy-mind.mjs';
 import { heightAt, landmarkPosition, REGIONS, SPAWN,WORLD_VERSION,WORLD_KILL_VOLUME,HEARTHS } from '../world/regions.mjs';
@@ -335,7 +335,8 @@ export class GameWorld {
     const t=new Transform64(),p=new Projectile(),e=this.ecd.createEntity();
     p.owner=a.id;p.weapon=a.weapon;p.damage=a.kind==='player'?weaponDamage(a):enemyDamage(a);
     const origin=weaponPose(a).origin;
-    p.velocity=[-Math.sin(a.yaw)*w.speed,a.weapon==='bow'?1:0,-Math.cos(a.yaw)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
+    const pitch=a.intent.pitch??0;
+    p.velocity=[-Math.sin(a.yaw)*Math.cos(pitch)*w.speed,-Math.sin(pitch)*w.speed,-Math.cos(a.yaw)*Math.cos(pitch)*w.speed];p.radius=a.weapon==='staff'?.17:.05;
     if(a.kind==='player'){
       const pitch=a.intent.pitch??0,direction=[-Math.sin(a.yaw)*Math.cos(pitch),-Math.sin(pitch),-Math.cos(a.yaw)*Math.cos(pitch)];
       // The camera looks over the player's shoulder. Converge the weapon socket
@@ -344,6 +345,9 @@ export class GameWorld {
       const distance=this.physics.raycast(this.ray,this.hit,id=>id!==this.actors.get(a.id))?this.hit.t:80;
       const delta=eye.map((v,i)=>v+direction[i]*Math.max(.5,distance)-origin[i]),length=Math.hypot(...delta);
       p.velocity=delta.map(v=>v/length*w.speed);
+    }else{
+      const target=this.actor(a.targetId);
+      if(target?.hp>0)p.velocity=rangedVelocity(origin,[target.x,target.y+.3,target.z],w.speed,a.weapon==='bow'?9.81:0);
     }
     t.setTranslation(...origin);
     this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);

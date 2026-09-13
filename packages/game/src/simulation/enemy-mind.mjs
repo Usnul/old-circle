@@ -10,6 +10,8 @@ import {WEAPONS,BOSSES} from '../content/catalog.mjs';
 import {armorFor} from '../content/equipment.mjs';
 import {BOSS_MOVES,nextBossMove} from '../content/boss-moves.mjs';
 import {castBossMove} from './boss-attacks.mjs';
+import {weaponPose} from './weapon-pose.mjs';
+import {rangedVelocity} from './aim.mjs';
 
 export const enemySeed=computeStringHash;
 const turn=(a,b,dt)=>a+clamp(Math.atan2(Math.sin(b-a),Math.cos(b-a)),-dt*2.6,dt*2.6);
@@ -87,6 +89,11 @@ export class EnemyMind {
     const w=this.world,a=this.actor,target=this.target,distance=this.distance;
     a.active=true;a.patrolGoal=null;
     const dx=target.x-a.x,dz=target.z-a.z,ranged=WEAPONS[a.weapon].style!=='melee',moveId=a.boss?nextBossMove(a):null;
+    const aim=()=>{
+      if(!ranged)return;
+      const velocity=rangedVelocity(weaponPose(a).origin,[target.x,target.y+.3,target.z],WEAPONS[a.weapon].speed,a.weapon==='bow'?9.81:0);
+      a.intent.pitch=-Math.atan2(velocity[1],Math.hypot(velocity[0],velocity[2]));
+    };
     const range=a.boss&&moveId!=='weapon'?BOSS_MOVES[moveId].range:ranged?12:a.boss?3.3:a.weapon==='spear'?2:1.65;
     a.phase=distance>range?'pursue':'windup';
     if(a.windup>0){
@@ -94,12 +101,13 @@ export class EnemyMind {
       if(a.windup<=0){
         if(a.boss&&BOSS_MOVES[a.bossMove]?.clip){castBossMove(w,a,a.bossMove);a.cooldown=BOSS_MOVES[a.bossMove].recovery+.85;}
         else{if(a.attackKind==='nova')w.nova(a,8,BOSSES[a.archetype].damage,'shockwave');else w.attack(a);a.cooldown=a.boss?2.6:1.7;}
-      }return;
+      }aim();return;
     }
-    if(a.attackAge>=0){a.phase='attack';a.intent={x:0,z:0,yaw:a.yaw,buttons:0};return;}
+    if(a.attackAge>=0){a.phase='attack';a.intent={x:0,z:0,yaw:ranged&&!a.projectileReleased?turn(a.yaw,Math.atan2(-dx,-dz),dt):a.yaw,pitch:a.intent.pitch??0,buttons:0};if(!a.projectileReleased)aim();return;}
     if(distance>range)this.steer([target.x,target.y,target.z],1,dt);
     else if(ranged&&distance<5){a.phase='retreat';this.steer([a.x-dx,a.y,a.z-dz],.65,dt);a.intent.yaw=turn(a.yaw,Math.atan2(-dx,-dz),dt);}
     else a.intent={x:0,z:0,yaw:turn(a.yaw,Math.atan2(-dx,-dz),dt),buttons:0};
+    aim();
     if(distance<=range&&a.cooldown===0){a.bossMove=moveId??'';a.windup=a.boss?BOSS_MOVES[moveId].windup:.65;a.attackKind=a.boss&&moveId!=='weapon'?'ritual':'weapon';w.event('telegraph',a,{effect:a.attackKind,move:a.bossMove,radius:range});}
   }
 }

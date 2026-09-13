@@ -88,7 +88,13 @@ export function animationPlan(a){
   const base=1-actionWeight;
   if(!hound&&a.crouch){loop(prefix+'crouch',base*(1-move),clock/3.2);travel('crouch_walk',base*move,1.12);}
   else{loop(prefix+'idle',base*(1-move),clock/(hound?3.4:3.2));travel('walk',base*move*(1-run),hound?1.04:1.12);travel('run',base*move*run,hound?1.36:1.84);}
-  if(action)add(action,actionWeight,actionTime);
+  if(action==='bow'){
+    // Small authored elevation intervals keep hands, bow and torso together
+    // in both native animation playback and simulation socket evaluation.
+    const pitch=clamp(a.intent?.pitch??0,-1.35,1.35),step=.45,lo=Math.floor(pitch/step),blend=pitch/step-lo;
+    const name=index=>index===0?'bow':`bow_aim_${Number((index*step).toFixed(2))}`;
+    add(name(lo),actionWeight*(1-blend),actionTime);add(name(lo+1),actionWeight*blend,actionTime);
+  }else if(action)add(action,actionWeight,actionTime);
   if(!plan.length)loop(prefix+'idle',1,clock/3.2);
   const total=plan.reduce((n,p)=>n+p.weight,0);for(const p of plan)p.weight/=total;
   return plan;

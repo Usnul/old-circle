@@ -234,7 +234,8 @@ export class WorldView {
       this.streaming.updateView(player,dt);
       const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
       const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
-      wanted[1]=Math.max(wanted[1],heightAt(wanted[0],wanted[2])+.6);
+      // Terrain and scenery contacts shorten this boom through cameraLimit.
+      // Raising its endpoint would change the sight angle when aiming upward.
       this.wantedCamera=[...wanted];this.cameraTarget=target;
       const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
       this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
