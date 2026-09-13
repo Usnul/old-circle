@@ -87,12 +87,12 @@ test.each([30,60,144])('animated wearer colliders maintain cage clearance and jo
 });
 
 test('a moving wearer capsule pushes the cage through native contacts',()=>{
-  const chain=new LanternChain(),control=new LanternChain(),socket=makeSocket(),hip=makeSocket([-.9,.70,-.085]);
+  const chain=new LanternChain(),control=new LanternChain(),socket=makeSocket(),hip=makeSocket([-.9,.70,.085]);
   control.physics.setContactFilter(()=>false);
   for(let frame=0;frame<360;frame++){chain.update(socket,1/120,[hip]);control.update(socket,1/120,[hip]);}
   let separation=0,contacts=0;
   for(let frame=1;frame<=180;frame++){
-    hip.setTranslation(-.9+Math.min(1,frame/120)*.43,.70,-.085);hip.updateMatrix();
+    hip.setTranslation(-.9+Math.min(1,frame/120)*.43,.70,.085);hip.updateMatrix();
     chain.update(socket,1/120,[hip]);control.update(socket,1/120,[hip]);
     separation=Math.max(separation,distance(chain.ember,control.ember));
     if(cageDepth(control,control.wearer[0])>.02)contacts++;
@@ -209,7 +209,7 @@ test.each(['bow','spear'])('%s arm motion leaves the lamp on the hips belt witho
   for(let frame=0;frame<45;frame++){
     actor.attackAge=frame/60;actor.yaw=.35;characters.update(rig,actor,1/60);actorSocket(hips,actor,'hips');actorSocket(hand,actor,'handL');m4_invert(inverse,hips);
     const local=new Vector3(...rig.lantern.chain.poses[0].position).applyMatrix4(inverse);
-    expect(local.x).toBeCloseTo(-.22,2);expect(local.y+.94).toBeGreaterThan(1.005);expect(local.y+.94).toBeLessThan(1.058);expect(local.z).toBeCloseTo(-.085,2);
+    expect(local.x).toBeCloseTo(-.22,2);expect(local.y+.94).toBeGreaterThan(1.005);expect(local.y+.94).toBeLessThan(1.058);expect(local.z).toBeCloseTo(.085,2);
     const ellipse=Math.hypot(local.x/.238,local.z/.168),distanceToBelt=Math.hypot(local.x,local.z)*(1-1/ellipse);
     expect(distanceToBelt).toBeGreaterThan(0);expect(distanceToBelt).toBeLessThan(.02);
     const light=rig.lantern.light.t.translation;

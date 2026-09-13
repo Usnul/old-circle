@@ -23,7 +23,7 @@ const wearerRadii={hips:.20,spine:.19,chest:.20,thighL:.145,thighR:.145,calfL:.1
 export const lanternBodyBones=rigs.pilgrim.bones.filter(b=>wearerRadii[b.name]);
 
 export function lanternMount(socket){
-  return new Vector3(-.22,.092,-.085).applyMatrix4(socket);
+  return new Vector3(-.22,.092,.085).applyMatrix4(socket);
 }
 
 function point(transform,y){return new Vector3(0,y,0).applyMatrix4(transform);}
