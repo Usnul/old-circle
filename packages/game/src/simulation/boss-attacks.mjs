@@ -69,7 +69,7 @@ export function stepHazard(world,e,p,t,dt){
     if(feet>surface+(p.kind==='wave'?.85:2.6)||feet+1.7<surface)continue;
     // Characters do not shelter one another from a marked patch of ground.
     if(!world.lineOfSight([x,y+.6,z],[victim.x,victim.y,victim.z],world.actors.get(owner.id),entity,e=>!world.ecd.getComponent(e,Actor)))continue;
-    if(world.damage(owner,victim,p.damage,310,['frost','stars'].includes(p.effect)?'magic':'physical'))p.hitIds.push(id);
+    if(world.damage(owner,victim,p.damage,310,['frost','stars'].includes(p.effect)?'magic':'physical',{effect:p.effect}))p.hitIds.push(id);
   }
 }
 

@@ -39,7 +39,7 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
     const listener=transformEntity();view.listenerTransform=listener.t;view.listenerEntity=listener.id;
     view.sun={...transformEntity(),l:{intensity:{set(){}},color:{set(){}}}};
     view.sky={update:()=>({nightBlend:0,intensity:1,color:[1,1,1],direction:[0,-1,0]})};
-    for(const name of ['streaming','ambient','banners','audio','footsteps','bossHazards','combatTrails'])view[name]={update(){}};
+    for(const name of ['streaming','ambient','banners','audio','footsteps','bossHazards','combatTrails','vfx'])view[name]={update(){}};
     view.streaming.updateView=()=>{};
     view.combatFeedback={update(){},cameraKick:()=>({pitch:0,roll:0})};view.animations={update:vi.fn()};
     view.characterRenderer={

@@ -55,6 +55,14 @@ test('boss defeat clears casts immediately and the encounter stays active while 
   w.damage(late,b,10000,0);expect(w.projectiles.size).toBe(0);
 });
 
+test('hazard reactions retain their elemental identity and land on the victim surface',async()=>{
+  const {w,p,b}=await setup('rootbound');spawnHazard(w,b,'sigil',ground(p.x,p.z),{effect:'roots',radius:2.3,delay:0,life:.5});
+  w.step();const hit=w.events.find(event=>event.type==='hit'&&event.id===p.id);
+  expect(hit).toMatchObject({effect:'roots',damageType:'physical',source:b.id});
+  expect(Math.hypot(hit.position[0]-p.x,hit.position[2]-p.z)).toBeCloseTo(.32,2);
+  expect(Math.hypot(...hit.normal)).toBeCloseTo(1);expect(Math.hypot(...hit.direction)).toBeCloseTo(1);
+});
+
 test.each(Object.keys(BOSSES))('%s has a distinct spell pattern, a stronger second phase and a complete planted cast animation',async archetype=>{
   const {w,p,b}=await setup(archetype);b.grounded=true;
   const first=Array.from({length:4},(_,i)=>{b.attackId=i;return nextBossMove(b);});b.hp=b.healthMax*.5;

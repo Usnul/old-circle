@@ -29,6 +29,7 @@ import { buildLayout } from '@old-circle/game/world/layout.mjs';
 import { heightAt } from '@old-circle/game/world/regions.mjs';
 import {DUNGEON_MATERIALS} from '@old-circle/game/world/dungeons.mjs';
 import { effect } from './effects.mjs';
+import {WorldVFX} from './particle-vfx.mjs';
 import { PresentationPoses } from './presentation-poses.mjs';
 import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
@@ -79,8 +80,10 @@ export class WorldView {
       this.cloth = new WorldCloth(this.wind);
     }});
     this.ecd=this.engine.entityManager.dataset;
+    this.vfx=new WorldVFX(this);
     const manifest = await fetch('/assets/geometry/manifest.json').then(response => response.json());
     await loadScenery(manifest, this.ecd);
+    await this.vfx.prepare(this.engine.assetManager);
     this.wind.attach(this.ecd);this.wind.follow(0,heightAt(0,23)+1,23);
     this.engine.viewStack.el.classList.add('meep-world');
     const renderer=this.engine.graphics.renderer;
@@ -179,16 +182,12 @@ export class WorldView {
     const l=new Light();l.type.set(type);l.color.set(...color);l.intensity.set(intensity);l.distance.set(distance);l.radius.set(.15);l.castShadow.set(shadow);l.maxShadowDistance.set(130);
     const t=new Transform64();t.setTranslation(...p);const id=new Entity().add(l).add(t).build(this.ecd);return {id,t,l};
   }
-  emitter(kind,p,rate,life=0){const t=new Transform64();t.setTranslation(...p);const c=effect(kind,rate),id=new Entity().add(c).add(t).build(this.ecd);if(life)this.transients.push({id,c,life,age:0});return {id,t,c};}
+  emitter(kind,p,rate,life=0){const t=new Transform64();t.setTranslation(...p);t.updateMatrix();const c=effect(kind,rate),id=new Entity().add(c).add(t).build(this.ecd);if(life)this.transients.push({id,c,life,age:0});return {id,t,c};}
   blastBoundary(ev){
     const [x,y,z]=ev.position,radius=ev.radius,material=this.materials[ev.effect==='frost'?'magic':'ember'].clone();
     material.transparency_mode=TransparencyMode.Transparent;material.diffuse_color.setA(0);
     const parts=this.model(ev.effect==='frost'?'frostRing':'dangerRing',[x,heightAt(x,z)+.12,z],[radius,radius,radius],0,material);
     this.transients.push({parts,material,life:.8,age:0});
-    for(let i=0;i<16;i++){
-      const angle=i/16*Math.PI*2,px=x+Math.sin(angle)*radius,pz=z+Math.cos(angle)*radius;
-      const emitter=this.emitter(ev.effect,[px,Math.max(y-.7,heightAt(px,pz)+.15),pz],0,1.1);this.particles.burst(emitter.id,10);
-    }
   }
   update(snapshot,playerId,dt,renderTime=performance.now()/1000){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
@@ -220,7 +219,8 @@ export class WorldView {
     for(const [id,rig] of this.characters)if(!present.has(id)){this.characterRenderer.remove(rig);this.characters.delete(id);}
     const liveProjectiles=new Set();for(const p of snapshot.projectiles){if(isBossHazard(p))continue;const key=p.key??p.id;liveProjectiles.add(key);let m=this.missiles.get(key);if(!m){m=this.model(p.weapon==='bow'?'arrow':'spell',[0,0,0],[1,1,1],0,p.effect==='cinder'?this.materials.ember:null);this.missiles.set(key,m);}const v=p.velocity;this.pose(m,p.position,p.effect==='cinder'?1.7:1,Math.atan2(-v[0],-v[2]),-Math.PI/2+Math.atan2(v[1],Math.hypot(v[0],v[2])));}
     for(const [id,m] of this.missiles)if(!liveProjectiles.has(id)){this.remove(m);this.missiles.delete(id);}
-    if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events){if(ev.type==='nova'){const emitter=this.emitter(ev.effect,ev.position,0,1.4);this.particles.burst(emitter.id,280);this.blastBoundary(ev);}if(ev.type==='hit'){const emitter=this.emitter('embers',ev.position,0,2);this.particles.burst(emitter.id,24);}}this.lastEventSnapshot=snapshot;}
+    this.vfx.update(snapshot,presented,playerId,dt);
+    if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events)if(ev.type==='nova')this.blastBoundary(ev);this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
     this.combatFeedback.update(snapshot,presented,playerId,dt);
     const player=presented.find(a=>a.id===playerId);if(player){

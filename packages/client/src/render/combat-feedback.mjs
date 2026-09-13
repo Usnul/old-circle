@@ -24,7 +24,6 @@ export class CombatFeedback {
         }
         if(event.type==='heal'){
           const actor=actors.find(a=>a.id===event.id),position=actor?[actor.x,actor.y,actor.z]:event.position;
-          const emitter=view.emitter('heal',position,0,1.5);view.particles.burst(emitter.id,80);
           let glow=this.healing.get(event.id);
           if(!glow){glow={light:view.light(position,[.45,1,.32],3,Light.Type.POINT,false,4)};this.healing.set(event.id,glow);}
           glow.age=0;

@@ -255,6 +255,12 @@ export class GameWorld {
     if(a.hp<=0){if(collider)this.ecd.removeComponentFromEntity(e,Collider);return;}
     if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=0;this.ecd.addComponentToEntity(e,c);}
   }
+  sweepContact(radius,direction){
+    const normal=Array.from(this.hit.normal),convex=this.ecd.getComponent(this.hit.entity,Collider)?.shape.is_convex!==false;
+    // Native convex sweeps report the moving sphere's centre at contact;
+    // the concave fallback reports a surface ray hit already on the geometry.
+    return {position:Array.from(this.hit.position,(value,i)=>value-(convex?normal[i]*radius:0)),normal,direction:Array.from(direction)};
+  }
   melee(a){
     const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova'||a.attackKind==='ritual')return;
     const age=a.attackAge;if(age<w.active[0]||age>w.active[1])return;
@@ -267,11 +273,13 @@ export class GameWorld {
       this.ray.set([...from,...d.map(v=>v/length),length]);
       if(sphereSweep(this.physics,this.ray,.11,this.hit,e=>e!==this.actors.get(a.id))){
         const v=this.ecd.getComponent(this.hit.entity,Actor);
-        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.kind==='player'?weaponDamage(a):enemyDamage(a),w.impulse);}
+        // Visibility uses the same query result; retain the blade's surface contact first.
+        const contact=this.sweepContact(.11,d.map(v=>v/length));
+        if(v&&!a.hitIds.includes(v.id)&&this.lineOfSight([a.x,a.y+.15,a.z],[v.x,v.y,v.z],this.actors.get(a.id),this.actors.get(v.id))){a.hitIds.push(v.id);this.damage(a,v,a.kind==='player'?weaponDamage(a):enemyDamage(a),w.impulse,'physical',contact);}
       }
     }
   }
-  damage(a,v,amount,impulse,type='physical'){
+  damage(a,v,amount,impulse,type='physical',contact={}){
     if(!canDamage(a,v))return false;
     const armor=v.kind==='player'?armorFor(v):null;
     amount*=(1-(armor?.[type]??0))*(charmFor(v).received??1);impulse*=1-(armor?.poise??0);
@@ -280,7 +288,12 @@ export class GameWorld {
     if(v.kind==='enemy'&&v.boss&&a.kind==='player'&&Math.hypot(a.x-v.home[0],a.z-v.home[2])<BOSS_ARENA_RADIUS)v.returning=false;
     const dx=v.x-a.x,dz=v.z-a.z,d=Math.max(.01,Math.hypot(dx,dz)),b=this.ecd.getComponent(this.actors.get(v.id),RigidBody);
     this.physics.applyImpulse(b,new Vector3(dx/d*impulse,impulse*.16,dz/d*impulse));
-    this.event('hit',v,{damage:Math.round(amount),source:a.id});
+    // Area damage has no sweep contact. Place its reaction on the capsule face
+    // toward the source instead of hiding it inside the character's centre.
+    const distance=Math.hypot(dx,dz),direction=contact.direction??(distance>.0001?[dx/distance,0,dz/distance]:[-Math.sin(a.yaw),0,-Math.cos(a.yaw)]);
+    const normal=contact.normal??direction.map(value=>-value),radius=.32*(v.boss?1.5:1);
+    const position=contact.position??[v.x+normal[0]*radius,v.y,v.z+normal[2]*radius];
+    this.event('hit',v,{damage:Math.round(amount),source:a.id,weapon:contact.weapon??a.weapon,damageType:type,targetMaterial:v.archetype==='hound'?'flesh':'armor',position:Array.from(position),normal:Array.from(normal),direction:Array.from(direction),...(contact.effect?{effect:contact.effect}:{})});
     if(v.hp===0){
       if(v.boss)clearBossHazards(this,v.id);
       v.deathTick=this.tick;v.deathVelocity=Array.from(b.linearVelocity);this.syncActorCollider(v);
@@ -312,7 +325,7 @@ export class GameWorld {
       const e=this.physics.entityOf(this.overlaps[i]);if(e<0)continue;
       const v=this.ecd.getComponent(e,Actor);
       if(v===undefined||hit.has(v.id))continue;hit.add(v.id);
-      if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420,effect==='shockwave'?'physical':'magic');
+      if(this.lineOfSight([a.x,a.y+.2,a.z],[v.x,v.y+.2,v.z],this.actors.get(a.id),e))this.damage(a,v,damage,420,effect==='shockwave'?'physical':'magic',{effect});
     }
   }
   spawnProjectile(a,w){
@@ -341,7 +354,11 @@ export class GameWorld {
       if(p.weapon==='bow')p.velocity[1]-=9.81*dt;
       const v=p.velocity,speed=Math.hypot(...v);this.ray.set([t.translation_x,t.translation_y,t.translation_z,v[0]/speed,v[1]/speed,v[2]/speed,speed*dt]);
       const hit=sphereSweep(this.physics,this.ray,p.radius,this.hit,id=>id!==this.actors.get(p.owner));
-      if(hit){const victim=this.ecd.getComponent(this.hit.entity,Actor),owner=this.actor(p.owner);if(victim&&owner)this.damage(owner,victim,p.damage,WEAPONS[p.weapon].impulse,p.weapon==='staff'?'magic':'physical');}
+      if(hit){
+        const victim=this.ecd.getComponent(this.hit.entity,Actor),contact={...this.sweepContact(p.radius,v.map(value=>value/speed)),weapon:p.weapon,...(p.effect?{effect:p.effect}:{})};
+        if(victim&&owner)this.damage(owner,victim,p.damage,WEAPONS[p.weapon].impulse,p.weapon==='staff'?'magic':'physical',contact);
+        else if(!victim&&owner&&p.age<=p.life)this.event('impact',owner,{...contact,source:p.owner});
+      }
       if(hit||p.age>p.life){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
       t.setTranslation(t.translation_x+v[0]*dt,t.translation_y+v[1]*dt,t.translation_z+v[2]*dt);
     }

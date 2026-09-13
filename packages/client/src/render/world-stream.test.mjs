@@ -367,8 +367,8 @@ test('suspended halo trails follow their persistent placement and release distan
   const store = new ModelStore({manifest, materials, read, residentCache: true});
   let ecd;
   const view = {emitter(kind, position, rate) {
-    expect(kind).toBe('levitation');
-    expect(rate).toBe(30);
+    expect(['levitation','monument-glint']).toContain(kind);
+    expect(rate).toBe(kind==='levitation'?24:5);
     const t = new Transform64();
     t.setTranslation(...position);
     const id = ecd.createEntity();

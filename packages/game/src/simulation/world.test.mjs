@@ -201,6 +201,21 @@ test('a visible melee swing connects once with each victim',async()=>{
   expect(b.hp).toBeCloseTo(167);expect(a.hitIds).toContain(b.id);
 });
 
+test('melee feedback retains the native blade contact across shared visibility queries',async()=>{
+  const w=await setup(),a=w.addPlayer('player');w.teleport(a,[100,heightAt(100,30)+1,30]);
+  const b=w.spawnActor('victim',{hp:200,healthMax:200},[100,a.y,28.5]);a.yaw=0;w.attack(a);
+  let captured;const visibility=w.lineOfSight.bind(w);
+  w.lineOfSight=(...args)=>{
+    captured={position:Array.from(w.hit.position,(value,i)=>value-w.hit.normal[i]*.11),normal:Array.from(w.hit.normal)};
+    const visible=visibility(...args);w.hit.position.fill(900);w.hit.normal.fill(0);return visible;
+  };
+  for(let i=0;i<12;i++){a.attackAge=.18+i*.02;w.melee(a);}
+  const hit=w.events.find(event=>event.type==='hit');expect(hit).toMatchObject({weapon:'sword',damageType:'physical',...captured});
+  expect(Math.hypot(hit.position[0]-b.x,hit.position[2]-b.z)).toBeCloseTo(.32,2);
+  expect(Math.hypot(...hit.direction)).toBeCloseTo(1);
+  w.hit.position.fill(-900);expect(hit.position).toEqual(captured.position);
+});
+
 test('native enemy blade hits use encounter level once, with armor applied after scaling',async()=>{
   const w=await setup(),p=w.addPlayer('target'),a=w.spawnActor('roadbound',{archetype:'hollow',level:1,weapon:'sword'},[100,15,30]);
   w.teleport(p,[100,15,28.5]);w.think=()=>{};w.step();a.yaw=0;p.inventory.armor='sentinel';
@@ -301,10 +316,34 @@ test('a fast arrow hits a thin wall before the actor behind it',async()=>{
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);
   const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.body([100,15,27],BoxShape3D.from_size(3,4,.02),BodyKind.Static);
   w.attack(a);expect(w.projectiles.size).toBe(0);w.advanceAttack(a,.45);expect(w.projectiles.size).toBe(0);w.advanceAttack(a,.02);expect(w.projectiles.size).toBe(1);w.stepProjectiles(.2);expect(w.projectiles.size).toBe(0);expect(b.hp).toBe(100);
+  const impact=w.events.find(event=>event.type==='impact');expect(impact).toMatchObject({source:a.id,weapon:'bow'});
+  expect(impact.position[2]).toBeCloseTo(27.01,3);expect(impact.normal[2]).toBeGreaterThan(.99);
+  expect(Math.hypot(...impact.direction)).toBeCloseTo(1);expect(impact.direction[2]).toBeLessThan(-.9);
+  expect(w.events.some(event=>event.type==='hit')).toBe(false);
 });
 test('a fast arrow connects with a visible actor over its swept travel',async()=>{
   const w=await setup(),a=w.addPlayer('archer','wayfarer');w.teleport(a,[100,15,30]);
   const b=w.spawnActor('victim',{hp:100},[100,15,25]);w.attack(a);w.advanceAttack(a,.47);w.stepProjectiles(.2);expect(b.hp).toBeLessThan(100);expect(w.projectiles.size).toBe(0);
+  const hit=w.events.find(event=>event.type==='hit');expect(hit).toMatchObject({source:a.id,weapon:'bow',damageType:'physical'});
+  expect(Math.hypot(hit.position[0]-b.x,hit.position[2]-b.z)).toBeCloseTo(.32,2);
+  expect(hit.normal[2]).toBeGreaterThan(.8);expect(Math.hypot(...hit.direction)).toBeCloseTo(1);
+  expect(w.events.some(event=>event.type==='impact')).toBe(false);
+});
+
+test('a missile expiring in empty air produces no impact',async()=>{
+  const w=await setup(),a=w.addPlayer('caster','ember');w.teleport(a,[100,80,30]);
+  const {p}=w.spawnProjectile(a,WEAPONS.staff);p.life=.01;w.events.length=0;w.stepProjectiles(.02);
+  expect(w.projectiles.size).toBe(0);expect(w.events).toEqual([]);
+});
+
+test('a cinder collision keeps its projectile identity and the concave terrain surface',async()=>{
+  const w=await setup(),a=w.addPlayer('caster','ember'),x=100,z=30,y=heightAt(x,z);
+  w.teleport(a,[x+5,y+3,z]);const {p,t}=w.spawnProjectile(a,WEAPONS.staff);
+  p.effect='cinder';p.velocity=[0,-40,0];t.setTranslation(x,y+2,z);a.weapon='spear';w.events.length=0;
+  w.stepProjectiles(.1);const impact=w.events.find(event=>event.type==='impact');
+  expect(impact).toMatchObject({source:a.id,weapon:'staff',effect:'cinder',direction:[0,-1,0]});
+  expect(impact.position[1]).toBeCloseTo(heightAt(impact.position[0],impact.position[2]),4);
+  expect(impact.normal[1]).toBeGreaterThan(0);expect(Math.hypot(...impact.normal)).toBeCloseTo(1);expect(w.projectiles.size).toBe(0);
 });
 test.each(['bow','staff'])('%s follows camera pitch upward and downward without changing projectile speed',async weapon=>{
   const w=await setup(),p=w.addPlayer('aiming',weapon==='bow'?'wayfarer':'ember');w.teleport(p,atHome(160,120,10));
@@ -344,6 +383,8 @@ test('nova damages nearby visible actors and excludes distant actors',async()=>{
   const w=await setup(),a=w.addPlayer('caster');w.teleport(a,[100,15,30]);
   const near=w.spawnActor('near',{hp:100},[102,15,30]),far=w.spawnActor('far',{hp:100},[110,15,30]);
   w.nova(a,6.5,36,'frost');expect(near.hp).toBe(64);expect(far.hp).toBe(100);
+  const hit=w.events.find(event=>event.type==='hit');expect(hit).toMatchObject({effect:'frost',damageType:'magic',direction:[1,0,0]});expect(hit.normal[0]).toBe(-1);
+  expect(hit.position).toEqual([near.x-.32,near.y,near.z]);
   expect(a.attackId).toBe(1); // Area attacks must advance a boss's three-move cycle too.
 });
 test('crouch preserves foot height and cannot stand into a low ceiling',async()=>{

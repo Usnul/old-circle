@@ -5,14 +5,9 @@ import { create_particle_effect } from '@woosh/meep-engine/src/shade/renderer/pa
 import { VM_BUILTIN } from '@woosh/meep-engine/src/shade/renderer/particles/isa/ParticleVMISA.js';
 import { ParticleEffect } from '@woosh/meep-engine/src/engine/graphics/ecs/particles/ParticleEffect.js';
 import { EMITTER_BLEND } from '@woosh/meep-engine/src/shade/renderer/particles/data/PARTICLE_EMITTER_STRUCT.js';
+import {PARTICLE_LAYERS,layerEffect} from './particle-layers.mjs';
 
 const programs=new Map();
-export const HAZARD_EFFECTS={
-  'hazard-roots':{color:[.65,.76,.24,.7],velocity:[1.6,1.4,1.6],lift:2.3,size:.07},
-  'hazard-stars':{color:[.57,.71,1.3,.7],velocity:[1.7,1.2,1.7],lift:1.9,size:.06},
-  'hazard-frost':{color:[.35,.85,1.5,.7],velocity:[1.8,1.5,1.8],lift:1.8,size:.07},
-  'hazard-bell':{color:[1.3,.7,.24,.7],velocity:[3,.3,3],lift:.5,size:.08},
-};
 export const FOOTSTEP_EFFECTS={
   'step-grass':{texture:'step-leaf',color:[.28,.34,.13,.85],size:.065,life:.55,lift:.85,spread:.30,gravity:2.4,growth:0,count:4},
   'step-gravel':{texture:'step-grit',color:[.43,.39,.31,.85],size:.055,life:.5,lift:.9,spread:.40,gravity:3,growth:0,count:5},
@@ -30,15 +25,17 @@ export const AMBIENT_EFFECTS={
   ash:{life:6,color:[.48,.43,.37,.45],size:.035,fall:-.16,speed:.9},
 };
 // Every visual particle is simulated on Meep's GPU VM, including ambient motes.
-export function effect(kind='embers',rate=35,scale=1){
+export function effect(kind='fire-ember',rate=35,scale=1){
+  if(PARTICLE_LAYERS[kind])return layerEffect(kind,rate,scale);
+  if(!FOOTSTEP_EFFECTS[kind]&&!AMBIENT_EFFECTS[kind]&&!['motes','levitation'].includes(kind))throw new Error(`Unknown particle effect: ${kind}`);
   const step=FOOTSTEP_EFFECTS[kind],key=step?`${kind}:${scale}`:kind;
   if(!programs.has(key))programs.set(key,compile(kind,scale));
   const natural=FOOTSTEP_EFFECTS[kind]||AMBIENT_EFFECTS[kind]&&!AMBIENT_EFFECTS[kind].glow;
   return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${step?.texture??'mote'}.png`,spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color',...(step?{rotation:'rotation'}:{})},prewarm:kind==='motes'?2:0});
 }
 function compile(kind,scale){
-  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],hazard=HAZARD_EFFECTS[kind],ambient=!!profile||kind==='motes',frost=kind==='frost',shock=kind==='shockwave',heal=kind==='heal',levitation=kind==='levitation';
-  const lifetime=step?.life??(levitation?1.4:hazard?1:profile?.life??(ambient?6:heal?1.4:shock||frost?1:1.9)),color=hazard?.color??step?.color??profile?.color??(levitation?[2.4,1.8,.7,.9]:heal?[.6,1.5,.35,.8]:frost?[.35,.85,1.6,.75]:[1.5,.75,.22,.7]);
+  const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],ambient=!!profile||kind==='motes',levitation=kind==='levitation';
+  const lifetime=step?.life??(levitation?1.4:profile?.life??6),color=step?.color??profile?.color??[2.4,1.8,.7,.9];
   const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4},...(step?[{name:'rotation',components:1},{name:'normal',components:3}]:[])]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
@@ -48,11 +45,11 @@ function compile(kind,scale){
   const normal=step?op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_UP}):null;
   // Scatter in the contact plane, then lift along its normal, including on slopes.
   const tangent=step?op(init,'sub',{a:signed,b:op(init,'scale',{v:normal,s:op(init,'dot',{a:signed,b:normal})})}):null;
-  const jitter=step?op(init,'scale',{v:tangent,s:[.065*scale]}):op(init,'mul',{a:signed,b:levitation?[.045,.045,.045]:kind==='snow'?[12,4,12]:ambient?[16,2,16]:heal?[.45,.5,.45]:[.2,.1,.2]});
+  const jitter=step?op(init,'scale',{v:tangent,s:[.065*scale]}):op(init,'mul',{a:signed,b:levitation?[.045,.045,.045]:kind==='snow'?[12,4,12]:[16,2,16]});
   set(init,'position',op(init,'add',{a:op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_POSITION}),b:jitter}));
-  let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:hazard?.velocity??(levitation?[.025,.025,.025]:ambient?[.15,.10,.15]:heal?[.35,.4,.35]:frost||shock?[7,.2,7]:[.5,1,.5])});
-  velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):levitation?[0,0,0]:hazard?[0,hazard.lift,0]:ambient?[.15,.02,.08]:shock||frost?[0,.1,0]:[0,1.4,0]});
-  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[hazard?.size??profile?.size??(levitation?.23:ambient?.035:shock||frost?.09:.11)]);
+  let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:levitation?[.025,.025,.025]:[.15,.10,.15]});
+  velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):levitation?[0,0,0]:[.15,.02,.08]});
+  set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[profile?.size??(levitation?.23:.035)]);
   if(step){set(init,'normal',normal);set(init,'rotation',op(init,'mul',{a:op(init,'random',{}, {components:1}),b:[Math.PI*2]}));}
   set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});

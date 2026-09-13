@@ -292,7 +292,6 @@ build_nature(beam,ico,mesh,finish)
 cone((0,0,.12),.7,.62,.24,'stoneDark')
 cone((0,0,.5),.13,.12,.7,'brass')
 cone((0,0,.95),.48,.6,.24,'brass')
-ico((0,0,1.1),(.27,.27,.22),'ember',2)
 finish('brazier')
 
 # A pilgrim's caged lantern, hanging from the origin at its belt hook.

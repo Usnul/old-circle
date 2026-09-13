@@ -204,9 +204,9 @@ export class WorldStream extends System {
 
   removeLamp(lamp, dataset) {
     if (lamp.light) dataset.removeEntity(lamp.light.id);
-    if (lamp.emitter) dataset.removeEntity(lamp.emitter.id);
+    this.view.vfx.remove(lamp.effect);
     lamp.light = null;
-    lamp.emitter = null;
+    lamp.effect = null;
   }
 
   updateEffects(focus) {
@@ -217,7 +217,7 @@ export class WorldStream extends System {
       const d = distance(focus, halo.scenery.bounds);
       if (halo.emitters && d > 260) this.removeEmitters(halo, dataset);
       if (!halo.emitters && d < 220) {
-        halo.emitters = Array.from({length: 6}, () => this.view.emitter('levitation', halo.transform.translation, 30));
+        halo.emitters = Array.from({length: 6}, (_,i) => this.view.emitter(i%3===0?'monument-glint':'levitation', halo.transform.translation, i%3===0?5:24));
       }
       for (const [index, emitter] of (halo.emitters ?? []).entries()) {
         const angle = this.clock * .18 + index * Math.PI / 3;
@@ -237,8 +237,9 @@ export class WorldStream extends System {
     for (const [index, lamp] of this.lights.entries()) {
       const d = v3_distance(...lamp.position, ...focus);
       if (!lamp.light && d < 75) {
-        lamp.light = this.view.light(lamp.position, [1, .48, .13], 42, Light.Type.POINT, index % 5 === 0, 8);
-        lamp.emitter = this.view.emitter('embers', lamp.position, 22);
+        lamp.light = this.view.light(lamp.position, [1, .48, .13], 9, Light.Type.POINT, index % 5 === 0, 8);
+        // The light sits above the rim; particles start at the bowl's fuel surface.
+        lamp.effect = this.view.vfx.create('brazier', [lamp.position[0],lamp.position[1]-.18,lamp.position[2]], {continuous:true,persistent:true});
       } else if (lamp.light && d > 90) {
         this.removeLamp(lamp, dataset);
       }

@@ -16,7 +16,7 @@ export class BossHazards {
   constructor(view){this.view=view;this.marks=new Map();this.bursts=new Map();this.time=0;}
   update(projectiles,player,epoch,dt){
     const {view}=this;this.time+=dt;
-    if(epoch!==this.epoch){for(const mark of this.marks.values())view.ecd.removeEntity(mark.id);this.marks.clear();this.bursts.clear();this.epoch=epoch;}
+    if(epoch!==this.epoch){for(const mark of this.marks.values()){for(const g of mark.effects??[])view.vfx.remove(g);view.ecd.removeEntity(mark.id);}this.marks.clear();this.bursts.clear();this.epoch=epoch;}
     for(const [key,time] of this.bursts)if(this.time-time>10)this.bursts.delete(key);
     const active=new Set(),nearby=projectiles.filter(p=>isBossHazard(p)&&p.age<=p.life&&(!player||Math.hypot(p.position[0]-player.x,p.position[2]-player.z)<60));
     nearby.sort((a,b)=>Math.hypot(a.position[0]-(player?.x??0),a.position[2]-(player?.z??0))-Math.hypot(b.position[0]-(player?.x??0),b.position[2]-(player?.z??0)));
@@ -42,12 +42,18 @@ export class BossHazards {
       t64_look_rotation(mark.t,0,-1,0,0,0,-1);mark.t.setTranslation(x,(top+bottom)/2,z);mark.t.setScale(radius*2,radius*2,top-bottom);mark.t.updateMatrix();t64_announce_change(view.ecd,mark.id);
       if(!casting&&!this.bursts.has(key)){
         this.bursts.set(key,this.time);
-        if(age-p.delay<.15&&view.transients.filter(t=>t.bossHazard).length<12){
-          const emitter=view.emitter('hazard-'+(p.effect==='roots'?'roots':p.effect==='frost'?'frost':p.effect==='stars'?'stars':'bell'),[x,y,z],0,1.1);
-          view.transients.at(-1).bossHazard=true;view.particles.burst(emitter.id,p.kind==='wave'?24:40);
+        if((p.kind==='wave'||age-p.delay<.15)&&[...this.marks.values()].filter(m=>m.effects).length<12){
+          mark.effects=view.vfx.groundBurst(p.effect,[x,y,z],radius,{wave:p.kind==='wave',continuous:p.kind==='wave'});
+        }
+      }
+      if(p.kind==='wave'&&mark.effects){
+        for(const [i,g] of mark.effects.entries()){
+          const angle=i/mark.effects.length*Math.PI*2,px=x+Math.sin(angle)*radius,pz=z+Math.cos(angle)*radius;
+          view.vfx.move(g,[px,heightAt(px,pz)+.12,pz]);
+          if(age>=p.life)view.vfx.stop(g);
         }
       }
     }
-    for(const [key,mark] of this.marks)if(!active.has(key)){view.ecd.removeEntity(mark.id);this.marks.delete(key);}
+    for(const [key,mark] of this.marks)if(!active.has(key)){for(const g of mark.effects??[])if(g.continuous)view.vfx.stop(g);view.ecd.removeEntity(mark.id);this.marks.delete(key);}
   }
 }
