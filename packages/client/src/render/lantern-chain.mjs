@@ -16,6 +16,7 @@ import {bvh_query_user_data_intersects_aabb} from '@woosh/meep-engine/src/core/b
 import {aabb3_transform_oriented} from '@woosh/meep-engine/src/core/geom/3d/aabb/aabb3_transform_oriented.js';
 
 const STEP=1/120,IDENTITY=[0,0,0,1];
+export const LANTERN_SCALE=.8;
 // Model origins are at the hooks; rigid-body origins are at their centres of mass.
 const segments=[{length:.038,centre:.022,mass:.035},{length:.038,centre:.022,mass:.035},{centre:.222,mass:.45}];
 const wearerRadii={hips:.20,spine:.19,chest:.20,thighL:.145,thighR:.145,calfL:.10,calfR:.10};
@@ -88,11 +89,11 @@ export class LanternChain {
     }))];
   }
   reset(socket,poses,targets){
-    this.dispose();this.scale=socket.scale[0];const scale=this.scale;
+    this.dispose();this.scale=socket.scale[0];const scale=this.scale*LANTERN_SCALE;
     this.anchor=this.body(targets[0].position,IDENTITY,null);
     for(let i=0;i<poses.length;i++){
       const bone=lanternBodyBones[i],radius=wearerRadii[bone.name],length=/^(thigh|calf)/.test(bone.name)?bone.length:Math.max(.02,bone.length-2*radius);
-      this.wearer.push(this.body(targets[i+1].position,targets[i+1].rotation,CapsuleShape3D.from(radius*scale,length*scale)));
+      this.wearer.push(this.body(targets[i+1].position,targets[i+1].rotation,CapsuleShape3D.from(radius*this.scale,length*this.scale)));
     }
     // Spawn clear of the trousers. This is only the initial pose; contacts
     // and joints determine the resting angle and every subsequent swing.
@@ -150,7 +151,7 @@ export class LanternChain {
     // solver's body poses or re-solving the links in the renderer.
     const offset=anchor.map((v,i)=>v-this.anchor.t.translation[i]);
     this.poses=this.links.map((body,i)=>({
-      position:Array.from(point(body.t,segments[i].centre*this.scale),(v,j)=>v+offset[j]),rotation:Array.from(body.t.rotation)
+      position:Array.from(point(body.t,segments[i].centre*this.scale*LANTERN_SCALE),(v,j)=>v+offset[j]),rotation:Array.from(body.t.rotation)
     }));
     this.ember=Array.from(this.links[2].t.translation,(v,i)=>v+offset[i]);
     return this.poses;

@@ -24,7 +24,7 @@ import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothCollider} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothCollider.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {clothComponents,unkeyCloth} from './cloth.mjs';
-import {LanternChain,lanternBodyBones} from './lantern-chain.mjs';
+import {LanternChain,lanternBodyBones,LANTERN_SCALE} from './lantern-chain.mjs';
 import {updateWeaponLight,removeWeaponLight} from './weapon-lights.mjs';
 
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
@@ -152,12 +152,12 @@ export class Characters {
           geometry.material=geometry.material.clone();geometry.material.transparency_mode=TransparencyMode.Transparent;geometry.material.diffuse_color.setA(.85);shaded_geometry_announce_change(view.ecd,id);
         }
       }
-      rig.lantern={parts,links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(view.lanternScenery),light:view.light(position,[1,.62,.30],2.4,Light.Type.POINT,false,7,.045),socket:new Transform64()};
+      rig.lantern={parts,links:[view.model('lanternLink'),view.model('lanternLink')],chain:new LanternChain(view.lanternScenery),light:view.light(position,[1,.62,.30],2.4,Light.Type.POINT,false,7,.045*LANTERN_SCALE),socket:new Transform64()};
     }
   }
   lanternPose(rig,socket,alpha,dt=0,bodyPoses=[]){
     const {view}=this,{parts,links,chain,light}=rig.lantern;
-    const scale=socket.scale[0],poses=chain.update(socket,dt,bodyPoses);
+    const scale=socket.scale[0]*LANTERN_SCALE,poses=chain.update(socket,dt,bodyPoses);
     const pose=(meshes,index)=>{for(const {id,t} of meshes){t.setScale(scale,scale,scale);t.setRotation(...poses[index].rotation);t.setTranslation(...poses[index].position);t.updateMatrix();t64_announce_change(view.ecd,id);}};
     links.forEach((meshes,i)=>pose(meshes,i));pose(parts,2);
     // The light originates at the ember, below the attachment hook.

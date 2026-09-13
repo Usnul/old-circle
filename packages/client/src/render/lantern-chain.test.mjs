@@ -110,7 +110,7 @@ test('teleport, scale changes and long stalls reset bodies without leaking solve
     expect(chain.links[0]).not.toBe(oldBodies[1]);expect(chain.physics.storage.size).toBe(4);
     expect(oldBodies.every(body=>body.b._bodyId===-1)).toBe(true);expect(oldJoints.every(joint=>joint._jointId===-1)).toBe(true);
     expect(distance(chain.poses[0].position,lanternMount(socket))).toBeLessThan(.004);
-    expect(chain.links[2].c.shape.half_extents.y).toBeCloseTo(.14*scale);
+    expect(chain.links[2].c.shape.half_extents.y).toBeCloseTo(.14*.8*scale);
     expect(jointError(chain)).toBeLessThan(.004);
   }
   chain.dispose();chain.dispose();expect(chain.physics.storage.size).toBe(0);
@@ -216,12 +216,15 @@ test.each(['bow','spear'])('%s arm motion leaves the lamp on the hips belt witho
     const emberInMesh=new Vector3(0,-.222,0).applyMatrix4(rig.lantern.parts[0].t);
     expect(distance(light,emberInMesh)).toBeLessThan(1e-6);
     [...rig.lantern.links,[...rig.lantern.parts]].forEach((parts,i)=>{
-      for(const part of parts)expect(Array.from(part.t.rotation)).toEqual(Array.from(rig.lantern.chain.links[i].t.rotation));
+      for(const part of parts){
+        expect(Array.from(part.t.rotation)).toEqual(Array.from(rig.lantern.chain.links[i].t.rotation));
+        for(const scale of part.t.scale)expect(scale).toBeCloseTo(.8,6);
+      }
     });
     handOffsets.push(new Vector3(...hand.translation).applyMatrix4(inverse));
   }
   expect(Math.max(...handOffsets.map(p=>p.distanceTo(handOffsets[0])))).toBeGreaterThan(.1);
-  expect(rig.lantern.light.l.castShadow.getValue()).toBe(false);expect(rig.lantern.light.l.radius.getValue()).toBe(.045);expect(rig.lantern.light.l.distance.getValue()).toBe(7);
+  expect(rig.lantern.light.l.castShadow.getValue()).toBe(false);expect(rig.lantern.light.l.radius.getValue()).toBeCloseTo(.036,6);expect(rig.lantern.light.l.distance.getValue()).toBe(7);
   const chunks=[...rig.lantern.parts,...rig.lantern.links.flat()].map(({id})=>ecd.getComponent(id,ShadedGeometry).material);
   const ember=rig.lantern.parts[1],core=ecd.getComponent(ember.id,ShadedGeometry).material,shadowCasters=[];
   // The real point shadow job draws exactly opaque and alpha-tested buckets;

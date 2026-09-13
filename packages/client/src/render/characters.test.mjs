@@ -307,13 +307,13 @@ test('lantern cloth collider follows the rendered cage and resets without sweepi
     }
     // The actual cloak worker receives the lantern box alongside body capsules.
     const {state}=view.cloth.instanceOf(rig.id);
-    expect(Array.from({length:state.collider_count},(_,i)=>state.collider_table[i*CCR_STRIDE+CCR_PARAM_1])).toContainEqual(expect.closeTo(.14,5));
+    expect(Array.from({length:state.collider_count},(_,i)=>state.collider_table[i*CCR_STRIDE+CCR_PARAM_1])).toContainEqual(expect.closeTo(.14*.8,5));
     actor.x=100;actor.z=-200;step();checkPose();
     expect(ecd.getComponent(light.id,Collider)).not.toBe(original);
     expect(Array.from(record().subarray(CCR_TX,CCR_TX+3))).toEqual(Array.from(record().subarray(CCR_PREV_TX,CCR_PREV_TX+3)));
     const socket=rig.lantern.socket;socket.setScale(1.85,1.85,1.85);socket.updateMatrix();
     characters.lanternPose(rig,socket,1);stepWorker(view.cloth);checkPose();
-    for(const [offset,half] of [[CCR_PARAM_0,.095],[CCR_PARAM_1,.14],[CCR_PARAM_2,.095]])expect(record()[offset]).toBeCloseTo(half*1.85,6);
+    for(const [offset,half] of [[CCR_PARAM_0,.095],[CCR_PARAM_1,.14],[CCR_PARAM_2,.095]])expect(record()[offset]).toBeCloseTo(half*.8*1.85,6);
     expect(Array.from(record().subarray(CCR_TX,CCR_TX+3))).toEqual(Array.from(record().subarray(CCR_PREV_TX,CCR_PREV_TX+3)));
     characters.remove(rig);
     expect(ecd.entityExists(light.id)).toBe(false);expect(colliders.handleOf(light.id)).toBeUndefined();
