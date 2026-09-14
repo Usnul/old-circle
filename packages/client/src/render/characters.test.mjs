@@ -131,6 +131,36 @@ test('presentation updates publish manual animation and gait samples without an 
   });
 });
 
+test('culling a live character releases animation and cloth, and pooled reentry samples its current pose',async()=>{
+  await withNativeCharacters(async({characters,view})=>{
+    const actor={id:'enemy',kind:'enemy',archetype:'hollow',weapon:'sword',x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:-.3,grounded:true,animationTime:.4,gaitPhase:.14};
+    const rig=characters.create(actor);await setImmediate();
+    characters.update(rig,actor);view.animations.update(0);stepWorker(view.cloth);
+    const animation=rig.animation,bodies=view.cloth.bodies.get(rig.id);
+    expect(view.cloth.instanceOf(rig.id)).toBeDefined();expect(bodies.parts.length).toBeGreaterThan(0);
+    expect(view.animations.playbacks_of(rig.id)).toHaveLength(2);
+    characters.remove(rig);
+    expect(view.ecd.getComponent(rig.id,Animation)).toBeUndefined();
+    expect(view.ecd.getComponent(rig.id,Cloth)).toBeUndefined();
+    expect(view.animations.playbacks_of(rig.id)).toHaveLength(0);
+    expect(view.cloth.instanceOf(rig.id)).toBeUndefined();expect(view.cloth.bodies.has(rig.id)).toBe(false);
+    for(const part of bodies.parts)expect(view.ecd.entityExists(part.id)).toBe(false);
+    Object.assign(actor,{x:12,animationTime:2.4,gaitPhase:.84});
+    const reused=characters.create(actor);
+    expect(reused).toBe(rig);expect(reused.animation).not.toBe(animation);
+    characters.update(reused,actor);characters.publishAnimations([reused]);stepWorker(view.cloth);
+    expect(view.ecd.getComponent(rig.id,Animation)).toBe(reused.animation);
+    expect(view.ecd.getComponent(rig.id,Cloth)).toBe(reused.cloth);
+    expect(view.cloth.instanceOf(rig.id)).toBeDefined();expect(view.cloth.bodies.has(rig.id)).toBe(true);
+    expect(reused.t.translation_x).toBe(12);
+    const poses=[];expect(view.animations.write_pose_playbacks(poses,rig.id)).toBe(true);
+    expect(poses.map(p=>p.clip.name)).toEqual(['sword_idle','sword_walk']);
+    expect(poses[0].time).toBeCloseTo(actor.animationTime/3.2*rigs.pilgrim.clips.sword_idle.duration);
+    expect(poses[1].time).toBeCloseTo(actor.gaitPhase/1.12*rigs.pilgrim.clips.sword_walk.duration);
+    for(const pose of poses)expect(pose.weight).toBeCloseTo(.5);
+  });
+});
+
 test.each([1,1.85])('cloth body capsules follow GPU clip poses and release on death at scale %s',async scale=>{
   await withNativeCharacters(async({characters,view})=>{
     const actor={kind:'enemy',archetype:'hollow',weapon:'sword',x:3,y:1,z:2,yaw:.7,vx:0,vy:0,vz:-3,grounded:true,animationTime:.8,gaitPhase:.28};

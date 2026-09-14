@@ -26,6 +26,7 @@ import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {clothComponents,unkeyCloth} from './cloth.mjs';
 import {LanternChain,lanternBodyBones,LANTERN_SCALE} from './lantern-chain.mjs';
 import {updateWeaponLight,removeWeaponLight} from './weapon-lights.mjs';
+import {actorScreenSphere,sphereScreenArea,ScreenCullState,CHARACTER_CULL} from './screen-culling.mjs';
 
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 
@@ -39,7 +40,37 @@ const keeperColors={
 };
 
 export class Characters {
-  constructor(view){this.view=view;this.bundles=new Map();this.pool=new Map();}
+  constructor(view){this.view=view;this.bundles=new Map();this.pool=new Map();this.visibility=new Map();}
+  visibleActors(actors,playerId,epoch,dt){
+    if(this.visibilityEpoch!==epoch){this.visibility.clear();this.visibilityEpoch=epoch;}
+    const camera=this.view.engine?.graphics.camera.camera,live=new Set(),visible=[];
+    for(const actor of actors){
+      if(actor.hp<=0)continue;
+      live.add(actor.id);
+      let state=this.visibility.get(actor.id);
+      if(!state){state=new ScreenCullState();this.visibility.set(actor.id,state);}
+      // The local player also owns the camera fade and lantern. Never remove
+      // that presentation when the camera is against a wall or inside its body.
+      // Offscreen wearers can still light the scene. Whole-character culling
+      // is size-only; cloth independently rejects the camera frustum.
+      const area=actor.id===playerId?1:sphereScreenArea(actorScreenSphere(actor),camera,{frustum:false});
+      if(state.update(area,dt,CHARACTER_CULL))visible.push(actor);
+    }
+    for(const id of this.visibility.keys())if(!live.has(id))this.visibility.delete(id);
+    return visible;
+  }
+  publishAnimations(rigs){
+    const animations=this.view.animations;
+    animations.update(0);
+    // New/reused skins bind during update, after the usual per-actor clock
+    // write. Publish their current pose before the first draw after culling.
+    let changed=false;
+    for(const rig of rigs)for(const playback of animations.playbacks_of(rig.id)){
+      const time=playback.clip.poseTime??0;
+      if(playback.elapsed!==time||playback.finished){playback.elapsed=time;playback.finished=false;changed=true;}
+    }
+    if(changed)animations.update(0);
+  }
   appearance(a){return actorRig(a)+':'+(a.kind==='player'?'player':a.archetype)+':'+(a.kind==='player'?armorFor(a).appearance:BOSSES[a.archetype]?'boss_'+a.archetype:a.archetype==='mage'?'keeper':a.archetype==='archer'?'wayfarer':a.archetype==='sentinel'?'sentinel':'pilgrim');}
   bundle(url){
     if(this.bundles.has(url))return this.bundles.get(url);

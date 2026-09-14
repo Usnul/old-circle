@@ -1,4 +1,6 @@
-import {expect,test} from 'vitest';
+import {expect,test,vi} from 'vitest';
+import {PerspectiveCamera} from '@woosh/meep-engine/src/shade/renderer/camera/PerspectiveCamera.js';
+import {t64_look_rotation} from '@woosh/meep-engine/src/engine/ecs/transform/t64_look_rotation.js';
 import {readFile} from 'node:fs/promises';
 import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
@@ -70,6 +72,38 @@ function bounded(instance){
 const translation=pose=>Array.from(pose.translation);
 const distance=(a,b)=>Math.hypot(...a.map((value,index)=>value-b[index]));
 const transformPoint=(m,p)=>[m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12],m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13],m[2]*p[0]+m[6]*p[1]+m[10]*p[2]+m[14]];
+
+test.each(['pilgrim','votiveBanner'])('%s culling stops CPU poses and worker steps, then resets on reentry',async name=>{
+  await garment(name,({ecd,system,id,t,step,cloth})=>{
+    const camera=new PerspectiveCamera();camera.fov=57*Math.PI/180;camera.aspect=16/9;camera.near=.12;
+    camera.transform.setTranslation(0,1,6);t64_look_rotation(camera.transform,0,0,-1,0,1,0);camera.update();
+    system.camera=()=>camera;
+    step();const original=system.instanceOf(id);
+    // An offscreen excursion shorter than the dwell must retain the solver.
+    t.setTranslation(100,0,0);t.updateMatrix();step(5);
+    expect(system.instanceOf(id)).toBe(original);
+    t.setTranslation(0,0,0);t.updateMatrix();step();
+    t.setTranslation(100,0,0);t.updateMatrix();step(16);
+    expect(system.instanceOf(id)).toBeUndefined();expect(system.bodies.size).toBe(0);
+    expect(ecd.getComponent(id,Cloth)).toBe(cloth);
+    const pose=vi.spyOn(system.poses,'evaluate'),seed=vi.spyOn(system.world,'ensure_seeded'),advance=vi.spyOn(system.world,'advance');
+    step(30);
+    expect(pose).not.toHaveBeenCalled();expect(seed).not.toHaveBeenCalled();expect(advance).not.toHaveBeenCalled();
+    // Size rejection is independent of frustum rejection, and culled motion
+    // must not sweep old body colliders or carry old particle momentum back.
+    t.setTranslation(0,0,-500);t.updateMatrix();step(2);
+    expect(system.instanceOf(id)).toBeUndefined();
+    t.setTranslation(0,0,0);t.updateMatrix();step(3);
+    const restored=system.instanceOf(id);expect(restored).toBeDefined();expect(restored).not.toBe(original);
+    bounded(restored);
+    if(name==='pilgrim')expect(system.bodies.get(id).parts).toHaveLength(16);
+    t.setTranslation(100,0,0);t.updateMatrix();step(16);
+    ecd.removeComponentFromEntity(id,Cloth);
+    expect(system.garments.has(id)).toBe(false);
+    t.setTranslation(0,0,0);t.updateMatrix();step(3);
+    expect(system.instanceOf(id)).toBeUndefined();
+  });
+});
 
 async function capeVertices(){
   const root=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',root),'utf8'));

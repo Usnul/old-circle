@@ -16,9 +16,13 @@ import {cloth_proxy_from_joints} from '@woosh/meep-engine/src/engine/physics/clo
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
 import {createSkeleton,rigs} from '@old-circle/game/simulation/animation.mjs';
+import {sphereScreenArea,ScreenCullState,CLOTH_CULL} from './screen-culling.mjs';
 
 const proxies=new Map();
 const clothJoint=name=>/^(cloak|cloth)\d+$/.test(name);
+// Root-local envelopes include the garment's swing, without evaluating its
+// animated anchor or reading particle buffers owned by the worker.
+const clothBounds={pilgrim:[0,1,0,1.5],votiveBanner:[.9,2.4,0,2.1]};
 // Damage capsules follow the anatomy, while cloth must clear the coat, armour
 // and shoulder pads as well. Add a small contact margin for the skinned surface
 // between solver particles, not just for the particles themselves.
@@ -62,10 +66,11 @@ export function clothComponents(name){
  * cloth anchor. GPU-animated joints' CPU Transform64 components can be stale,
  * so evaluate the pose before Meep refreshes its cloth collider index. */
 export class WorldCloth extends WorkerClothSystem {
-  constructor(wind,{worker_factory=makeClothWorker}={}){
+  constructor(wind,{worker_factory=makeClothWorker,camera=()=>null}={}){
     // Up to 96 visible actors plus the world's eight banners exceed the
     // engine's default 32 slots. Leave room for all of them to keep simulating.
     super({worker_factory,max_cloth_count:128});this.bodies=new Map();this.playbacks=[];this.pose=new Transform64();this.poses=new T64WorldCache();
+    this.camera=camera;this.garments=new Map();this.screenSphere=new Float64Array(4);
     // Sample the published velocity snapshot, never the fluid worker's buffers.
     this.wind=new AbstractClothWind();
     this.wind.sample=(out,x,y,z)=>wind.sample(out,x,y,z);
@@ -76,14 +81,38 @@ export class WorldCloth extends WorkerClothSystem {
     this.bodies.delete(entity);
     for(const {id} of bodies.parts)if(bodies.ecd.entityExists(id))bodies.ecd.removeEntity(id);
   }
-  unlink(cloth,transform,entity){this.removeBodies(entity);super.unlink(cloth,transform,entity);}
+  link(cloth,transform,entity){
+    this.garments.set(entity,{cloth,transform,culling:new ScreenCullState()});
+    super.link(cloth,transform,entity);
+  }
+  unlink(cloth,transform,entity){this.garments.delete(entity);this.removeBodies(entity);super.unlink(cloth,transform,entity);}
   async shutdown(entityManager){
     await super.shutdown(entityManager);
     for(const entity of this.bodies.keys())this.removeBodies(entity);
+    this.garments.clear();
   }
   collect(command,tick,dt){
     if(!Number.isFinite(dt)||dt<=0)return false;
     const ecd=this.entityManager.dataset;if(!ecd)return false;
+    const camera=this.camera();
+    for(const [entity,garment] of this.garments){
+      const {cloth,transform,culling}=garment,bounds=clothBounds[ecd.getComponent(entity,ClothRig)?.proxy?.name];
+      let area=1;
+      if(camera&&bounds){
+        const [x,y,z,r]=bounds,m=transform,sphere=this.screenSphere;
+        for(let i=0;i<3;i++)sphere[i]=m[i]*x+m[4+i]*y+m[8+i]*z+m[12+i];
+        sphere[3]=r*Math.max(...transform.scale.map(Math.abs));
+        area=sphereScreenArea(sphere,camera);
+      }
+      const active=culling.update(area,dt,CLOTH_CULL),instance=this.instanceOf(entity);
+      if(!active&&instance){
+        this.removeBodies(entity);
+        // Retire the native worker registration and release its joint ownership.
+        // Keep the component as the lifecycle owner so deletion/pooling still
+        // unlinks a culled garment. Relinking seeds fresh, zero-velocity state.
+        super.unlink(cloth,transform,entity);
+      }else if(active&&!instance)super.link(cloth,transform,entity);
+    }
     for(const instance of this.instances){
       const entity=instance.entity,rig=ecd.getComponent(entity,ClothRig);
       if(rig?.proxy?.name!=='pilgrim'){this.removeBodies(entity);continue;}

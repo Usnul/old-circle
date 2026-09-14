@@ -8,11 +8,12 @@ import {Camera} from '@woosh/meep-engine/src/engine/graphics/ecs/camera/Camera.j
 import {CameraSystem} from '@woosh/meep-engine/src/engine/graphics3/CameraSystem.js';
 import {ShadedGeometrySystem} from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
 import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
-import {Camera as RenderCamera} from '@woosh/meep-engine/src/shade/renderer/camera/Camera.js';
+import {PerspectiveCamera as RenderCamera} from '@woosh/meep-engine/src/shade/renderer/camera/PerspectiveCamera.js';
 import {Scene} from '@woosh/meep-engine/src/shade/renderer/scene/Scene.js';
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
 import {StandardShadeMaterial} from '@woosh/meep-engine/src/shade/renderer/material/StandardShadeMaterial.js';
 import {WorldView} from './scene.mjs';
+import {Characters} from './characters.mjs';
 import {GPUParticleEmitterSystem} from '@woosh/meep-engine/src/engine/graphics3/GPUParticleEmitterSystem.js';
 import {layerEffect} from './particle-layers.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
@@ -48,12 +49,14 @@ async function createView(){
   view.streaming.updateView=()=>{};
   view.combatFeedback={update(){},cameraKick:()=>({pitch:0,roll:0})};view.animations={update:vi.fn()};view.particles=particles;
   view.characterRenderer={
+    view,visibility:new Map(),visibleActors:Characters.prototype.visibleActors,publishAnimations:()=>view.animations.update(0),
     appearance:()=> 'player',
     create(){
       const t=new Transform64(),geometry=ShadedGeometry.from(new MeshletGeometry(),new StandardShadeMaterial()),id=new Entity().add(t).add(geometry).build(ecd);
       return {t,id,geometry,url:'player'};
     },
     update(rig,a){rig.t.setTranslation(a.x,a.y,a.z);rig.t.updateMatrix();t64_announce_change(ecd,rig.id);},
+    remove(rig){ecd.removeEntity(rig.id);},
     viewAlpha(){}
   };
   return {view,em,ecd,camera,particles,emitterRows,emitters};
@@ -96,6 +99,51 @@ test.each([60,120,144])('lateral solo travel keeps the rendered camera and body 
     expect(Math.min(...speeds)).toBeGreaterThan(3);
     expect(Math.max(...speeds)).toBeLessThan(4);
     expect(view.animations.update).toHaveBeenCalledWith(0);
+  }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
+});
+
+test('tiny characters skip presentation, nearby offscreen lights remain, and camera teleports wake characters in the same frame',async()=>{
+  const {view,em}=await createView();
+  try{
+    view.pitch=-Math.asin(.7/view.distance);
+    const player={id:'player',kind:'player',x:0,y:100,z:0,yaw:0,hp:100,weapon:'sword'};
+    const enemy={...player,id:'enemy',kind:'enemy',archetype:'hollow'};
+    const snapshot={actors:[player,{...enemy,id:'tiny',z:-500},{...enemy,id:'side',x:100},{...enemy,id:'behind',z:30}],projectiles:[],events:[],time:12};
+    const create=vi.spyOn(view.characterRenderer,'create'),update=vi.spyOn(view.characterRenderer,'update');
+    view.update(snapshot,player.id,1/60,0);
+    expect([...view.characters.keys()]).toEqual(['player','side','behind']);
+    expect(create).toHaveBeenCalledTimes(3);expect(update).toHaveBeenCalledTimes(3);
+    player.z=-480;
+    view.update(snapshot,player.id,1/60,1/60);
+    expect(view.characters.has('tiny')).toBe(true);expect(create).toHaveBeenCalledTimes(4);
+    // Local presentation remains even if its screen sphere would be tiny.
+    const distantPlayer={...player,z:-100000};
+    for(let frame=0;frame<10;frame++)expect(view.characterRenderer.visibleActors([distantPlayer],player.id,1,.1)).toEqual([distantPlayer]);
+  }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
+});
+
+test('small characters need continuous dwell before presentation is removed, then wake immediately',async()=>{
+  const {view,em}=await createView();
+  try{
+    view.pitch=-Math.asin(.7/view.distance);
+    const player={id:'player',kind:'player',x:0,y:100,z:0,yaw:0,hp:100,weapon:'sword'};
+    const enemy={...player,id:'enemy',kind:'enemy',archetype:'hollow',z:-10};
+    const hidden={...enemy,z:-500};
+    const snapshot={actors:[player,enemy],projectiles:[],events:[],time:12};
+    const remove=vi.spyOn(view.characterRenderer,'remove'),create=vi.spyOn(view.characterRenderer,'create'),update=vi.spyOn(view.characterRenderer,'update');
+    let time=0;const draw=actor=>{snapshot.actors=[player,actor];view.update(snapshot,player.id,.1,time+=.1);};
+    draw(enemy);const rig=view.characters.get(enemy.id);expect(rig).toBeDefined();
+    for(let frame=0;frame<4;frame++)draw(hidden);
+    expect(view.characters.get(enemy.id)).toBe(rig);expect(remove).not.toHaveBeenCalled();
+    draw(enemy); // A visible sample resets the continuous exit timer.
+    for(let frame=0;frame<4;frame++)draw(hidden);
+    expect(view.characters.get(enemy.id)).toBe(rig);expect(remove).not.toHaveBeenCalled();
+    draw(hidden);
+    expect(view.characters.has(enemy.id)).toBe(false);expect(remove).toHaveBeenCalledExactlyOnceWith(rig);
+    update.mockClear();draw(hidden);
+    expect(update).toHaveBeenCalledTimes(1);expect(update.mock.calls[0][1].id).toBe(player.id);
+    draw(enemy);
+    expect(view.characters.has(enemy.id)).toBe(true);expect(create).toHaveBeenCalledTimes(3);
   }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
 });
 

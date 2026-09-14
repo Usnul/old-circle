@@ -80,7 +80,7 @@ export class WorldView {
       this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       this.wind=new WorldWind();config.addSystem(this.wind);
-      this.cloth = new WorldCloth(this.wind);
+      this.cloth = new WorldCloth(this.wind,{camera:()=>engine.graphics.camera.camera});
       config.addSystem(new ClothColliderSystem());
     }});
     this.ecd=this.engine.entityManager.dataset;
@@ -198,11 +198,29 @@ export class WorldView {
   }
   update(snapshot,playerId,dt,renderTime=performance.now()/1000){
     if(!snapshot)return;this.elapsed+=dt;this.fps+=((1/Math.max(.001,dt))-this.fps)*.025;
-    const present=new Set(),presented=[];
-    for(const state of snapshot.actors){
-      const a=this.poses.sample(state,renderTime);
-      presented.push(a);
-      if(a.hp<=0){continue;}present.add(a.id);
+    const present=new Set(),presented=snapshot.actors.map(state=>this.poses.sample(state,renderTime));
+    this.combatFeedback.update(snapshot,presented,playerId,dt);
+    const player=presented.find(a=>a.id===playerId);if(player){
+      this.streaming.updateView(player,dt);
+      const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
+      const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
+      // Terrain and scenery contacts shorten this boom through cameraLimit.
+      // Raising its endpoint would change the sight angle when aiming upward.
+      this.wantedCamera=[...wanted];this.cameraTarget=target;
+      const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
+      this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
+      this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
+      this.aimPitch=Math.atan2(this.cameraPosition[1]-target[1],Math.hypot(this.cameraPosition[0]-target[0],this.cameraPosition[2]-target[2]));
+      const kick=this.combatFeedback.cameraKick(),look=target.map((v,i)=>v-this.cameraPosition[i]);look[1]+=Math.hypot(...look)*kick.pitch;
+      this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...look,Math.cos(this.yaw)*Math.sin(kick.roll),Math.cos(kick.roll),-Math.sin(this.yaw)*Math.sin(kick.roll));this.cameraTransform.updateMatrix();
+      this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
+      this.ambient.update(player,snapshot.time,dt);
+      this.banners.update(dt,player);
+    }
+    // Cull against this frame's camera, including a teleport or a rapid turn.
+    this.engine.entityManager.getSystem(CameraSystem).update(0);
+    for(const a of this.characterRenderer.visibleActors(presented,playerId,this.poses.epoch,dt)){
+      present.add(a.id);
       let rig=this.characters.get(a.id);
       if(rig&&rig.url!==this.characterRenderer.appearance(a)){this.characterRenderer.remove(rig);rig=null;}
       if(!rig){rig=this.characterRenderer.create(a);this.characters.set(a.id,rig);}
@@ -212,6 +230,7 @@ export class WorldView {
       this.characterRenderer.update(rig,a,dt);
       if(a.id!==playerId&&rig.viewFaded)this.characterRenderer.viewAlpha(rig,1);
     }
+    const playerRig=this.characters.get(playerId);if(playerRig&&player)this.characterRenderer.viewAlpha(playerRig,(this.cameraDistance-1)/1.2);
     const dead=new Set();
     for(const state of snapshot.ragdolls??[]){
       dead.add(state.key);let rig=this.corpses.get(state.key);
@@ -229,25 +248,6 @@ export class WorldView {
     this.vfx.update(snapshot,presented,playerId,dt);
     if(snapshot!==this.lastEventSnapshot){for(const ev of snapshot.events)if(ev.type==='nova')this.blastBoundary(ev);this.lastEventSnapshot=snapshot;}
     for(let i=this.transients.length-1;i>=0;i--){const e=this.transients[i];e.age+=dt;if(e.material)e.material.diffuse_color.setA(Math.sin(Math.PI*Math.min(1,e.age/e.life)));if(e.age>e.life){if(e.parts)this.remove(e.parts);else this.ecd.removeEntity(e.id);this.transients.splice(i,1);}}
-    this.combatFeedback.update(snapshot,presented,playerId,dt);
-    const player=presented.find(a=>a.id===playerId);if(player){
-      this.streaming.updateView(player,dt);
-      const pitch=this.pitch,dist=this.distance,target=['bow','staff'].includes(player.weapon)?rangedSightOrigin(player,this.yaw):[player.x,player.y+.7,player.z];
-      const wanted=[target[0]+Math.sin(this.yaw)*Math.cos(pitch)*dist,target[1]+Math.sin(pitch)*dist+.7,target[2]+Math.cos(this.yaw)*Math.cos(pitch)*dist];
-      // Terrain and scenery contacts shorten this boom through cameraLimit.
-      // Raising its endpoint would change the sight angle when aiming upward.
-      this.wantedCamera=[...wanted];this.cameraTarget=target;
-      const d=wanted.map((v,i)=>v-target[i]),length=Math.hypot(...d),allowed=Math.min(length,this.cameraLimit??length);
-      this.cameraDistance??=allowed;this.cameraDistance=allowed<this.cameraDistance?allowed:this.cameraDistance+(allowed-this.cameraDistance)*(1-Math.exp(-dt*12));
-      this.cameraPosition=target.map((v,i)=>v+d[i]*this.cameraDistance/length);
-      const playerRig=this.characters.get(playerId);if(playerRig)this.characterRenderer.viewAlpha(playerRig,(this.cameraDistance-1)/1.2);
-      this.aimPitch=Math.atan2(this.cameraPosition[1]-target[1],Math.hypot(this.cameraPosition[0]-target[0],this.cameraPosition[2]-target[2]));
-      const kick=this.combatFeedback.cameraKick(),look=target.map((v,i)=>v-this.cameraPosition[i]);look[1]+=Math.hypot(...look)*kick.pitch;
-      this.cameraTransform.setTranslation(...this.cameraPosition);t64_look_rotation(this.cameraTransform,...look,Math.cos(this.yaw)*Math.sin(kick.roll),Math.cos(kick.roll),-Math.sin(this.yaw)*Math.sin(kick.roll));this.cameraTransform.updateMatrix();
-      this.listenerTransform.setTranslation(player.x,player.y+.65,player.z);t64_look_rotation(this.listenerTransform,-Math.sin(this.yaw),0,-Math.cos(this.yaw),0,1,0);this.listenerTransform.updateMatrix();t64_announce_change(this.ecd,this.listenerEntity);
-      this.ambient.update(player,snapshot.time,dt);
-      this.banners.update(dt,player);
-    }
     const sky=this.sky.update(this.scene,snapshot.time);
     // Auto exposure otherwise lifts the moonlit landscape back to daylight.
     // Ease the bias away under roofs so sheltered stairs and doors stay legible.
@@ -264,10 +264,9 @@ export class WorldView {
     // Mesh transforms publish immediately; these bridges otherwise wait for the
     // independent engine ticker. Publish the matching camera and skeletal poses
     // before drawing, without advancing animation clocks a second time.
-    this.animations.update(0);
+    this.characterRenderer.publishAnimations(this.characters.values());
     // Register new emitter rows before the scene build. FrameStart drains bursts
     // after that build, too late to publish a newly created emitter's GPU row.
     this.particles.update(0);
-    this.engine.entityManager.getSystem(CameraSystem).update(0);
   }
 }

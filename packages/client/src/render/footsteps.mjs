@@ -4,8 +4,7 @@ import {t64_look_rotation} from '@woosh/meep-engine/src/engine/ecs/transform/t64
 import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import {Decal} from '@woosh/meep-engine/src/engine/graphics/ecs/decal/v2/Decal.js';
 import {FootContacts,presentedFeet} from '@old-circle/game/simulation/foot-contacts.mjs';
-import {actorFeet,actorScale} from '@old-circle/game/simulation/animation.mjs';
-import {sphere_project} from '@woosh/meep-engine/src/core/geom/3d/sphere/sphere_project.js';
+import {actorScreenSphere,sphereScreenArea} from './screen-culling.mjs';
 import {effect,FOOTSTEP_EFFECTS} from './effects.mjs';
 import {GameAssetType} from '@woosh/meep-engine/src/engine/asset/GameAssetType.js';
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
@@ -21,13 +20,7 @@ const surfaces={
 const MIN_SCREEN_AREA=.0018;
 export function footstepScreenArea(actor,camera){
   if(!camera)return 1;
-  const scale=actorScale(actor),radius=(actor.archetype==='hound'?.75:.95)*scale,[x,bottom,z]=actorFeet(actor),y=bottom+radius;
-  const m=camera.view_matrix,depth=-(m[2]*x+m[6]*y+m[10]*z+m[14]);
-  if(depth+radius<=camera.near)return 0;
-  for(let i=0;i<24;i+=4){const f=camera.frustum;if(f[i]*x+f[i+1]*y+f[i+2]*z+f[i+3]<-radius)return 0;}
-  // sphere_project is singular at the eye plane. Intersecting spheres are near.
-  if(depth<=radius)return 1;
-  const area=sphere_project([x,y,z,radius],m,1/Math.tan(camera.fov/2))/(4*camera.aspect);
+  const area=sphereScreenArea(actorScreenSphere(actor),camera);
   return area>=MIN_SCREEN_AREA?area:0;
 }
 
