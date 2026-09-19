@@ -12,7 +12,7 @@ import {PresentationEvents} from './presentation-events.mjs';
 
 // Rendering never owns authority. This Worker keeps the same Meep simulation
 // warm while NetworkSession predicts and reconciles the connected character.
-let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false,entered=false;
+let world,ragdolls,corpseMode='offline',playerId,url,origin,timer,remote,socket,connecting=false,paused=false,inspect=false,entered=false,characterReady=false;
 let last=performance.now(),accumulator=0,retryAt=0,lastServerAt=0,lastServerTick=-1,connectedAt=0;
 let intent={x:0,z:0,yaw:0,buttons:0},settings={weapon:0,pvp:0,levelStat:0,armor:0,upgradeWeapon:0,charm:0,sequence:0},pendingLevel,pendingEquipment;
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
@@ -90,11 +90,12 @@ function update(){
 self.onmessage=async({data})=>{
   try{
     if(data.type==='start'){
-      entered=false;paused=true;presentationMode=undefined;accumulator=0;
+      entered=false;characterReady=false;paused=true;presentationMode=undefined;accumulator=0;
       if(timer)clearInterval(timer);disconnect();if(world)await world.stop();if(ragdolls)await ragdolls.stop();
       world=await new GameWorld().start();playerId=data.playerId;url=data.url;origin=data.origin;inspect=!!data.inspect;
       ragdolls=await new Ragdolls().start();corpseMode='offline';
       const a=world.addPlayer(playerId,origin,data.saved);settings.weapon=weaponIds.indexOf(a.weapon);settings.pvp=Number(a.pvp);
+      characterReady=true;
       last=performance.now();retryAt=0;timer=setInterval(update,16);postMessage({type:'ready',snapshot:stamp(world.snapshot(),'offline'),mode:'offline'});
     }
     if(!world)return;
@@ -114,7 +115,9 @@ self.onmessage=async({data})=>{
         pendingEquipment={type:data.type,item:data.item,sequence:settings.sequence,rank:reinforcement(world.actor(playerId),data.item)};
       }else equipmentResult(data.type==='armor'?world.equipArmor(playerId,data.item):data.type==='charm'?world.equipCharm(playerId,data.item):world.reinforce(playerId,data.item));
     }
-    if(data.type==='save')postMessage({type:'save',character:world.exportCharacter(playerId)});
+    // addPlayer creates a default actor before importing the saved character.
+    // A rejected import must never export that partial state over the save.
+    if(data.type==='save'&&characterReady)postMessage({type:'save',character:world.exportCharacter(playerId)});
     if(data.type==='pause'){paused=data.paused;if(paused)intent={...intent,x:0,z:0,buttons:0};}
     if(inspect&&data.type==='inspect'){
       if(data.landmark){const hearth=HEARTHS.find(h=>h.id===data.landmark),p=landmarkPosition(data.landmark);world.teleport(world.actor(playerId),hearth?hearthArrival(hearth):[p[0],p[1]+1,p[2]+5]);}
@@ -140,7 +143,7 @@ self.onmessage=async({data})=>{
       }
       postMessage({type:'camera',distance,shelter});
     }
-  }catch(error){postMessage({type:'error',message:error.stack??String(error)});}
+  }catch(error){if(data.type==='start')characterReady=false;postMessage({type:'error',message:error.stack??String(error)});}
 };
 
 // Baked-asset imports have completed and the message handler is installed.

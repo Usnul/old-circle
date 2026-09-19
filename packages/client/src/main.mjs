@@ -20,7 +20,7 @@ const app=document.querySelector('#app');
 const inspecting=import.meta.env.DEV&&new URLSearchParams(location.search).has('inspect');let inspector;
 const journey=new JourneyStore(),playerId=journey.playerId;
 let view=null,worker=null,snapshot=null,started=false,menu=false,origin='pilgrim',lastArea='',areaTimer,toastTimer,lastHud=0;
-let input=null,menuCleanup=null,equipmentOpen=false,equipmentFocus=null,modalReturnFocus=null,completionPending=false,journalPending=false,saveRequested=false;
+let input=null,menuCleanup=null,equipmentOpen=false,equipmentFocus=null,modalReturnFocus=null,completionPending=false,journalPending=false,saveRequested=false,saveTimer=null;
 function saved(){return journey.character;}
 app.innerHTML=`
 <section class="screen title-screen" id="title">
@@ -105,6 +105,8 @@ async function start(character){
       if(data.type==='network-status'){$('#network-state').title=data.message;return;}
       if(data.type==='error'){showError(data.message);return;}
       if(data.type==='save'){
+        // Ignore queued responses after a load or runtime failure.
+        if(!started)return;
         if(inspecting){if(saveRequested)toast('Workshop journeys are temporary.');}
         else{
           const previousWarning=journey.warning,persisted=journey.save(data.character);updateSaveWarning();
@@ -124,7 +126,6 @@ async function start(character){
       if(data.type==='ready')enterWorld().catch(e=>showError(e.stack??String(e)));
     };
     if(inspecting){const {installInspector}=await import('./inspector.mjs');inspector=installInspector({send,getView:()=>view,getSnapshot:()=>snapshot,playerId});}
-    setInterval(()=>send({type:'save'}),8000);
   }catch(e){showError(e.stack??String(e));}
 }
 async function enterWorld(){
@@ -134,9 +135,16 @@ async function enterWorld(){
   $('#hud').hidden=false;updateHud();previous=undefined;frameId=requestAnimationFrame(frame);
   if(!await loading.reveal(view.engine))return;
   started=true;send({type:'enter-world',paused:menu});input.suspend(menu);$('#capture-mouse').hidden=inspecting||menu;
+  clearInterval(saveTimer);saveTimer=setInterval(()=>send({type:'save'}),8000);
   if(!menu)view.engine.viewStack.el.focus();
 }
-function showError(message){started=false;cancelAnimationFrame(frameId);if(view?.engine)view.engine.renderingEnabled=false;loading.show();modal(`<div class="panel-top"><h2>Unable to load game</h2></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Reload game</span><span>⟶</span></button>`,{dismissible:false});$('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();}
+function showError(message){
+  started=false;clearInterval(saveTimer);saveTimer=null;saveRequested=false;
+  cancelAnimationFrame(frameId);if(view?.engine)view.engine.renderingEnabled=false;
+  loading.show();
+  modal(`<div class="panel-top"><h2>Unable to load game</h2></div><p>The engine reported the following error.</p><pre class="error-detail"></pre><button class="primary" id="reload"><span>Reload game</span><span>⟶</span></button>`,{dismissible:false});
+  $('.error-detail').textContent=message;$('#reload').onclick=()=>location.reload();
+}
 function journal(){
   equipmentOpen=false;
   const p=snapshot?.actors.find(a=>a.id===playerId);if(!p)return;

@@ -6,6 +6,48 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
+test('a rejected character cannot be saved as a default player, and a successful retry saves its imported progress',async()=>{
+  const world=await new GameWorld().start({populate:false,navigation:false});
+  let saved;
+  try{const player=world.addPlayer('load-retry');player.embers=7000;saved=world.exportCharacter(player.id);}
+  finally{await world.stop();}
+  const invalid=structuredClone(saved);invalid.stats.vigor=Number.MAX_VALUE;
+  const entry=new URL('./simulation.worker.mjs',import.meta.url);
+  const source=`
+    import {parentPort} from 'node:worker_threads';
+    globalThis.self=globalThis;
+    globalThis.postMessage=message=>parentPort.postMessage(message);
+    parentPort.on('message',async data=>{
+      if(data.type==='test-save'){
+        await self.onmessage({data:{type:'save'}});
+        postMessage({type:'save-processed'});
+      }else await self.onmessage?.({data});
+    });
+    await import(${JSON.stringify(entry.href)});
+  `;
+  const worker=new Worker(new URL('data:text/javascript,'+encodeURIComponent(source))),messages=[];
+  worker.on('message',message=>messages.push(message));
+  const receive=(type,send)=>new Promise((resolve,reject)=>{
+    const finish=(error,message)=>{clearTimeout(timeout);worker.off('message',onMessage);worker.off('error',onError);error?reject(error):resolve(message);};
+    const onError=error=>finish(error),onMessage=message=>{
+      if(message.type===type)finish(null,message);
+      else if(message.type==='error')finish(new Error(message.message));
+    };
+    const timeout=setTimeout(()=>finish(new Error(`Simulation did not produce ${type}`)),10000);
+    worker.on('message',onMessage);worker.on('error',onError);if(send)worker.postMessage(send);
+  });
+  try{
+    await receive('initialized');
+    const failure=await receive('error',{type:'start',playerId:'load-retry',origin:'pilgrim',saved:invalid,url:null});
+    expect(failure.message).toContain('Malformed character state');
+    await receive('save-processed',{type:'test-save'});
+    expect(messages.filter(message=>message.type==='save')).toEqual([]);
+    await receive('ready',{type:'start',playerId:'load-retry',origin:'pilgrim',saved,url:null});
+    const result=await receive('save',{type:'save'});
+    expect(result.character.embers).toBe(7000);expect(result.character.stats).toEqual(saved.stats);
+  }finally{await worker.terminate();}
+});
+
 test('the simulation announces its installed handler before accepting the start that produces a player snapshot',async()=>{
   // Exercise the actual module and its asynchronous baked-asset imports. Node's
   // worker transport only supplies the browser worker globals used by the entry.
