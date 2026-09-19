@@ -22,3 +22,50 @@ test('geometry revisions never reuse stale bytes and successful warming retains 
   expect([...namespaces.keys()]).toEqual(['old-circle-geometry-two','old-circle-geometry-three']);
   const failed=new GeometryCache({...manifest,revision:'failed'},{storage,fetcher:async()=>{throw new Error('Interrupted');}});await expect(failed.warm()).rejects.toThrow('Interrupted');expect(namespaces.has('old-circle-geometry-three')).toBe(true);
 });
+
+test('an interrupted revision cannot displace the previous complete offline copy',async()=>{
+  const namespaces=new Map(),storage={
+    keys:async()=>[...namespaces.keys()],delete:async name=>namespaces.delete(name),
+    open:async name=>{
+      if(!namespaces.has(name))namespaces.set(name,new Map());
+      const disk=namespaces.get(name);
+      return {match:async key=>disk.get(key)?.clone(),put:async(key,response)=>disk.set(key,response)};
+    }
+  };
+  const create=(revision,fetcher=async()=>new Response(revision))=>new GeometryCache({...manifest,revision},{storage,fetcher});
+  await create('complete').warm();
+  await expect(create('interrupted',async()=>{throw new Error('Offline');}).warm()).rejects.toThrow('Offline');
+  await create('current').warm();
+  expect([...namespaces.keys()]).toEqual(['old-circle-geometry-complete','old-circle-geometry-current']);
+  const offline=create('complete',async()=>{throw new Error('Offline');});
+  expect(new TextDecoder().decode(await offline.read('b.meep'))).toBe('complete');
+});
+
+test('memory fallback cannot prune persisted offline revisions when browser storage is full',async()=>{
+  const namespaces=new Map();let full=false;
+  const storage={keys:async()=>[...namespaces.keys()],delete:async name=>namespaces.delete(name),open:async name=>{
+    if(!namespaces.has(name))namespaces.set(name,new Map());
+    const disk=namespaces.get(name);
+    return {match:async key=>disk.get(key)?.clone(),put:async(key,response)=>{if(full)throw new Error('Quota');disk.set(key,response);}};
+  }};
+  const create=revision=>new GeometryCache({...manifest,revision},{storage,fetcher:async()=>new Response(revision)});
+  await create('previous').warm();await create('current').warm();full=true;
+  const fallback=create('memory-only');await fallback.warm();
+  expect(fallback.memory.size).toBe(2);
+  expect(namespaces.has('old-circle-geometry-previous')).toBe(true);
+  expect(namespaces.has('old-circle-geometry-current')).toBe(true);
+});
+
+test('upgrading preserves unmarked legacy caches until a completed predecessor exists',async()=>{
+  const namespaces=new Map([['old-circle-geometry-legacy',new Map([['/assets/geometry/a.meep',new Response('legacy')]])]]);
+  const storage={keys:async()=>[...namespaces.keys()],delete:async name=>namespaces.delete(name),open:async name=>{
+    if(!namespaces.has(name))namespaces.set(name,new Map());
+    const disk=namespaces.get(name);
+    return {match:async key=>disk.get(key)?.clone(),put:async(key,response)=>disk.set(key,response)};
+  }};
+  const warm=revision=>new GeometryCache({...manifest,revision},{storage,fetcher:async()=>new Response(revision)}).warm();
+  await warm('first-marked');
+  expect(namespaces.has('old-circle-geometry-legacy')).toBe(true);
+  await warm('second-marked');
+  expect([...namespaces.keys()]).toEqual(['old-circle-geometry-first-marked','old-circle-geometry-second-marked']);
+});
