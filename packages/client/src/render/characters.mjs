@@ -248,7 +248,7 @@ export class Characters {
     removeWeaponLight(view,rig);
     if(rig.weapon)view.remove(rig.weapon);if(rig.telegraph)view.remove(rig.telegraph);rig.weapon=null;delete rig.telegraph;
     if(rig.lantern){rig.lantern.chain.dispose();view.remove(rig.lantern.parts);for(const link of rig.lantern.links??[])view.remove(link);view.ecd.removeEntity(rig.lantern.light.id);delete rig.lantern;}
-    // Meep 3.22 fixes MEEP-005, but despawning still retains BLAS data (MEEP-012).
+    // Meep 3.26 reclaims skin/BLAS ranges, but geometry IDs still grow (MEEP-012).
     // Retain the registered instance offstage and reuse it on the next spawn.
     rig.t.makeIdentity();rig.t.setTranslation(0,-10000,0);rig.t.updateMatrix();t64_announce_change(view.ecd,rig.id);
     let available=this.pool.get(rig.url);if(!available){available=[];this.pool.set(rig.url,available);}available.push(rig);

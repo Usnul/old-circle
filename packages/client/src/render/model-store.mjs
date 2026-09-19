@@ -56,8 +56,8 @@ export class ModelStore {
     this.time+=dt;
     for(const [name,r] of this.records)if(!r.pinned&&!r.refs&&!this.pending.has(name)&&this.time-r.lastUsed>this.idleSeconds){
       const parts=this.models.get(name);
-      // Meep 3.20's BLAS arena is append-only, including after remove(). Keep one
-      // registered identity per visited model to bound repeat travel (MEEP-012).
+      // Meep 3.26 reclaims BLAS ranges, but geometry IDs and their metadata rows
+      // are not recycled. Keep one identity per visited model (MEEP-012).
       if(this.residentCache&&parts)this.cached.set(name,parts);
       else for(const part of parts??[])this.dispose(part.geometry);
       this.models.delete(name);this.records.delete(name);this.loadedBytes-=r.bytes;

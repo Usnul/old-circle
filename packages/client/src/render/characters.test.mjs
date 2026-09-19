@@ -188,7 +188,7 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
   await withNativeCharacters(async({characters,view,scene,graphics,context,flush})=>{
     const {ecd}=view,baseBytes=graphics.geometries.meshlets.gpu_memory_usage_occupied;
     const actors=[{kind:'enemy',archetype:'hollow',weapon:'sword'},{kind:'enemy',archetype:'hound',weapon:'sword'}].map(a=>({...a,x:0,y:1,z:0,yaw:0,vx:0,vy:0,vz:0,grounded:true}));
-    let peakVertices,peakBlasBytes,pooledEntityCount;
+    let peakVertices,peakBlasBytes,peakMetadataBytes,pooledEntityCount;
     for(let cycle=0;cycle<8;cycle++){
       const instances=actors.map(a=>characters.create(a));
       await setImmediate();flush();
@@ -207,8 +207,12 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
         }
       }
       peakBlasBytes??=graphics.geometries.blas.buffer_data.size;
-      // MEEP-012: keep the game pool until BLAS node ranges are reclaimed too.
-      if(mode==='pool')expect(graphics.geometries.blas.buffer_data.size).toBe(peakBlasBytes);
+      // Meep 3.26 reclaims BLAS ranges even on complete native teardown, but
+      // unrecycled geometry IDs still grow metadata tables without pooling.
+      expect(graphics.geometries.blas.buffer_data.size).toBe(peakBlasBytes);
+      peakMetadataBytes??=graphics.geometries.buffer_metadata.size;
+      if(mode==='pool')expect(graphics.geometries.buffer_metadata.size).toBe(peakMetadataBytes);
+      else if(cycle>0)expect(graphics.geometries.buffer_metadata.size).toBeGreaterThan(peakMetadataBytes);
       expect(context.animation_manager.skin_matrix_count).toBe(rigs.pilgrim.bones.length+rigs.briarHound.bones.length);
       peakVertices??=context.skinning.prev_position_vertex_count;
       expect(peakVertices).toBeGreaterThan(0);
