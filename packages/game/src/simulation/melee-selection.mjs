@@ -2,6 +2,7 @@ import {MELEE_ATTACKS} from '../content/melee-attacks.mjs';
 import {WEAPONS,canDamage} from '../content/catalog.mjs';
 import {actorFeet,actorScale} from './animation.mjs';
 import {weaponPose} from './weapon-pose.mjs';
+import {line3_compute_segment_point_distance} from '@woosh/meep-engine/src/core/geom/3d/line/line3_compute_segment_point_distance.js';
 
 const trajectories=new Map();
 /** Eight conservative swept boxes, in a unit actor's facing coordinates.
@@ -49,11 +50,8 @@ export function selectMeleeAttack(actor,targets,visible=()=>true){
     }));
     // Refine conservative boxes against their blade segments. A diagonal box
     // alone can include empty space above a dog's back or beside a spear tip.
-    for(const clip of valid)gaps.set(clip,Math.min(...attackTrajectory(actor.weapon,clip,!!actor.crouch).flatMap(box=>box.segments.map(([from,to])=>{
-      const d=to.map((v,i)=>v-from[i]),length2=d.reduce((sum,v)=>sum+v*v,0);
-      const t=Math.max(0,Math.min(1,local.reduce((sum,v,i)=>sum+(v-from[i])*d[i],0)/Math.max(.000001,length2)));
-      return Math.hypot(...local.map((v,i)=>v-from[i]-d[i]*t));
-    }))));
+    for(const clip of valid)gaps.set(clip,Math.min(...attackTrajectory(actor.weapon,clip,!!actor.crouch).flatMap(box=>
+      box.segments.map(([from,to])=>line3_compute_segment_point_distance(...from,...to,...local)))));
     const reachable=valid.filter(clip=>gaps.get(clip)<radius+.11);
     if(!reachable.length||!visible(target,center))continue;
     const ray=center.map((v,i)=>v-eye[i]),length=Math.hypot(...ray);
