@@ -66,8 +66,6 @@ const staticScene=encodeStaticScene();
 await writeChanged(resolve(root,'packages/game/src/content/static-scene.bin'),staticScene.entities);
 await writeChanged(resolve(root,'packages/game/src/content/static-shapes.json'),JSON.stringify(staticScene.shapes));
 console.log(`Baked ${staticScene.shapes.bindings.length} static entities with native Meep serialization.`);
-const {bakeAcousticTerrain}=await import('../packages/game/src/world/acoustic-terrain-authoring.mjs');
-await writeChanged(resolve(root,'packages/game/src/content/acoustic-terrain.bin'),bakeAcousticTerrain());
 const {encodeScenery}=await import('../packages/client/src/render/scenery-authoring.mjs');
 const {buildLayout}=await import('../packages/game/src/world/layout.mjs');
 await writeChanged(resolve(out,'scenery.bin'),encodeScenery(buildLayout(),manifest,staticScene.dataset));

@@ -1,10 +1,10 @@
-import {expect,test} from 'vitest';
+import {expect,test,vi} from 'vitest';
 import {AcousticSourceState} from '@woosh/meep-engine/src/engine/sound/simulation/core/AcousticSourceState.js';
 import {AcousticSolution} from '@woosh/meep-engine/src/engine/sound/simulation/core/AcousticSolution.js';
 import {AcousticProbeField} from '@woosh/meep-engine/src/engine/sound/simulation/probe/AcousticProbeField.js';
 import {RayHit} from '@woosh/meep-engine/src/engine/sound/simulation/core/RayHit.js';
 import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
-import {createWorldAcoustics,AcousticTerrain,ACOUSTIC_MATERIALS} from './acoustics.mjs';
+import {createWorldAcoustics,ACOUSTIC_MATERIALS} from './acoustics.mjs';
 import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
@@ -15,12 +15,7 @@ import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.j
 import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {HeightMapShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
-import {buildAcousticTerrainSurface} from './acoustic-terrain-authoring.mjs';
-import {encodeAcousticTerrainSurface,decodeAcousticTerrainSurface,loadAcousticTerrainSurface} from './acoustic-terrain-data.mjs';
-import {TERRAIN_GRID} from './terrain-data.mjs';
-import {ELEMENT_WORD_COUNT} from '@woosh/meep-engine/src/core/bvh2/bvh3/BVH.js';
-import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
-import {heightAt,WORLD_VERSION} from './regions.mjs';
+import {heightAt,WORLD_VERSION,WORLD_BOUNDS} from './regions.mjs';
 import baked from '../content/acoustic-probes.json' with {type:'json'};
 
 test('acoustics consumes live components and follows their pose and dataset lifecycle', async () => {
@@ -89,48 +84,37 @@ test('acoustics consumes live components and follows their pose and dataset life
   }
 });
 
-test('baked native terrain BVH handles world-spanning rays without rebuilding or resampling the heightfield',()=>{
+test('native terrain rays cross only a linear number of cells across the world',()=>{
   const sampler=new Sampler2D(new Float32Array(241*321).fill(40),1,241,321);
-  const authored=buildAcousticTerrainSurface({vertices:sampler.data,cols:241,rows:321,width:480,depth:640,offset:0});
-  const bytes=encodeAcousticTerrainSurface(authored),surface=decodeAcousticTerrainSurface(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
-  const tree=surface.__raycast_blas,terrain=new AcousticTerrain(HeightMapShape3D.from(sampler,480,101,640),surface);
-  sampler.sampleChannelCatmullRomUV=()=>{throw new Error('Ray query resampled terrain');};
+  const terrain=HeightMapShape3D.from(sampler,480,101,640);
+  const sample=vi.spyOn(sampler,'sampleChannelCatmullRomUV');
   const length=Math.hypot(478,100,638),ray=new Ray3(),hit=new Float32Array(6);
   for(const sign of [-1,1]){
+    sample.mockClear();
     ray.set([-239*sign,100,-319*sign,478*sign/length,-100/length,638*sign/length,length]);
     expect(terrain.raycast(hit,ray)).toBe(true);expect(hit[0]).toBeCloseTo(47.8*sign,3);expect(hit[1]).toBeCloseTo(40,4);expect(hit[2]).toBeCloseTo(63.8*sign,3);
     expect(hit[4]).toBeCloseTo(1,6);
+    // Four corner samples per visited cell, bounded by crossed rows + columns.
+    expect(sample.mock.calls.length).toBeGreaterThan(0);
+    expect(sample.mock.calls.length).toBeLessThanOrEqual(4*(240+320));
   }
   ray.set([-400,50,-500,-1,0,0,Infinity]);expect(terrain.raycast(hit,ray)).toBe(false);
-  expect(surface.__raycast_blas).toBe(tree);expect(tree.size).toBe(authored.__raycast_blas.size);expect(surface.surface_area).toBe(authored.surface_area);
-  const stale=bytes.slice(),buffer=new BinaryBuffer();buffer.fromArrayBuffer(stale.buffer);buffer.writeUint32(WORLD_VERSION-1);
-  expect(()=>decodeAcousticTerrainSurface(stale.buffer)).toThrow('needs rebuilding');
-  const incompatible = bytes.slice();
-  buffer.fromArrayBuffer(incompatible.buffer);
-  buffer.position = 4;
-  buffer.writeUTF8String('0.0.0');
-  expect(() => decodeAcousticTerrainSurface(incompatible.buffer)).toThrow('needs rebuilding');
 });
 
-test('shipped acoustic terrain contains a complete native mesh and baked ray BVH', async () => {
-  const surface = await loadAcousticTerrainSurface();
-  const vertices = TERRAIN_GRID.cols * TERRAIN_GRID.rows;
-  const triangles = (TERRAIN_GRID.cols - 1) * (TERRAIN_GRID.rows - 1) * 2;
-  expect(surface.positions).toBeInstanceOf(Float32Array);
-  expect(surface.indices).toBeInstanceOf(Uint32Array);
-  expect(surface.positions).toHaveLength(vertices * 3);
-  expect(surface.indices).toHaveLength(triangles * 3);
-  expect(surface.positions.every(Number.isFinite)).toBe(true);
-  expect(surface.indices.every(index => index < vertices)).toBe(true);
-  expect(surface.__bbox.every(Number.isFinite)).toBe(true);
-  expect(Number.isFinite(surface.surface_area)).toBe(true);
-  expect(surface.surface_area).toBeGreaterThan(0);
-  expect(surface.tet_mesh.count).toBe(0);
-  const tree = surface.__raycast_blas;
-  expect(tree.size).toBe(triangles * 2 - 1);
-  expect(tree.root).toBeGreaterThanOrEqual(0);
-  expect(tree.root).toBeLessThan(tree.size);
-  expect(tree.data_buffer.byteLength).toBe(tree.size * ELEMENT_WORD_COUNT * 4);
+test('acoustics preserves and raycasts the original translated terrain collider', async ({onTestFinished}) => {
+  const entityManager=new EntityManager(),dataset=new EntityComponentDataset();
+  dataset.registerManyComponentTypes([Transform64,Collider,Name]);entityManager.attachDataset(dataset);
+  const entity=dataset.createEntity(),transform=new Transform64(),collider=new Collider();
+  const shape=HeightMapShape3D.from(new Sampler2D(new Float32Array(9).fill(40),1,3,3),4,50,4);
+  collider.shape=shape;transform.setTranslation(0,-15,-100);
+  dataset.addComponentToEntity(entity,transform);dataset.addComponentToEntity(entity,collider);dataset.addComponentToEntity(entity,new Name('terrain'));
+  const {simulator}=await createWorldAcoustics(entityManager);
+  onTestFinished(()=>new Promise((resolve,reject)=>entityManager.shutdown(resolve,reject)));
+  expect(collider.shape).toBe(shape);
+  expect(dataset.getComponent(entity,AcousticBody).material).toBe(ACOUSTIC_MATERIALS.ground);
+  const ray=new Ray3(),hit=new RayHit();ray.set([0,50,-100,0,-1,0,30]);
+  expect(simulator.occluderIndex.closestHit(ray,hit)).toBe(true);
+  expect(Array.from(hit.position)).toEqual([0,25,-100]);
 });
 
 test('native acoustics distinguish an open doorway, stone partition, stacked floor and canonical terrain',async({onTestFinished})=>{
@@ -143,6 +127,18 @@ test('native acoustics distinguish an open doorway, stone partition, stacked flo
   const floor=solve([38,10.6,-66],[38,5.8,-66]);expect(floor.occlusion).toBeGreaterThan(.95);expect(floor.hasPath).toBe(false);
   for(const [x,z] of [[-201.3,122.6],[140.2,44.9],[-29.4,-196.3]]){
     const y=heightAt(x,z),hit=new RayHit(),ray=new Ray3();ray.set([x,y+.5,z,0,-1,0,1]);expect(simulator.occluderIndex.closestHit(ray,hit)).toBe(true);expect(hit.position[1]).toBeCloseTo(y,4);
+  }
+  let terrain,transform;
+  entityManager.dataset.traverseEntities([Collider,Name,Transform64],(collider,name,t)=>{
+    if(name.getValue()==='terrain'){terrain=collider.shape;transform=t;}
+  });
+  expect(terrain.constructor).toBe(HeightMapShape3D);
+  const {minX,minZ,width,depth}=WORLD_BOUNDS,hit=new Float32Array(6),ray=new Ray3();
+  for(let i=0;i<80;i++){
+    const x=minX+2+(i*37.31)%(width-4),z=minZ+2+(i*79.17)%(depth-4),y=heightAt(x,z);
+    ray.set([x-transform.translation_x,y-transform.translation_y+.5,z-transform.translation_z,0,-1,0,1]);
+    expect(terrain.raycast(hit,ray)).toBe(true);
+    expect(hit[1]+transform.translation_y).toBeCloseTo(y,4);
   }
 });
 

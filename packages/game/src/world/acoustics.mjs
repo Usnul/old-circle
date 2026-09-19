@@ -8,27 +8,6 @@ import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
 import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
 import {AcousticSimulationSystem} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticSimulationSystem.js';
 import {loadStaticScene} from './static-scene-data.mjs';
-import {HeightMapShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
-import {loadAcousticTerrainSurface} from './acoustic-terrain-data.mjs';
-
-const terrainShapes=new WeakMap();
-
-// Keep native heightfield distance/volume queries and use a baked native mesh
-// BVH for rays. Long reflection rays must not resample thousands of grid cells.
-export class AcousticTerrain extends HeightMapShape3D {
-  constructor(heightmap, surface) {
-    super();
-    this.sampler = heightmap.sampler;
-    this.size.copy(heightmap.size);
-    this.orientation.copy(heightmap.orientation);
-    this.tessellation = heightmap.tessellation;
-    this.surface = surface;
-  }
-
-  raycast(hit, ray) {
-    return this.surface.raycast(hit, ray);
-  }
-}
 
 export const ACOUSTIC_MATERIALS={
   ground:AcousticMaterial.from({absorption:[.24,.48,.78],scattering:.85,transmission:[.01,.002,0]}),
@@ -61,19 +40,12 @@ export async function createWorldAcoustics(entityManager) {
   simulator.smoothing = .55;
   simulator.random_seed = 4171;
 
-  const surface = await loadAcousticTerrainSurface();
   dataset.registerComponentType(AcousticBody);
   let bodies = 0;
   dataset.traverseEntities([Transform64, Collider, Name], (transform, collider, name, entity) => {
     const model = name.getValue();
-    if (model === 'terrain' && !(collider.shape instanceof AcousticTerrain)) {
-      const shape = collider.shape;
-      if (!terrainShapes.has(shape)) {
-        terrainShapes.set(shape, new AcousticTerrain(shape, surface));
-      }
-      collider.shape = terrainShapes.get(shape);
-    }
-
+    // HeightMapShape3D now implements the native ray contract. Physics and
+    // acoustics share the original shape, including its terrain tessellation.
     dataset.addComponentToEntity(entity, AcousticBody.from(materialForModel(model)));
     bodies++;
   });
