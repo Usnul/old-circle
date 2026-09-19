@@ -1,5 +1,6 @@
-import {expect,test} from 'vitest';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {expect,test,vi} from 'vitest';
+import {mkdtemp,mkdir,rm} from 'node:fs/promises';
+import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startServer} from './main.mjs';
@@ -8,6 +9,42 @@ import {GameWorld} from '@old-circle/game/simulation/world.mjs';
 import {GameSocketTransport as WebSocketTransport} from '@old-circle/game/network/socket-transport.mjs';
 import {WebSocket} from 'ws';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
+
+test('a failed listen releases the simulation without starting background work',async()=>{
+  const dataDir=await mkdtemp(join(tmpdir(),'old-circle-listen-')),occupied=createServer();
+  await new Promise(done=>occupied.listen(0,'127.0.0.1',done));
+  const stop=vi.spyOn(SharedSession.prototype,'stop');
+  try{
+    await expect(startServer({port:occupied.address().port,dataDir})).rejects.toMatchObject({code:'EADDRINUSE'});
+    expect(stop).toHaveBeenCalledTimes(1);
+  }finally{stop.mockRestore();await new Promise(done=>occupied.close(done));await rm(dataDir,{recursive:true,force:true});}
+});
+
+test('a failed shutdown save reports the error after closing the server and simulation',async()=>{
+  const dataDir=await mkdtemp(join(tmpdir(),'old-circle-stop-'));let server,stop;
+  try{
+    server=await startServer({port:0,dataDir});stop=vi.spyOn(server.host,'stop');
+    // A directory at the temporary save path fails consistently on all hosts.
+    await mkdir(join(dataDir,'world.meep.tmp'));
+    await expect(server.stop()).rejects.toThrow();
+    expect(stop).toHaveBeenCalledTimes(1);
+    await expect(fetch(`http://127.0.0.1:${server.port}/health`)).rejects.toThrow();
+    await expect(server.stop()).rejects.toThrow();expect(stop).toHaveBeenCalledTimes(1);
+  }finally{await server?.stop().catch(()=>{});stop?.mockRestore();await rm(dataDir,{recursive:true,force:true});}
+});
+
+test('an oversized socket frame closes only its connection and leaves the server available',async()=>{
+  const dataDir=await mkdtemp(join(tmpdir(),'old-circle-socket-error-'));let server,socket;
+  const report=vi.spyOn(console,'error').mockImplementation(()=>{});
+  try{
+    server=await startServer({port:0,dataDir});socket=new WebSocket(`ws://127.0.0.1:${server.port}/multiplayer`);
+    await new Promise((done,failed)=>{socket.once('open',done);socket.once('error',failed);});
+    const closed=new Promise(done=>socket.once('close',done));socket.send(Buffer.alloc(2*1024*1024+1));await closed;
+    const health=await fetch(`http://127.0.0.1:${server.port}/health`);expect(health.status).toBe(200);await health.text();
+    expect(report).toHaveBeenCalledWith('Socket rejected:',expect.stringContaining('Max payload size exceeded'));
+  }finally{socket?.terminate();await server?.stop();report.mockRestore();await rm(dataDir,{recursive:true,force:true});}
+});
+
 async function until(predicate,timeout=8000){const end=Date.now()+timeout;while(!predicate()){if(Date.now()>end)throw new Error('Timed out waiting for network state');await delay(30);}}
 async function beginJoin(port,character,playerId='integration-player'){
   const socket=new WebSocket(`ws://127.0.0.1:${port}/multiplayer`);await new Promise((done,fail)=>{socket.onopen=done;socket.onerror=fail;});

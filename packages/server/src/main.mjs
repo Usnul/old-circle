@@ -26,6 +26,9 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
   const wss=new WebSocketServer({server:http,path:'/multiplayer',maxPayload:2*1024*1024});
   wss.on('connection',socket=>{
     let info,readyTimeout,closed=false;
+    // ws reports oversized or invalid frames as socket errors before closing.
+    // Handle them here so one malformed connection cannot crash the process.
+    socket.on('error',error=>{console.error('Socket rejected:',error.message);socket.terminate();});
     const timeout=setTimeout(()=>socket.close(1008,'Join timed out'),5000);
     socket.on('close',()=>{
       if(closed)return;closed=true;clearTimeout(timeout);clearTimeout(readyTimeout);sockets.delete(socket);
@@ -58,14 +61,37 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
       }catch(error){console.error('Join rejected:',error.message);socket.close(1008,error.message.slice(0,100));}
     });
   });
+  try{
+    await new Promise((done,failed)=>{
+      http.once('error',failed);
+      // WebSocketServer forwards the HTTP server's error synchronously.
+      wss.once('error',failed);
+      http.listen(port,address,()=>{http.removeListener('error',failed);wss.removeListener('error',failed);done();});
+    });
+  }catch(error){
+    await new Promise(done=>wss.close(done));
+    await host.stop();
+    throw error;
+  }
   let last=performance.now(),accumulator=0;
   const ticker=setInterval(()=>{const now=performance.now();accumulator+=Math.min(.25,(now-last)/1000);last=now;let steps=0;while(accumulator>=NET_DT&&steps++<8){host.tick();accumulator-=NET_DT;}},8);
   let saving=Promise.resolve();
   function save(){saving=saving.catch(()=>{}).then(async()=>{const b=new BinaryBuffer();b.writeUint32(WORLD_SAVE_VERSION);b.writeUTF8String(JSON.stringify(host.sim.snapshot()));await writeFile(savePath+'.tmp',new Uint8Array(b.data,0,b.position));await rename(savePath+'.tmp',savePath);});return saving;}
   const saver=setInterval(()=>save().catch(e=>console.error('World save failed',e)),15000);
   let stopping;
-  function stop(){return stopping??=(async()=>{clearInterval(ticker);clearInterval(saver);await save();for(const socket of wss.clients)socket.terminate();await new Promise(r=>wss.close(r));await new Promise(r=>http.close(r));await host.stop();})();}
-  await new Promise((done,failed)=>{http.once('error',failed);http.listen(port,address,done);});
+  function stop(){
+    return stopping??=(async()=>{
+      clearInterval(ticker);clearInterval(saver);
+      try{await save();}
+      finally{
+        // A failed disk write must still release sockets, physics and timers.
+        for(const socket of wss.clients)socket.terminate();
+        await new Promise(done=>wss.close(done));
+        await new Promise(done=>http.close(done));
+        await host.stop();
+      }
+    })();
+  }
   return {host,port:http.address().port,save,stop};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
