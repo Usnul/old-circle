@@ -35,6 +35,9 @@ function disconnect(reason='Connection closed'){
   old?.stop().catch(e=>console.warn('Session cleanup',e));
   if(pendingLevel){levelResult(world.actor(playerId).level>pendingLevel.level);pendingLevel=null;}
   finishEquipment();
+  // Rejoining carries the resulting character. A fresh CharacterFrame starts
+  // its command sequence at zero, so retained purchases would execute again.
+  Object.assign(settings,{levelStat:0,armor:0,upgradeWeapon:0,charm:0,sequence:0});
 }
 function connect(){
   if(connecting||remote||!url)return;connecting=true;
