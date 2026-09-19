@@ -15,6 +15,18 @@ afterEach(async()=>{for(const sim of simulations)await sim.stop();simulations.le
 async function setup(options){const sim=await new Ragdolls(options).start();simulations.push(sim);return sim;}
 function dead(id='fallen'){return Object.assign(new Actor(),{id,x:160,y:heightAt(160,120)+.845,z:120,hp:0,grounded:true,deathVelocity:[2,.5,0]});}
 
+test('living collision proxies follow crouch and boss capsule dimensions',async()=>{
+  const sim=await setup(),actor=Object.assign(dead('proxy'),{hp:100});
+  const shape=()=>sim.world.ecd.getComponent(sim.proxies.get(actor.id).id,Collider).shape;
+  sim.sync([actor]);const standing=shape();expect(standing.radius).toBe(.32);expect(standing.height).toBe(1.05);
+  actor.crouch=true;actor.y-=.35;sim.sync([actor]);
+  expect(shape()).not.toBe(standing);expect(shape().height).toBe(.35);
+  const crouching=shape();sim.sync([actor]);expect(shape()).toBe(crouching);
+  actor.crouch=false;actor.boss=true;sim.sync([actor]);
+  expect(shape().radius).toBeCloseTo(.48);expect(shape().height).toBeCloseTo(1.575);
+  sim.sync([]);expect(sim.proxies.size).toBe(0);
+});
+
 test('cosmetic physics shares static shapes without changing gameplay state',async()=>{
   const world=await new GameWorld().start({populate:false,navigation:false});
   simulations.push(world);

@@ -93,7 +93,9 @@ export class Ragdolls {
     for(const a of actors){
       if(a.hp<=0){if(a.deadTime<CORPSE_LIFETIME)this.spawn(a);continue;}
       live.add(a.id);let proxy=this.proxies.get(a.id),scale=a.boss?1.5:1;
-      if(!proxy){proxy=this.body([a.x,a.y,a.z],IDENTITY,CapsuleShape3D.from(.32*scale,1.05*scale),{kind:BodyKind.Kinematic,layer:4,mask:2,inertia:[0,0,0]});this.proxies.set(a.id,proxy);}
+      const height=(a.crouch?.35:1.05)*scale;
+      if(proxy&&(proxy.scale!==scale||proxy.height!==height)){this.world.ecd.removeEntity(proxy.id);this.proxies.delete(a.id);proxy=null;}
+      if(!proxy){proxy=this.body([a.x,a.y,a.z],IDENTITY,CapsuleShape3D.from(.32*scale,height),{kind:BodyKind.Kinematic,layer:4,mask:2,inertia:[0,0,0]});proxy.scale=scale;proxy.height=height;this.proxies.set(a.id,proxy);}
       this.world.physics.setPose(proxy.b,[a.x,a.y,a.z],IDENTITY);proxy.b.linearVelocity.set([a.vx,a.vy,a.vz]);
     }
     for(const [id,proxy] of this.proxies)if(!live.has(id)){this.world.ecd.removeEntity(proxy.id);this.proxies.delete(id);}
