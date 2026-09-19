@@ -2,7 +2,15 @@ import {expect,test} from 'vitest';
 import {BOSSES,ENEMIES,enemyDamage,levelCost} from './catalog.mjs';
 import {REGIONS} from '../world/regions.mjs';
 import {DUNGEONS} from '../world/dungeons.mjs';
-import {reinforcementCost} from './equipment.mjs';
+import {reinforcementCost,migrateInventory} from './equipment.mjs';
+
+test('inventory migration removes unknown IDs and tolerates malformed legacy collections',()=>{
+  expect(migrateInventory({weapons:'bow',charm:'constructor'},'__proto__').weapons).toEqual(['sword']);
+  const inventory=migrateInventory({weapons:['bow','constructor','bow','missing'],armor:'toString',charm:'constructor'},'staff');
+  expect(inventory.weapons).toEqual(['sword','staff','bow']);
+  expect(inventory.armor).toBe('mail');expect(inventory.charm).toBe('none');
+  expect(Object.keys(inventory.reinforcements)).toEqual(inventory.weapons);
+});
 
 test('one clear provides a viable level budget for the next region without farming',()=>{
   let level=1,embers=0;

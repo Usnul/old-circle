@@ -6,6 +6,8 @@ import {hearthArrival} from './resting.mjs';
 import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
 import {BodyKind} from '@woosh/meep-engine/src/engine/physics/ecs/BodyKind.js';
 import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
+import {RigidBody} from '@woosh/meep-engine/src/engine/physics/ecs/RigidBody.js';
+import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {SpatialAtlas} from '../world/spatial-atlas.mjs';
 import {ARMOR,weaponDamage,reinforcementLimit} from '../content/equipment.mjs';
 import {BOSSES,ENEMIES,WEAPONS,enemyDamage} from '../content/catalog.mjs';
@@ -162,7 +164,39 @@ test('ground adhesion does not let contact friction drag down the walking speed'
 test('restoring an unchanged snapshot does not teleport or wake every actor',async()=>{
   const w=await setup();w.addPlayer('still');run(w,60);let calls=0;
   const original=w.physics.setPose.bind(w.physics);w.physics.setPose=(...args)=>{calls++;return original(...args);};
-  w.replaceSnapshot(w.snapshot());expect(calls).toBe(0);
+  const velocity=vi.spyOn(w.physics,'setLinearVelocity');
+  w.replaceSnapshot(w.snapshot());expect(calls).toBe(0);expect(velocity).not.toHaveBeenCalled();
+});
+
+test('a velocity-only snapshot correction wakes a sleeping Meep body',async()=>{
+  const w=await setup(),a=w.spawnActor('sleeping',{},[180,heightAt(180,100)+6,100]);
+  const e=w.actors.get(a.id),body=w.ecd.getComponent(e,RigidBody),transform=w.ecd.getComponent(e,Transform64);
+  body.gravityScale=0;w.physics.sleep(body);
+  const snapshot=w.snapshot();snapshot.actors[0].vx=3;w.replaceSnapshot(snapshot);
+  w.physics.fixedUpdate(1/60);
+  expect(transform.translation_x).toBeGreaterThan(180.04);
+});
+
+test.each(['constructor','toString','__proto__'])('save import rejects inherited weapon key %s without changing the character',async weapon=>{
+  const w=await setup(),p=w.addPlayer('invalid-weapon'),before=w.exportCharacter(p.id),saved=structuredClone(before);
+  saved.weapon=weapon;saved.embers=900;
+  expect(()=>w.importCharacter(p.id,saved)).toThrow('Malformed equipment');
+  expect(w.exportCharacter(p.id)).toEqual(before);
+  p.inventory.weapons.push(weapon);w.equip(p.id,weapon);expect(p.weapon).toBe('sword');
+});
+
+test('save import rejects overflowing derived values before mutation and keeps only known stats',async()=>{
+  const w=await setup(),p=w.addPlayer('finite-character'),before=w.exportCharacter(p.id);
+  for(const key of ['vigor','endurance','insight','might','level']){
+    const saved=structuredClone(before);saved.embers=900;
+    if(key==='level')saved.level=Number.MAX_VALUE;
+    else saved.stats[key]=Number.MAX_VALUE;
+    if(key==='might')saved.inventory.reinforcements.sword=6;
+    expect(()=>w.importCharacter(p.id,saved),key).toThrow('Malformed character state');
+    expect(w.exportCharacter(p.id)).toEqual(before);
+  }
+  const saved=structuredClone(before);saved.stats.extra=123;w.importCharacter(p.id,saved);
+  expect(p.stats).toEqual(before.stats);
 });
 
 test('prediction suspends distant physics and AI, then local authority resumes both',async()=>{
@@ -361,6 +395,22 @@ test('a missile expiring in empty air produces no impact',async()=>{
   const w=await setup(),a=w.addPlayer('caster','ember');w.teleport(a,[100,80,30]);
   const {p}=w.spawnProjectile(a,WEAPONS.staff);p.life=.01;w.events.length=0;w.stepProjectiles(.02);
   expect(w.projectiles.size).toBe(0);expect(w.events).toEqual([]);
+});
+
+test.each([.01,.2])('projectile travel is clipped to its remaining lifetime (%s seconds)',async life=>{
+  const w=await setup(),a=w.addPlayer('caster','ember');w.teleport(a,[100,80,30]);
+  const target=w.spawnActor('target',{hp:100},[100,80,28]);
+  const {p,t}=w.spawnProjectile(a,WEAPONS.staff);t.setTranslation(100,80,30);p.velocity=[0,0,-20];p.life=life;
+  w.stepProjectiles(.2);
+  expect(target.hp<100).toBe(life===.2);expect(w.projectiles.size).toBe(0);
+});
+
+test('a scenery impact before expiry still emits feedback on the final partial step',async()=>{
+  const w=await setup(),a=w.addPlayer('caster','ember');w.teleport(a,[100,80,30]);
+  w.body([100,80,29],BoxShape3D.from_size(3,3,.1),BodyKind.Static);
+  const {p,t}=w.spawnProjectile(a,WEAPONS.staff);t.setTranslation(100,80,30);p.velocity=[0,0,-20];p.life=.1;
+  w.events=[];w.stepProjectiles(.2);
+  expect(w.events.map(event=>event.type)).toEqual(['impact']);expect(w.projectiles.size).toBe(0);
 });
 
 test('a cinder collision keeps its projectile identity and the concave terrain surface',async()=>{

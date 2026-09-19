@@ -116,7 +116,7 @@ export class GameWorld {
   }
   actor(id){const e=this.actors.get(id);return e===undefined?undefined:this.ecd.getComponent(e,Actor);}
   input(id,intent){const a=this.actor(id);if(a)a.intent={x:clamp(Number(intent.x)||0,-1,1),z:clamp(Number(intent.z)||0,-1,1),yaw:Number.isFinite(Number(intent.yaw))?Number(intent.yaw):0,pitch:Number.isFinite(Number(intent.pitch))?clamp(Number(intent.pitch),-1.35,1.35):0,buttons:(intent.buttons|0)&127};}
-  equip(id,weapon){const a=this.actor(id);if(a&&WEAPONS[weapon]&&a.attackAge<0&&(a.kind!=='player'||a.inventory.weapons.includes(weapon)))a.weapon=weapon;}
+  equip(id,weapon){const a=this.actor(id);if(a&&Object.hasOwn(WEAPONS,weapon)&&a.attackAge<0&&(a.kind!=='player'||a.inventory.weapons.includes(weapon)))a.weapon=weapon;}
   equipArmor(id,armor){
     const a=this.actor(id);
     if(!a||!Object.hasOwn(ARMOR,armor)||!a.inventory.armors.includes(armor)||restStatus(a,[...this.actors.keys()].map(id=>this.actor(id))).reason)return false;
@@ -355,19 +355,21 @@ export class GameWorld {
   }
   stepProjectiles(dt){
     for(const e of this.projectiles){
-      const t=this.ecd.getComponent(e,Transform64),p=this.ecd.getComponent(e,Projectile);p.age+=dt;
+      const t=this.ecd.getComponent(e,Transform64),p=this.ecd.getComponent(e,Projectile);
+      const travelTime=Math.min(dt,Math.max(0,p.life-p.age));p.age+=dt;
       const owner=this.actor(p.owner);if(owner?.boss&&owner.hp<=0){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
       if(p.kind==='wave'||p.kind==='sigil'){stepHazard(this,e,p,t,dt);continue;}
-      if(p.weapon==='bow')p.velocity[1]-=9.81*dt;
-      const v=p.velocity,speed=Math.hypot(...v);this.ray.set([t.translation_x,t.translation_y,t.translation_z,v[0]/speed,v[1]/speed,v[2]/speed,speed*dt]);
+      if(travelTime===0){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
+      if(p.weapon==='bow')p.velocity[1]-=9.81*travelTime;
+      const v=p.velocity,speed=Math.hypot(...v);this.ray.set([t.translation_x,t.translation_y,t.translation_z,v[0]/speed,v[1]/speed,v[2]/speed,speed*travelTime]);
       const hit=sphereSweep(this.physics,this.ray,p.radius,this.hit,id=>id!==this.actors.get(p.owner));
       if(hit){
         const victim=this.ecd.getComponent(this.hit.entity,Actor),contact={...this.sweepContact(p.radius,v.map(value=>value/speed)),weapon:p.weapon,...(p.effect?{effect:p.effect}:{})};
         if(victim&&owner)this.damage(owner,victim,p.damage,WEAPONS[p.weapon].impulse,p.weapon==='staff'?'magic':'physical',contact);
-        else if(!victim&&owner&&p.age<=p.life)this.event('impact',owner,{...contact,source:p.owner});
+        else if(!victim&&owner)this.event('impact',owner,{...contact,source:p.owner});
       }
-      if(hit||p.age>p.life){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
-      t.setTranslation(t.translation_x+v[0]*dt,t.translation_y+v[1]*dt,t.translation_z+v[2]*dt);
+      if(hit||p.age>=p.life){this.ecd.removeEntity(e);this.projectiles.delete(e);continue;}
+      t.setTranslation(t.translation_x+v[0]*travelTime,t.translation_y+v[1]*travelTime,t.translation_z+v[2]*travelTime);
     }
   }
   tryMantle(a,e){
@@ -437,7 +439,7 @@ export class GameWorld {
     const a=this.actor(id);if(!a||s.version!==1)throw new Error('Unsupported character save version');
     const fields=['vigor','endurance','might','insight'];
     if(!fields.every(k=>Number.isFinite(s.stats?.[k])&&s.stats[k]>=1)||![s.x,s.y,s.z,s.hp,s.stamina,s.mana,s.level,s.embers].every(Number.isFinite))throw new Error('Malformed character state');
-    if(!WEAPONS[s.weapon]||!Array.isArray(s.seals)||!Array.isArray(s.checkpoint)||s.checkpoint.length!==3||!s.checkpoint.every(Number.isFinite))throw new Error('Malformed equipment or checkpoint');
+    if(!Object.hasOwn(WEAPONS,s.weapon)||!Array.isArray(s.seals)||!Array.isArray(s.checkpoint)||s.checkpoint.length!==3||!s.checkpoint.every(Number.isFinite))throw new Error('Malformed equipment or checkpoint');
     if(s.inventory&&!Array.isArray(s.inventory.weapons))throw new Error('Malformed inventory');
     if(s.motion){
       const m=s.motion;
@@ -445,12 +447,18 @@ export class GameWorld {
       if(!Object.keys(optionalMotion).every(key=>m[key]===undefined||Number.isFinite(m[key])))throw new Error('Malformed landing state');
       if(m.mantle&&(!['hang','climb'].includes(m.mantle.phase)||!Number.isFinite(m.mantle.t)||![m.mantle.from,m.mantle.to].every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))))throw new Error('Malformed mantle state');
     }
+    const stats=Object.fromEntries(fields.map(key=>[key,s.stats[key]])),relics=knownRelics(s.relics);
+    const inventory=migrateInventory(s.inventory,s.weapon,s.seals,relics);
+    const character={kind:'player',stats,inventory,relics};
+    // Progression is trusted, but finite inputs can still overflow resource
+    // maxima or reinforced damage and poison physics/network serialization.
+    if(![maxHealth(stats),maxStamina(stats),maxMana(stats),levelCost(s.level),...inventory.weapons.map(weapon=>weaponDamage(character,weapon))].every(Number.isFinite))throw new Error('Malformed character state');
     // Client progression is trusted at reconnect, per game policy. World state never comes from this payload.
-    Object.assign(a,{origin:s.origin,weapon:s.weapon,stats:{...s.stats},level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
+    Object.assign(a,{origin:s.origin,weapon:s.weapon,stats,level:s.level,embers:s.embers,flasks:s.flasks,pvp:!!s.pvp,seals:[...s.seals],checkpoint:[...s.checkpoint]});
     a.checkpointId=HEARTHS.some(h=>h.id===s.checkpointId)?s.checkpointId:'hearth';
     a.hearths=[...new Set(['hearth',a.checkpointId,...(Array.isArray(s.hearths)?s.hearths.filter(id=>HEARTHS.some(h=>h.id===id)):[])])];
-    a.inventory=migrateInventory(s.inventory,s.weapon,a.seals,knownRelics(s.relics));
-    a.relics=knownRelics(s.relics);a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,flaskCapacity(a));
+    a.inventory=inventory;
+    a.relics=relics;a.flasks=clamp(Math.floor(Number(a.flasks)||0),0,flaskCapacity(a));
     a.healthMax=maxHealth(a.stats);a.staminaMax=maxStamina(a.stats);a.manaMax=maxMana(a.stats);
     a.hp=clamp(s.hp,0,a.healthMax);a.stamina=clamp(s.stamina,0,a.staminaMax);a.mana=clamp(s.mana,0,a.manaMax);this.teleport(a,[s.x,s.contentVersion===WORLD_VERSION?s.y:Math.max(s.y,heightAt(s.x,s.z)+1),s.z]);if(s.contentVersion!==WORLD_VERSION)a.checkpoint[1]=Math.max(a.checkpoint[1],heightAt(a.checkpoint[0],a.checkpoint[2])+1);this.syncActorCollider(a);
     Object.assign(a,optionalMotion);
@@ -511,7 +519,10 @@ export class GameWorld {
       Object.assign(a,structuredClone(value));if(moved)this.teleport(a,[value.x,value.y,value.z]);
       if(snapshot.scope==='nearby'&&a.kind==='enemy'){a.path=null;a.pathTick=0;a.patrolGoal=null;delete a.patrolWaitUntil;delete a.patrolDeadline;a.memory=0;}
       this.syncActorCollider(a,resized);
-      const velocity=this.ecd.getComponent(this.actors.get(a.id),RigidBody).linearVelocity;velocity[0]=value.vx;velocity[1]=value.vy;velocity[2]=value.vz;
+      const body=this.ecd.getComponent(this.actors.get(a.id),RigidBody),velocity=body.linearVelocity;
+      // A velocity-only correction must wake its body, but an unchanged
+      // snapshot should preserve Meep's sleeping state.
+      if(velocity[0]!==value.vx||velocity[1]!==value.vy||velocity[2]!==value.vz)this.physics.setLinearVelocity(body,[value.vx,value.vy,value.vz]);
     }
     for(const e of this.projectiles)this.ecd.removeEntity(e);this.projectiles.clear();
     for(const value of snapshot.projectiles??[]){const e=this.ecd.createEntity(),t=new Transform64(),p=Object.assign(new Projectile(),structuredClone(value));t.setTranslation(...value.position);this.ecd.addComponentToEntity(e,t);this.ecd.addComponentToEntity(e,p);this.projectiles.add(e);}

@@ -28,9 +28,11 @@ export function weaponDamage(actor,weapon=actor.weapon){
 // Unknown content is removed, while known owned equipment survives reconnect.
 export function migrateInventory(saved,weapon='sword',seals=[],relics=[]){
   const armor=Object.hasOwn(ARMOR,saved?.armor)?saved.armor:'mail';
-  const weapons=[...new Set(['sword',weapon,...(saved?.weapons??[]).filter(w=>Object.hasOwn(WEAPONS,w))])];
+  const equipped=Object.hasOwn(WEAPONS,weapon)?weapon:'sword';
+  const owned=Array.isArray(saved?.weapons)?saved.weapons.filter(w=>Object.hasOwn(WEAPONS,w)):[];
+  const weapons=[...new Set(['sword',equipped,...owned])];
   const armors=[...new Set(['mail',armor,...(Array.isArray(saved?.armors)?saved.armors.filter(id=>Object.hasOwn(ARMOR,id)):[]),...armorIds.filter(id=>seals.includes(ARMOR[id].seal))])];
   const reinforcements=Object.fromEntries(weapons.map(id=>[id,clamp(Math.floor(Number(saved?.reinforcements?.[id])||0),0,6)]));
-  const charm=CHARMS[saved?.charm]&&relics.includes(CHARMS[saved.charm].relic)?saved.charm:'none';
+  const charm=Object.hasOwn(CHARMS,saved?.charm)&&relics.includes(CHARMS[saved.charm].relic)?saved.charm:'none';
   return {weapons,arrows:clamp(Math.floor(Number(saved?.arrows??30)||0),0,9999),armor,armors,reinforcements,charm};
 }
