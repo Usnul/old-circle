@@ -26,3 +26,19 @@ test('disconnect restores dormant enemies into the warm world and reconnect disc
     expect(w.actor(far.id).hp).toBe(far.hp);expect(w.actors.size).toBe(full.actors.length);
   }finally{await w.stop();}
 });
+
+test('a saturated nearby view retains projectile owners ahead of unrelated bystanders',()=>{
+  const player={id:'you',x:0,y:0,z:0},owner={id:'distant-keeper',x:130,y:0,z:0};
+  const bystanders=Array.from({length:INTEREST.actors},(_,i)=>({id:`bystander-${i}`,x:i*.1,y:0,z:0}));
+  const projectile={id:1,owner:owner.id,position:[1,0,0]};
+  const snapshot={tick:1,time:12,actors:[player,...bystanders,owner],projectiles:[projectile],events:[]};
+  const scoped=projectWorld(snapshot,player.id);
+  expect(scoped.actors).toHaveLength(INTEREST.actors);expect(scoped.actors.map(a=>a.id)).toContain(owner.id);
+  expect(scoped.actors[0].id).toBe(player.id);expect(scoped.projectiles).toEqual([projectile]);
+
+  const owners=Array.from({length:INTEREST.projectiles},(_,i)=>({id:`owner-${i}`,x:130+i,y:0,z:0}));
+  const crowded=projectWorld({...snapshot,actors:[player,...owners],projectiles:owners.map((a,id)=>({id,owner:a.id,position:[1,0,0]}))},player.id);
+  expect(crowded.actors).toHaveLength(INTEREST.actors);
+  expect(crowded.projectiles).toHaveLength(INTEREST.actors-1);
+  const retained=new Set(crowded.actors.map(a=>a.id));expect(crowded.projectiles.every(p=>retained.has(p.owner))).toBe(true);
+});

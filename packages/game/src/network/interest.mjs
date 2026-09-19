@@ -10,9 +10,16 @@ const positionDistance=(p,a)=>v3_distance(...p,a.x,a.y,a.z);
  * and removals while an actor moves along the edge of the visible region. */
 export function projectWorld(snapshot,playerId,previous){
   const player=snapshot.actors.find(a=>a.id===playerId),prior=new Set(previous?.actors.map(a=>a.id)??[]);
-  const projectiles=player?(snapshot.projectiles??[]).filter(p=>positionDistance(p.position,player)<=INTEREST.leave+(p.maxRadius??p.radius??0)).sort((a,b)=>positionDistance(a.position,player)-positionDistance(b.position,player)).slice(0,INTEREST.projectiles):[];
+  let projectiles=player?(snapshot.projectiles??[]).filter(p=>positionDistance(p.position,player)<=INTEREST.leave+(p.maxRadius??p.radius??0)).sort((a,b)=>positionDistance(a.position,player)-positionDistance(b.position,player)).slice(0,INTEREST.projectiles):[];
   const owners=new Set(projectiles.map(p=>p.owner));
-  const actors=player?snapshot.actors.filter(a=>owners.has(a.id)||distance(a,player)<=(prior.has(a.id)?INTEREST.leave:INTEREST.enter)).sort((a,b)=>(a.id===playerId?-1:b.id===playerId?1:distance(a,player)-distance(b,player))).slice(0,INTEREST.actors).map(a=>{if(a.id===playerId)return {id:a.id,kind:a.kind};const wire={...a};for(const key of PRIVATE_AI_FIELDS)delete wire[key];return wire;}):[];
+  // Retain owners before nearby bystanders: hazard prediction needs the owner
+  // even when it is outside the usual interest radius or the actor cap is full.
+  const priority=a=>a.id===playerId?0:owners.has(a.id)?1:2;
+  const actors=player?snapshot.actors.filter(a=>owners.has(a.id)||distance(a,player)<=(prior.has(a.id)?INTEREST.leave:INTEREST.enter))
+    .sort((a,b)=>priority(a)-priority(b)||distance(a,player)-distance(b,player)).slice(0,INTEREST.actors)
+    .map(a=>{if(a.id===playerId)return {id:a.id,kind:a.kind};const wire={...a};for(const key of PRIVATE_AI_FIELDS)delete wire[key];return wire;}):[];
+  const retained=new Set(actors.map(a=>a.id)),known=new Set(snapshot.actors.map(a=>a.id));
+  projectiles=projectiles.filter(p=>!known.has(p.owner)||retained.has(p.owner));
   const events=player?(snapshot.events??[]).filter(e=>e.id===playerId||e.victim===playerId||e.position&&positionDistance(e.position,player)<=INTEREST.leave).slice(-INTEREST.events):[];
   return {version:snapshot.version,contentVersion:snapshot.contentVersion,tick:snapshot.tick,time:snapshot.time,scope:'nearby',actors,projectiles,events};
 }
