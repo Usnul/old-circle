@@ -9,6 +9,28 @@ import {castBossMove} from '../simulation/boss-attacks.mjs';
 import {RELICS} from '../content/relics.mjs';
 import {INTEREST} from './interest.mjs';
 
+test('malformed client input cannot poison rollback state and peers cannot replace owned character components',async()=>{
+  const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
+  try{
+    const id='invalid-input';client.localNetworkId=host.addPlayer(1,id);
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const frames=n=>{for(let i=0;i<n;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}};frames(12);
+    const rejected=[];host.net.peer.executor.onActionRejected.add((peer,action)=>rejected.push({peer,type:action.constructor.action_type_name??action.constructor.name}));
+    client.localInput.x=NaN;client.localInput.pitch=Infinity;frames(12);
+    expect(rejected.some(r=>r.peer===1&&r.type==='OldCircleInput')).toBe(true);
+    expect(host.ecd.getComponent(host.characters.get(id),CharacterFrame).intent.x).toBe(0);
+    expect(client.localCharacter().intent.x).toBe(0);
+    client.localInput.x=0;client.localInput.pitch=0;
+    const entity=client.net.peer.slot_table.entity_for(client.localNetworkId);
+    const replace=()=>client.ecd.sendEvent(entity,'net_mutate_component',{component_type:CharacterFrame,new_state:{...client.localCharacter(),appliedSequence:999}});
+    client.net.client.onPredict.add(replace);client.tick();client.net.client.onPredict.remove(replace);
+    frames(12);
+    expect(rejected.some(r=>r.type==='ReplaceComponentAction')).toBe(true);
+    expect(host.ecd.getComponent(host.characters.get(id),CharacterFrame).appliedSequence).toBe(0);
+    expect(host.sim.actor(id).hp).toBeGreaterThan(0);expect(client.failure).toBeUndefined();
+  }finally{await client.stop();await host.stop();}
+});
+
 test('an invalid replicated world baseline stops prediction so the Worker can return to local authority',async()=>{
   const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
   const report=vi.spyOn(console,'error').mockImplementation(()=>{});

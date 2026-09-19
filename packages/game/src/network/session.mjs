@@ -18,10 +18,14 @@ export const PROTOCOL_VERSION=10,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';recipient=0;snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;charm=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
+const validInput=action=>[action.x,action.z,action.yaw,action.pitch].every(Number.isFinite);
 const InputAction=SimAction.extend({
   type:'OldCircleInput',schema:{network_id:'uintVar',x:'float32',z:'float32',yaw:'float32',buttons:'uint8',weapon:'uint8',pvp:'uint8',levelStat:'uint8',sequence:'uint32',armor:'uint8',upgradeWeapon:'uint8',charm:'uint8',pitch:'float32'},
   affects(executor){const e=executor.slot_table.entity_for(this.network_id);return e<0?[]:[[e,CharacterFrame]];},
   apply(world,executor){
+    // Keep malformed floats out of rollback records as well as physics. The
+    // gameplay input sanitizer runs after this replicated component is written.
+    if(!validInput(this))return;
     const e=executor.slot_table.entity_for(this.network_id);if(e<0)return;const c=world.getComponent(e,CharacterFrame);if(!c)return;
     c.intent={x:this.x,z:this.z,yaw:this.yaw,pitch:this.pitch,buttons:this.buttons};c.weapon=this.weapon;c.pvp=this.pvp;c.levelStat=this.levelStat;c.sequence=this.sequence;c.armor=this.armor;c.upgradeWeapon=this.upgradeWeapon;c.charm=this.charm;
     if(world.oldCircle.role==='client')world.oldCircle.predict(c);
@@ -97,6 +101,11 @@ export class SharedSession {
       const b=new BinaryBuffer();b.writeUint8(1);b.writeUint32(frame);this.net.peer.send_reliable_command(peer,b.raw_bytes,b.position);
     });
     if(this.role==='host'){
+      const executor=this.net.peer.executor,authorizeOwner=executor.authorize;
+      // Ownership permits a peer to submit intent, not replace its replicated
+      // component (including the server's command acknowledgement) wholesale.
+      executor.authorize=(sender,entity,action)=>authorizeOwner(sender,entity,action)
+        &&(sender===this.peerId||action instanceof InputAction&&validInput(action));
       const replicator=this.net.peer.replicator,pack=replicator.pack_for_peer.bind(replicator);
       // Entity scope does not gate global actions or records whose entity was
       // retired. Their packet ACK would credit withheld world deltas as well.
