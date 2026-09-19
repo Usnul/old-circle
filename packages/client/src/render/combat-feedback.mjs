@@ -14,6 +14,9 @@ export class CombatFeedback {
       this.healing.clear();
     }
     this.hit=Math.max(0,this.hit-dt*2.8);this.time+=dt;
+    // The elapsed frame predates newly received heals. Age existing glows
+    // before creating or restarting them so a stalled frame cannot erase one.
+    for(const glow of this.healing.values())glow.age+=dt;
     if(this.lastSnapshot!==snapshot){
       for(const event of snapshot.events){
         const key=event.key??`${event.tick}:${event.id}:${event.type}`;
@@ -33,7 +36,7 @@ export class CombatFeedback {
       this.lastSnapshot=snapshot;
     }
     for(const [id,glow] of this.healing){
-      glow.age+=dt;const actor=actors.find(a=>a.id===id);
+      const actor=actors.find(a=>a.id===id);
       if(glow.age>=1.3||!actor||actor.hp<=0){view.ecd.removeEntity(glow.light.id);this.healing.delete(id);continue;}
       glow.light.t.setTranslation(actor.x,actor.y+.3,actor.z);glow.light.t.updateMatrix();t64_announce_change(view.ecd,glow.light.id);
       glow.light.l.intensity.set(3*(1-glow.age/1.3));
