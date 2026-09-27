@@ -21,7 +21,8 @@ test('Sopra spatial voices use band transmission, bounded reverb and a dry wind 
   const panners=nodes.filter(n=>n.kind==='panner');expect(panners).toHaveLength(1); // No corner-leak send.
   for(let i=0;i<12;i++)audio.acoustics.update(listener,audio.voices,.05);
   const taps=nodes.filter(n=>n.kind==='gain'&&n.connections.includes(panners[0]));expect(taps).toHaveLength(3);
-  expect(taps.reduce((sum,n)=>sum+n.gain.value,0)).toBeCloseTo(.1,2);expect(Math.min(...taps.map(n=>n.gain.value))).toBeLessThan(.01);
+  // The subtractive taps sum to the low-band amplitude: sqrt(transmitted energy).
+  expect(taps.reduce((sum,n)=>sum+n.gain.value,0)).toBeCloseTo(Math.sqrt(.1),2);expect(Math.min(...taps.map(n=>n.gain.value))).toBeLessThan(.1);
   expect(sopra.busGraph.getOutput('effects').connections).toContain(audio.acoustics.reverb.input);
   expect(sopra.busGraph.getOutput('ambient').connections).not.toContain(audio.acoustics.reverb.input);
   const convolved=nodes.filter(n=>n.kind==='convolver'&&n.buffer);expect(convolved.length).toBeGreaterThan(0);expect(convolved.every(n=>n.buffer.duration<=2.05)).toBe(true);

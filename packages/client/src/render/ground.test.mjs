@@ -2,11 +2,8 @@ import {expect,test,vi} from 'vitest';
 import {WorldGround} from './ground.mjs';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {WORLD_BOUNDS} from '@old-circle/game/world/regions.mjs';
-import {row_of_entity} from '@woosh/meep-engine/src/shade/renderer/scene/rows/GPUSceneRows.js';
-
-// Sampling and native row packing need no terrain render pass or GPU device.
-vi.mock('@woosh/meep-engine/src/engine/graphics3/TerrainSystem.js',()=>({TerrainExtension:class{}}));
-vi.mock('@woosh/meep-engine/src/engine/graphics3/terrain/GPUTerrainSplatRenderer.js',()=>({GPUTerrainSplatRenderer:class{}}));
+import {TerrainShadeMaterial} from '@woosh/meep-engine/src/engine/graphics3/terrain/TerrainShadeMaterial.js';
+import {buildLayout} from '@old-circle/game/world/layout.mjs';
 
 function ground(layers,width=1,height=1){
   const result=new WorldGround();result.manifest={layers:Object.keys(layers),width,height};
@@ -16,20 +13,63 @@ function ground(layers,width=1,height=1){
 const point=(u=.5,v=.5)=>[WORLD_BOUNDS.minX+u*WORLD_BOUNDS.width,WORLD_BOUNDS.minZ+v*WORLD_BOUNDS.depth];
 const sample=g=>g.surfaceMixAt(...point());
 
-test('terrain recording resolves current entity rows and excludes removed tiles',()=>{
-  const g=new WorldGround(),draws=[];
-  let entities=[2,9];
-  g.getEntities=()=>entities;g.rows=new Uint32Array(0);g.data={layer_count:1};
-  g.pass={graph_draw:args=>draws.push({...args,rows:Array.from(args.rows.subarray(0,args.row_count))})};
-  const frame={};g.record(frame);
-  expect(draws[0].frame).toBe(frame);expect(draws[0].row_count).toBe(row_of_entity(9)+1);
-  expect(draws[0].rows.flatMap((value,row)=>value?[row]:[])).toEqual([row_of_entity(2),row_of_entity(9)]);
-  const table=g.rows;entities=[5];g.record(frame);
-  expect(g.rows).toBe(table);expect(draws[1].row_count).toBe(row_of_entity(5)+1);
-  expect(draws[1].rows.flatMap((value,row)=>value?[row]:[])).toEqual([row_of_entity(5)]);
-  entities.length=0;g.record(frame);expect(draws).toHaveLength(2);
-  entities.push(12);g.record(frame);
-  expect(draws[2].rows.flatMap((value,row)=>value?[row]:[])).toEqual([row_of_entity(12)]);
+test('terrain material packs authored layers and shares the gameplay weight map origin',async()=>{
+  const manifest={layers:['meadow','desert','magic','road'],width:1,height:1,layerSize:1,tileMetres:[2,4,8,16]};
+  const images=new Map(manifest.layers.map((name,i)=>[name,Uint8ClampedArray.from([10+i,20+i,30+i,255])]));
+  images.set('weights-0',Uint8ClampedArray.from([40,30,20,255]));images.set('weights-1',Uint8ClampedArray.from([10,0,0,255]));images.set('weights-2',new Uint8ClampedArray(4));
+  vi.stubGlobal('fetch',async url=>({ok:true,json:async()=>manifest,blob:async()=>({width:1,height:1,data:images.get(url.split('/').at(-1).replace('.png','')),close(){}})}));
+  vi.stubGlobal('createImageBitmap',async image=>image);
+  vi.stubGlobal('OffscreenCanvas',class{getContext(){let image;return {drawImage(value){image=value;},getImageData(){return image;}};}});
+  try{
+    const g=new WorldGround(),material=g.material;await g.start();
+    expect(g.material).toBe(material);expect(material).toBeInstanceOf(TerrainShadeMaterial);
+    expect(Array.from(material.weights.data)).toEqual([40,30,20,10]);
+    expect(Array.from(material.layers.data)).toEqual(manifest.layers.flatMap(name=>Array.from(images.get(name))));
+    expect(material.layer_count).toBe(4);expect(material.layer_scales_version).toBeGreaterThan(0);expect(material.version).toBeGreaterThan(0);
+    const uniform=material.template.uniform_value(material),{minX,minZ,width,depth}=WORLD_BOUNDS;
+    for(const [x,z,u,v] of [[minX,minZ,0,0],[minX+width/2,minZ+depth/2,.5,.5],[minX+width,minZ+depth,1,1]]){
+      expect((x-uniform.grid_transform[2])*uniform.inv_world_size[0]).toBeCloseTo(u,6);
+      expect((z-uniform.grid_transform[3])*uniform.inv_world_size[1]).toBeCloseTo(v,6);
+    }
+    expect(Array.from(material.layer_scales)).toEqual(manifest.tileMetres.flatMap(size=>[width/size,depth/size]));
+    expect(sample(g)).toEqual([{surface:'grass',weight:4/7},{surface:'sand',weight:3/7}]);
+  }finally{vi.unstubAllGlobals();}
+});
+
+test('authored terrain placements preserve the material geometry-space mapping',()=>{
+  const tiles=buildLayout().props.filter(p=>p.model.startsWith('terrain_'));expect(tiles.length).toBeGreaterThan(0);
+  for(const tile of tiles){expect(tile.position).toEqual([0,0,0]);expect(tile.scale).toEqual([1,1,1]);expect(tile.yaw).toBe(0);}
+});
+
+test('terrain binds the authored normal map alongside native splat textures',async()=>{
+  const [{SoftwareGPUDevice},{TextureManager},{GPUSamplerManager},{ShadeImage},{ShadeTexture},{ColorSpace},{sampler_descriptor_from_shade_texture}]=await Promise.all([
+    import('@woosh/meep-engine/src/shade/device/mock/SoftwareGPUDevice.js'),
+    import('@woosh/meep-engine/src/shade/renderer/texture/TextureManager.js'),
+    import('@woosh/meep-engine/src/shade/renderer/GPUSamplerManager.js'),
+    import('@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js'),
+    import('@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js'),
+    import('@woosh/meep-engine/src/shade/renderer/texture/ColorSpace.js'),
+    import('@woosh/meep-engine/src/shade/renderer/texture/sampler_descriptor_from_shade_texture.js'),
+  ]);
+  vi.stubGlobal('GPUBufferUsage',{MAP_READ:1,MAP_WRITE:2,COPY_SRC:4,COPY_DST:8,INDEX:16,VERTEX:32,UNIFORM:64,STORAGE:128,INDIRECT:256,QUERY_RESOLVE:512});
+  vi.stubGlobal('GPUTextureUsage',{COPY_SRC:1,COPY_DST:2,TEXTURE_BINDING:4,STORAGE_BINDING:8,RENDER_ATTACHMENT:16});
+  const device=new SoftwareGPUDevice(),textures=new TextureManager(device),samplers=new GPUSamplerManager(device),material=new WorldGround().material;
+  const pixels=Sampler2D.uint8(4,1,1);pixels.data.set([160,128,251,255]);
+  const image=ShadeImage.fromSampler2D(pixels);image.color_space=ColorSpace.None;material.texture_normal=ShadeTexture.from(image);
+  const template=material.template,ctx={source:material,textures:new Map(),state:null,uniform_buffer:device.createBuffer({size:template.uniform_type.size,usage:GPUBufferUsage.UNIFORM})};
+  const services={device,textures,samplers};
+  try{
+    template.build(ctx,services);
+    const layout=device.createBindGroupLayout(template.resources.generateBindGroupLayoutDescriptor());
+    const group=template.create_bind_group(ctx,layout,services);expect(group.isValid).toBe(true);
+    const binding=name=>group.entries.find(entry=>entry.binding===template.resources.resources.find(resource=>resource.name===name).binding_index).resource;
+    const normal=textures.obtain(material.texture_normal);
+    expect(normal.descriptor.format).toBe('rgba8unorm');expect(binding('texture_normal')).toBe(normal.obtainView());
+    expect(binding('texture_normal_sampler')).toBe(samplers.obtain(sampler_descriptor_from_shade_texture(material.texture_normal)));
+    expect(binding('splat_weights').texture).toBe(ctx.state.weights.texture.gpu_texture);
+    expect(binding('layer_diffuse').texture).toBe(ctx.state.layers.texture.gpu_texture);
+    expect(template.update(ctx,services)).toBe(false);
+  }finally{template.destroy(ctx,services);ctx.uniform_buffer.destroy();textures.destroy();vi.unstubAllGlobals();}
 });
 
 test('bilinear splat sampling blends both axes at texel centres',()=>{

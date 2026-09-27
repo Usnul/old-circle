@@ -1,4 +1,4 @@
-import {expect,test} from 'vitest';
+import {expect,test,vi} from 'vitest';
 import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {Trail3DSystem} from '@woosh/meep-engine/src/engine/graphics3/Trail3DSystem.js';
@@ -7,8 +7,11 @@ import {CombatTrails} from './combat-trails.mjs';
 import {GameWorld} from '@old-circle/game/simulation/world.mjs';
 import {weaponPose} from '@old-circle/game/simulation/weapon-pose.mjs';
 
+// The native trail shader now reads the browser's WebGPU stage constants at import.
+vi.hoisted(()=>vi.stubGlobal('GPUShaderStage',{VERTEX:1,FRAGMENT:2,COMPUTE:4}));
+
 test('native trails follow the presented blade, fade outside damage windows, and clear across authority changes',async()=>{
-  const em=new EntityManager(),ecd=new EntityComponentDataset(),system=new Trail3DSystem({add_extension:e=>e,remove_extension:()=>{}});em.addSystem(system);em.attachDataset(ecd);
+  const em=new EntityManager(),ecd=new EntityComponentDataset(),system=new Trail3DSystem({add_transparency_channel:e=>e,remove_transparency_channel:()=>{}});em.addSystem(system);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));const world=await new GameWorld().start({populate:false,navigation:false}),p=world.addPlayer('you');
   const trails=new CombatTrails({ecd});
   try{

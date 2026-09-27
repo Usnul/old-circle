@@ -22,14 +22,10 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
-import {row_of_entity} from '@woosh/meep-engine/src/shade/renderer/scene/rows/GPUSceneRows.js';
+import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import {BVH} from '@woosh/meep-engine/src/core/bvh2/bvh3/BVH.js';
 import {ebvh_build_for_geometry_morton} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_build_for_geometry_morton.js';
 import {ebvh_geometry_query_nearest_triangle_ray} from '@woosh/meep-engine/src/core/bvh2/bvh3/ebvh_geometry_query_nearest_triangle_ray.js';
-
-// Exercise terrain row selection without initializing a GPU render pass.
-vi.mock('@woosh/meep-engine/src/engine/graphics3/TerrainSystem.js',()=>({TerrainExtension:class{}}));
-vi.mock('@woosh/meep-engine/src/engine/graphics3/terrain/GPUTerrainSplatRenderer.js',()=>({GPUTerrainSplatRenderer:class{}}));
 
 const base=new URL('../../public/assets/geometry/',import.meta.url),manifest=JSON.parse(await readFile(new URL('manifest.json',base),'utf8'));
 const materials=Object.fromEntries(Object.values(manifest.models).flat().map(c=>[c.material,{name:c.material}]));
@@ -369,7 +365,8 @@ test('detaching scenery consumers preserves authored components and reattaches n
 
 test('LOD loading preserves the live placement and keeps the old surface until its replacement is available', async () => {
   const prop = {model: 'terrain_0_0', position: [0, 0, 0], scale: [1, 1, 1], yaw: 0};
-  const store = new ModelStore({manifest, materials, read, residentCache: true});
+  const ground = new WorldGround();
+  const store = new ModelStore({manifest, materials: {...materials, landscape: ground.material}, read, residentCache: true});
   const {stream, ecd, em, meshSystem} = await startStream(prop, store);
   try {
     const record = stream.records[0];
@@ -380,20 +377,12 @@ test('LOD loading preserves the live placement and keeps the old surface until i
     const firstInstance = meshSystem.instance_of(root);
     expect(entities).toHaveLength(1);
     const first = entities[0];
-    const ground = new WorldGround();
-    ground.getEntities = () => stream.rebuildGround();
-    ground.rows = new Uint32Array(0);
-    ground.data = {};
-    let renderedRows = [];
-    ground.pass = {graph_draw({rows, row_count}) {
-      renderedRows = Array.from(rows.subarray(0, row_count)).flatMap((value, row) => value ? [row] : []);
-    }};
-    const packedRows = () => {
-      renderedRows = [];
-      ground.record({});
-      return renderedRows;
+    const texturedEntities = () => {
+      const children = [...meshSystem.mesh_entities_of(root)];
+      for (const child of children) expect(ecd.getComponent(child, ShadedGeometry).material).toBe(ground.material);
+      return children;
     };
-    expect(packedRows()).toEqual([row_of_entity(first)]);
+    expect(texturedEntities()).toEqual([first]);
 
     const far = {x: 400, y: 20, z: 400};
     stream.updateView(far, .1);
@@ -402,21 +391,20 @@ test('LOD loading preserves the live placement and keeps the old surface until i
     await Promise.all(stream.loading.values());
     stream.updateView(far, .1);
     await new Promise(resolve => setTimeout(resolve, 0));
-    // The native children arrive between presentation updates. Rendering must
-    // discover them without another updateView or an explicit terrain rebuild.
-    expect(packedRows()).toEqual([...meshSystem.mesh_entities_of(root)].map(row_of_entity));
+    // Native children carry the material even when a LOD attaches between updates.
+    expect(texturedEntities()).toHaveLength(1);
     expect(meshSystem.instance_of(root)).not.toBe(firstInstance);
     expect(ecd.getComponent(root, SGMesh).url).toBe(manifest.lods[prop.model]);
     expect(ecd.getComponent(root, Transform64)).toBe(transform);
     expect(ecd.getComponent(root, Scenery)).toBe(scenery);
     expect(record.entity).toBe(root);
     expect(stream.groundEntities).toBe(entities);
-    expect(entities).toHaveLength(1);
-    expect(packedRows()).toEqual([row_of_entity(entities[0])]);
+    stream.rebuildGround();expect(entities).toHaveLength(1);
+    expect(texturedEntities()).toEqual([...entities]);
     for (let i = 0; i < 60; i++) stream.updateView(far, .1);
     expect(store.models.has(prop.model)).toBe(false);
     stream.replace(record, null);
-    expect(packedRows()).toEqual([]);
+    expect(texturedEntities()).toEqual([]);stream.rebuildGround();
     expect(entities).toEqual([]);
     expect(ecd.entityExists(root)).toBe(true);
     expect(ecd.getComponent(root, Transform64)).toBe(transform);

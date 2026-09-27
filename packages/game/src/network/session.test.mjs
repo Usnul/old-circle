@@ -9,6 +9,23 @@ import {castBossMove} from '../simulation/boss-attacks.mjs';
 import {RELICS} from '../content/relics.mjs';
 import {INTEREST} from './interest.mjs';
 
+test('batched initial snapshots keep the acknowledged baseline on the snapshot actually installed',async()=>{
+  const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
+  try{
+    for(let i=0;i<6;i++)host.tick();
+    client.localNetworkId=host.addPlayer(1,'batched-join');
+    const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
+    const syncs=[];client.net.peer.onInitialSync.add((_peer,_token,frame)=>syncs.push(frame));
+    // A busy browser can receive both initial-sync copies in one event-loop turn.
+    host.tick();host.tick();b.deliver_all();client.tick();a.deliver_all();
+    expect(syncs).toHaveLength(2);expect(syncs[1]).toBeGreaterThan(syncs[0]);
+    const joined=client.presentation().tick;
+    for(let i=0;i<18;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}
+    expect(client.failure).toBeUndefined();expect(client.presentation().tick).toBeGreaterThan(joined+20);
+    expect(client.localCharacter().actor.id).toBe('batched-join');
+  }finally{await client.stop();await host.stop();}
+});
+
 test('malformed client input cannot poison rollback state and peers cannot replace owned character components',async()=>{
   const host=await new SharedSession('host').start(),client=await new SharedSession('client',1).start();
   try{
@@ -40,6 +57,8 @@ test('an invalid replicated world baseline stops prediction so the Worker can re
     for(let i=0;i<18;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}
     client.net.normalize_if_dirty();client.worldFrame().snapshot.tick-=2;
     host.tick();b.deliver_all();
+    // Meep applies received packets at the next fixed step, not on delivery.
+    expect(()=>client.tick()).toThrow('World history gap');
     expect(client.failure?.message).toContain('World history gap');expect(report).toHaveBeenCalled();
     expect(()=>client.tick()).toThrow('World history gap');
     expect(()=>client.presentation()).toThrow('World history gap');
@@ -182,7 +201,7 @@ test('late combat input corrects already-published enemy health after server rep
     client.localInput.buttons=16;client.tick();client.localInput.buttons=0;
     // Keep the input in flight while the host publishes those frames.
     for(let i=0;i<12;i++){host.tick();b.deliver_all();client.tick();}
-    a.deliver_all();host.tick();b.deliver_all();
+    a.deliver_all();host.tick();b.deliver_all();client.tick();
     expect(host.sim.actor(victim.id).hp).toBeLessThan(hp);
     expect(client.worldFrame().snapshot.actors.find(a=>a.id===victim.id).hp).toBe(host.sim.actor(victim.id).hp);
   }finally{await client.stop();await host.stop();}

@@ -112,7 +112,7 @@ export class WorldView {
     }
     this.materials.path=new StandardShadeMaterial();this.materials.path.diffuse_color.set(.28,.29,.23);
     this.materials.glassLeaf=new StandardShadeMaterial();this.materials.glassLeaf.diffuse_color.set(.12,.23,.27);
-    this.materials.landscape=new StandardShadeMaterial();this.materials.landscape.roughness_factor=1;
+    this.ground=new WorldGround();await this.ground.start();this.materials.landscape=this.ground.material;
     this.materials.cloak=new StandardShadeMaterial();
     this.materials.limestone=new StandardShadeMaterial();
     this.sky=new WorldSky();
@@ -154,8 +154,6 @@ export class WorldView {
     this.streaming.rebuildGround();
     await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.ground = new WorldGround();
-    await this.ground.start(this.engine.graphics, () => this.streaming.rebuildGround());
     this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);

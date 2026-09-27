@@ -41,7 +41,7 @@ export async function startServer({port=Number(process.env.PORT??8787),address=p
         if(hello.protocol!==PROTOCOL_VERSION||typeof hello.playerId!=='string'||!/^[a-zA-Z0-9-]{8,80}$/.test(hello.playerId))throw new Error('Incompatible join');
         const prior=joins.get(hello.playerId);
         if(joins.size>=maxPlayers&&!prior)throw new Error('World is full');
-        let peerId=1;while(reservedPeers.has(peerId)&&peerId<=253)peerId++;if(peerId>253)throw new Error('World is full');reservedPeers.add(peerId);
+        let peerId=1;while(reservedPeers.has(peerId)&&peerId<=252)peerId++;if(peerId>252)throw new Error('World is full');reservedPeers.add(peerId);
         info={peerId,playerId:hello.playerId};
         // Loading clients already own a reservation. Replace them as well as
         // ready peers, and prevent their delayed ready packet importing a save.

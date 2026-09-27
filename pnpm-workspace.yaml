@@ -4,4 +4,4 @@ allowBuilds:
   esbuild: true
   '@parcel/watcher': true
 minimumReleaseAgeExclude:
-  - '@woosh/meep-engine@3.26.0'
+  - '@woosh/meep-engine@3.32.0'
