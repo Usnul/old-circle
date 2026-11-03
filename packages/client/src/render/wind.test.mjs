@@ -5,10 +5,11 @@ import {WorldWind} from './wind.mjs';
 import {WorldCloth} from './cloth.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 import {WorkerFluidSystem} from '@woosh/meep-engine/src/engine/physics/fluid/ecs/WorkerFluidSystem.js';
+import {FluidEffectorsSystem} from '@woosh/meep-engine/src/engine/physics/fluid/ecs/FluidEffectorsSystem.js';
 import {fluidWorker,stepWorker} from './worker-test-helpers.mjs';
 
 test('native wind follows travel and remains bounded after a distant relocation',async()=>{
-  const em=new EntityManager(),ecd=new EntityComponentDataset(),wind=new WorldWind({worker_factory:fluidWorker});em.addSystem(wind);em.attachDataset(ecd);
+  const em=new EntityManager(),ecd=new EntityComponentDataset(),wind=new WorldWind({worker_factory:fluidWorker});em.addSystem(new FluidEffectorsSystem());em.addSystem(wind);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));wind.attach(ecd);
   try{
     for(const [x,z] of [[0,23],[7,20],[95,-250]]){
@@ -23,7 +24,7 @@ test('native wind follows travel and remains bounded after a distant relocation'
 });
 
 test('native cloth wind converts fluid cells to metres and uses ambient wind outside disabled fields',async()=>{
-  const em=new EntityManager(),ecd=new EntityComponentDataset(),wind=new WorldWind({worker_factory:fluidWorker});em.addSystem(wind);em.attachDataset(ecd);
+  const em=new EntityManager(),ecd=new EntityComponentDataset(),wind=new WorldWind({worker_factory:fluidWorker});em.addSystem(new FluidEffectorsSystem());em.addSystem(wind);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));wind.attach(ecd);
   try{
     const source=new WorldCloth(wind).wind,out=new Float64Array(3),c=wind.fluid;
@@ -42,7 +43,7 @@ test('native cloth wind converts fluid cells to metres and uses ambient wind out
 
 test('worker wind publishes completed velocities and placement without exposing an outstanding solve',async()=>{
   const worker=fluidWorker(),wind=new WorldWind({worker_factory:()=>worker});
-  const em=new EntityManager(),ecd=new EntityComponentDataset();em.addSystem(wind);em.attachDataset(ecd);
+  const em=new EntityManager(),ecd=new EntityComponentDataset();em.addSystem(new FluidEffectorsSystem());em.addSystem(wind);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));wind.attach(ecd);
   try{
     expect(wind).toBeInstanceOf(WorkerFluidSystem);expect(wind.fluid.field.isSharedMemory()).toBe(true);
@@ -56,7 +57,7 @@ test('worker wind publishes completed velocities and placement without exposing 
     expect(wind.published.field.velocity_x).toEqual(published);
     expect(Array.from(wind.sample([0,0,0],...point))).toEqual(velocity);
     expect(Array.from(cloth.wind.sample(new Float64Array(3),...point))).toEqual(velocity);
-    const tick=em.fixedStepTick;em.simulate(1/60);expect(em.fixedStepTick).toBe(tick);
+    const tick=em.fixedStepTick;em.simulate(em.fixedUpdateStepSize);expect(em.fixedStepTick).toBe(tick);
     worker.host.runPendingStep();
     // Disabling the field must still join its last solve on the next tick.
     wind.fluid.enabled=false;em.simulate(0);

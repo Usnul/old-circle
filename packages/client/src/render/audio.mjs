@@ -65,7 +65,7 @@ export class WorldAudio {
     if(voice){voice.setGainDb(description.gainDb+(actor.crouch?-9:Math.hypot(actor.vx,actor.vz)>4?2:0)+(actor.boss?3:0)+(local?0:-3));this.footVoices.push({until:now+.6,local});}
   }
   update(snapshot,player,dt){
-    if(!player)return;const listener=new Vector3(player.x,player.y+.65,player.z);this.sopra.listenerPosition=listener;
+    if(!player)return;const listener=new Vector3(player.x,player.y+.65,player.z);this.sopra.setListener(listener);
     if(this.lastSnapshot!==snapshot){
       if(snapshot.presentationEpoch!==this.presentationEpoch){
         this.playedEvents.clear();

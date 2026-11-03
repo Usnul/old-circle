@@ -108,7 +108,7 @@ test.each(drops)('$weapon drops independently of the skeleton (boss: $boss, grou
   expect(dropped.position[1]).toBeLessThan(start.weaponPose.position[1]-.2);
   const q=new Quaternion();q.set(...body.t.rotation);q.conjugate();
   const down=new Vector3(0,-1,0).applyQuaternion(q),lowest=new Vector3();
-  sim.world.ecd.getComponent(body.id,Collider).shape.support(lowest,0,...down);lowest.applyMatrix4(body.t);
+  sim.world.ecd.getComponent(body.id,Collider).shape.support(lowest,0,down,0);lowest.applyMatrix4(body.t);
   expect(lowest.y).toBeGreaterThan(heightAt(lowest.x,lowest.z)-.1);
   // Moving the arm after the drop cannot pull the released weapon with it.
   const hand=record.bodies.get(record.data.bones.findIndex(b=>b.name==='handR'));

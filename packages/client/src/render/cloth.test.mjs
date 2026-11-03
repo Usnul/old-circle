@@ -8,12 +8,17 @@ import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityCo
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
+import {PosePlayback} from '@woosh/meep-engine/src/shade/renderer/animation/pose/PosePlayback.js';
 import {TransformAttachment} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachment.js';
 import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TransformAttachmentSystem.js';
 import {TRANSFORM_ATTACHMENT_EVENT_CHANGE} from '@woosh/meep-engine/src/engine/ecs/transform-attachment/TRANSFORM_ATTACHMENT_EVENT_CHANGE.js';
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
 import {prefab_instantiate} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_instantiate.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
+import {AnimationClips} from '@woosh/meep-engine/src/engine/graphics3/animation/AnimationClips.js';
+import {GPUStateAuthorityFlags} from '@woosh/meep-engine/src/engine/ecs/gpu/GPUStateAuthorityFlags.js';
+import {gpu_authority_grant} from '@woosh/meep-engine/src/engine/ecs/gpu/gpu_authority_grant.js';
+import {MeshSkin} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/MeshSkin.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {MeshletGeometry} from '@woosh/meep-engine/src/shade/renderer/geometry/MeshletGeometry.js';
@@ -37,28 +42,31 @@ import {clothWorker,stepWorker} from './worker-test-helpers.mjs';
 async function garment(name,run,{scale=1,yaw=0}={}){
   const em=new EntityManager(),ecd=new EntityComponentDataset(),attachments=new TransformAttachmentSystem();
   let worker;
-  const wind=[0,0,0],system=new WorldCloth({sample:out=>{out.set(wind);return out;},varies:()=>false},{worker_factory:()=>worker=clothWorker()}),models=new Map();
-  system.models={instance_of:id=>models.get(id)??null};
+  const wind=[0,0,0],system=new WorldCloth({sample:out=>{out.set(wind);return out;},varies:()=>false},{worker_factory:()=>worker=clothWorker()});
   // Exercise the native pose evaluator with authored, retargeted playbacks;
   // GPU publication itself is covered by characters.test.mjs.
-  const playbacks=[],animations=new AnimationSystem({},{});
+  const playbacks=[],animations=new AnimationSystem({},{isScene:true});
   animations.write_pose_playbacks=target=>{target.push(...playbacks);return playbacks.length>0;};
   em.addSystem(animations);em.addSystem(attachments);em.addSystem(new ClothColliderSystem());em.addSystem(system);em.attachDataset(ecd);
   await new Promise((resolve,reject)=>em.startup(resolve,reject));
   try{
     const skeleton=createSkeleton(name);unkeyCloth(skeleton);
-    skeleton.bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes:[]})];
+    const bind=Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind));
+    skeleton.bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:bind})];
     const t=new Transform64();t.setScale(scale,scale,scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();
-    const prefab=prefab_compile(skeleton.bundle),id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab,ecd,id);models.set(id,model);
+    const prefab=prefab_compile(skeleton.bundle),id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab,ecd,id);
+    ecd.addComponentToEntity(id,MeshSkin.from(Int32Array.from(skeleton.data.bones.map(b=>model.entity_of(b.name))),bind));
     const components=clothComponents(name);for(const component of components)ecd.addComponentToEntity(id,component);
-    const joints=Object.fromEntries(skeleton.data.bones.map((b,i)=>[b.name,model.skins[0].joints[i]]));
+    const joints=Object.fromEntries(skeleton.data.bones.map((b,i)=>[b.name,ecd.getComponent(id,MeshSkin).joints[i]]));
     const step=(count=1)=>{for(let i=0;i<count;i++){stepWorker(system);attachments.update(1/60);}};
     const pose=name=>t64_evaluate_world(new Transform64(),ecd,joints[name],playbacks);
-    const play=(name,time)=>{const clip=model.clips.find(c=>c.name===name);expect(clip,name).toBeDefined();playbacks.splice(0,playbacks.length,{clip,time,weight:1});};
+    const animationClips=ecd.getComponent(id,AnimationClips);
+    animationClips.write_pose_playbacks=target=>{target.push(...playbacks);return playbacks.length>0;};
+    const play=(name,time)=>{const clip=animationClips.clips.find(c=>c.name===name);expect(clip,name).toBeDefined();for(const j of Object.values(joints))gpu_authority_grant(ecd,j,GPUStateAuthorityFlags.Transform64);playbacks.splice(0,playbacks.length,PosePlayback.from(clip,time,1));};
     // The seed is registered on the first tick and solved after its acknowledgement.
     step(2);expect(system.instances[0].seeded).toBe(true);expect(system.instances[0].refused).toBe(false);
     expect(system.instances[0].state.isSharedMemory()).toBe(true);
-    await run({ecd,system,id,t,wind,joints,step,pose,play,prefab,models,worker,cloth:components.find(c=>c instanceof Cloth)});
+    await run({ecd,system,id,t,wind,joints,step,pose,play,prefab,bind,skeleton,worker,cloth:components.find(c=>c instanceof Cloth)});
   }finally{
     await new Promise((resolve,reject)=>em.shutdown(resolve,reject));
     expect(worker.terminated).toBe(true);expect(system.bodies.size).toBe(0);
@@ -206,7 +214,7 @@ test.each([1,1.85])('native cloak stays on its animated shoulder at scale %s',as
       shoulder.transform.setRotation(0,0,Math.sin(Math.sin(i*.025)*.12),Math.cos(Math.sin(i*.025)*.12));shoulder.transform.updateMatrix();ecd.sendEvent(joints.chest,TRANSFORM_ATTACHMENT_EVENT_CHANGE);
       step();
       expect(Array.from(top.transform)).toEqual(bindTop);
-      expect(distance(translation(pose('cloak1')),Array.from(system.instances[0].anchor_translation))).toBeLessThan(.00001);
+      expect(distance(translation(pose('cloak1')),Array.from(system.instances[0].frame_translation))).toBeLessThan(.00001);
       expect(distance(translation(pose('cloak1')),translation(pose('cloak3')))).toBeLessThan(scale*1.2);
       bounded(system.instances[0]);
     }
@@ -219,12 +227,12 @@ test('teleport and pooled removal/re-add reset native cloth without carrying sta
     t.setTranslation(400,12,-300);t.updateMatrix();t64_announce_change(ecd,id);step();
     expect(previous.teleport_count).toBe(1);bounded(previous);
     expect(Array.from(previous.state.velocity).every(value=>value===0)).toBe(true);
-    expect(distance(translation(pose('cloth0')),Array.from(previous.anchor_translation))).toBeLessThan(.00001);
+    expect(distance(translation(pose('cloth0')),Array.from(previous.frame_translation))).toBeLessThan(.00001);
     ecd.removeComponentFromEntity(id,Cloth);expect(system.instances).toHaveLength(0);
     t.setTranslation(-200,0,40);t.updateMatrix();t64_announce_change(ecd,id);step(30);
     wind.fill(0);ecd.addComponentToEntity(id,cloth);step(2);const restored=system.instances[0];
     expect(restored).not.toBe(previous);expect(restored.seeded).toBe(true);expect(restored.teleport_count).toBe(0);bounded(restored);
-    expect(distance(translation(pose('cloth0')),Array.from(restored.anchor_translation))).toBeLessThan(.00001);
+    expect(distance(translation(pose('cloth0')),Array.from(restored.frame_translation))).toBeLessThan(.00001);
     const fresh=Array.from(restored.state.position);step(180);bounded(restored);
     expect(distance(fresh,Array.from(restored.state.position))).toBeLessThan(.1);
   });
@@ -234,7 +242,7 @@ test('cape cloth resolves five strips from shoulder to hem instead of bending as
   await garment('pilgrim',({system,wind,step,pose})=>{
     const instance=system.instances[0],{proxy}=clothComponents('pilgrim')[0];
     expect(instance.state.particle_count).toBe(41);
-    expect(Array.from(proxy.joint_parent).filter(parent=>parent===-1)).toHaveLength(5);
+    expect(Array.from(proxy.parent).filter(parent=>parent===0)).toHaveLength(5);
     const top=Array.from(pose('cloak1'));
     const left=translation(pose('cloak37')),right=translation(pose('cloak41'));
     expect(right[0]-left[0]).toBeGreaterThan(.5);
@@ -247,10 +255,11 @@ test('cape cloth resolves five strips from shoulder to hem instead of bending as
 });
 
 test('worker cloth advances the full actor and banner budget beyond the engine default of 32',async()=>{
-  await garment('votiveBanner',({ecd,system,wind,step,prefab,models})=>{
+  await garment('votiveBanner',({ecd,system,wind,step,prefab,bind,skeleton})=>{
     for(let i=1;i<104;i++){
       const t=new Transform64();t.setTranslation(i*4,0,0);t.updateMatrix();
-      const id=new Entity().add(t).build(ecd);models.set(id,prefab_instantiate(prefab,ecd,id));
+      const id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab,ecd,id);
+      ecd.addComponentToEntity(id,MeshSkin.from(Int32Array.from(skeleton.data.bones.map(b=>model.entity_of(b.name))),bind));
       for(const component of clothComponents('votiveBanner'))ecd.addComponentToEntity(id,component);
     }
     step(2);expect(system.instances).toHaveLength(104);

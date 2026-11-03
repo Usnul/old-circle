@@ -1,5 +1,6 @@
 import {expect,test,vi} from 'vitest';
 import {LoopbackTransport} from '@woosh/meep-engine/src/engine/network/transport/LoopbackTransport.js';
+import {InitialSyncPage} from '@woosh/meep-engine/src/engine/network/orchestrator/NetworkPeer.js';
 import {CharacterFrame,SharedSession} from './session.mjs';
 import {GameWorld} from '../simulation/world.mjs';
 import {heightAt} from '../world/regions.mjs';
@@ -15,10 +16,10 @@ test('batched initial snapshots keep the acknowledged baseline on the snapshot a
     for(let i=0;i<6;i++)host.tick();
     client.localNetworkId=host.addPlayer(1,'batched-join');
     const a=new LoopbackTransport(),b=new LoopbackTransport();LoopbackTransport.bind_pair(a,b);host.connect(1,a);client.connect(0,b);
-    const syncs=[];client.net.peer.onInitialSync.add((_peer,_token,frame)=>syncs.push(frame));
-    // A busy browser can receive both initial-sync copies in one event-loop turn.
+    const syncs=[];client.net.peer.onInitialSync.add((_peer,_token,frame,flags)=>syncs.push({frame,flags}));
+    // A busy browser can receive both initial-sync pages in one event-loop turn.
     host.tick();host.tick();b.deliver_all();client.tick();a.deliver_all();
-    expect(syncs).toHaveLength(2);expect(syncs[1]).toBeGreaterThan(syncs[0]);
+    expect(syncs).toHaveLength(2);expect(syncs[0].flags).toBe(InitialSyncPage.FIRST);expect(syncs[1].flags).toBe(InitialSyncPage.FINAL);expect(syncs[1].frame).toBeGreaterThanOrEqual(syncs[0].frame);
     const joined=client.presentation().tick;
     for(let i=0;i<18;i++){host.tick();b.deliver_all();client.tick();a.deliver_all();}
     expect(client.failure).toBeUndefined();expect(client.presentation().tick).toBeGreaterThan(joined+20);

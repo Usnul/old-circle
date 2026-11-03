@@ -259,10 +259,10 @@ export class GameWorld {
     if(!collider){const c=new Collider(),scale=a.boss?1.5:1;c.shape=CapsuleShape3D.from(.32*scale,(a.crouch?.35:1.05)*scale);c.friction=0;this.ecd.addComponentToEntity(e,c);}
   }
   sweepContact(radius,direction){
-    const normal=Array.from(this.hit.normal),convex=this.ecd.getComponent(this.hit.entity,Collider)?.shape.is_convex!==false;
-    // Native convex sweeps report the moving sphere's centre at contact;
-    // the concave fallback reports a surface ray hit already on the geometry.
-    return {position:Array.from(this.hit.position,(value,i)=>value-(convex?normal[i]*radius:0)),normal,direction:Array.from(direction)};
+    const normal=Array.from(this.hit.normal);
+    // Native shape sweeps report the moving sphere's centre at contact;
+    // step back along the contact normal to place the hit on the struck surface.
+    return {position:Array.from(this.hit.position,(value,i)=>value-normal[i]*radius),normal,direction:Array.from(direction)};
   }
   melee(a){
     const w=WEAPONS[a.weapon];if(w.style!=='melee'||a.attackKind==='nova'||a.attackKind==='ritual')return;

@@ -21,7 +21,8 @@ export const clothWorker=()=>worker(new ClothWorkerCore());
 export const fluidWorker=()=>worker(new FluidWorkerCore());
 
 export function stepWorker(system,dt=1/60){
-  system.entityManager.fixedStepTick++;
+  const em=system.entityManager;em.fixedStepTick++;
+  for(const s of em.systems)if(s!==system&&s.fixedUpdate)s.fixedUpdate(dt);
   system.fixedUpdate(dt);
   for(const facade of workers)facade.host.runPendingStep();
   // A zero-duration collection skips dispatch, exposing joined state to asserts.

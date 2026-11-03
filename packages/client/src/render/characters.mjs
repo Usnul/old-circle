@@ -2,6 +2,7 @@ import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {t64_announce_change} from '@woosh/meep-engine/src/engine/ecs/transform/t64_announce_change.js';
 import {SGMesh} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/aggregate/SGMesh.js';
+import {MeshSkin} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/MeshSkin.js';
 import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
 import {AnimationClip} from '@woosh/meep-engine/src/engine/ecs/animation/AnimationClip.js';
 import {SceneNode} from '@woosh/meep-engine/src/shade/renderer/loader/SceneNode.js';
@@ -220,8 +221,8 @@ export class Characters {
       for(const {id,t} of rig.weapon){t.setTranslation(...position);t.setRotation(...rotation);t.setScale(state.scale,state.scale,state.scale);t.updateMatrix();t64_announce_change(view.ecd,id);}
     }
     updateWeaponLight(view,rig,clamp01((45-state.age)/4));
-    const instance=view.meshSystem.instance_of(rig.id);if(!instance)return;
-    const skin=instance.skins[0],bones=rigs[state.name].bones,{ecd}=view;
+    const meshEntity=view.meshSystem.mesh_entities_of(rig.id)[0],skin=meshEntity!==undefined?view.ecd.getComponent(meshEntity,MeshSkin):null;if(!skin)return;
+    const bones=rigs[state.name].bones,{ecd}=view;
     if(!rig.corpseReady){
       // The clips gave the joints to the GPU and unregistering Animation took them back; physics
       // claims them here as well, so a clip still draining cannot keep a row it no longer drives.

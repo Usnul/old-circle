@@ -8,4 +8,5 @@ coverage/
 *.blend2
 __pycache__/
 *.log
+.idea/
 AGENTS.md

@@ -9,9 +9,11 @@ import {TransformAttachmentSystem} from '@woosh/meep-engine/src/engine/ecs/trans
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
 import {prefab_instantiate} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_instantiate.js';
 import {Skin} from '@woosh/meep-engine/src/shade/renderer/animation/Skin.js';
+import {MeshSkin} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/MeshSkin.js';
 import {createSkeleton} from '@old-circle/game/simulation/animation.mjs';
 import {WorldCloth,clothComponents,unkeyCloth} from './cloth.mjs';
 import {WorldWind} from './wind.mjs';
+import {FluidEffectorsSystem} from '@woosh/meep-engine/src/engine/physics/fluid/ecs/FluidEffectorsSystem.js';
 
 test('the default cloth and fluid factories boot real workers, solve together, and terminate',async()=>{
   const workers=[],errors=[];
@@ -33,16 +35,17 @@ test('the default cloth and fluid factories boot real workers, solve together, a
     terminate(){this.terminated=true;this.stopped=this.worker.terminate();}
   });
   const em=new EntityManager(),ecd=new EntityComponentDataset(),wind=new WorldWind(),cloth=new WorldCloth(wind);
-  em.addSystem(new TransformAttachmentSystem());em.addSystem(wind);em.addSystem(cloth);em.attachDataset(ecd);
+  em.addSystem(new TransformAttachmentSystem());em.addSystem(new FluidEffectorsSystem());em.addSystem(wind);em.addSystem(cloth);em.attachDataset(ecd);
   let started=false;
   try{
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
     wind.attach(ecd);wind.follow(0,10,23);
     const skeleton=createSkeleton('votiveBanner');unkeyCloth(skeleton);
-    skeleton.bundle.skins=[Skin.from({name:'votiveBanner',joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes:[]})];
+    const bind=Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind));
+    skeleton.bundle.skins=[Skin.from({name:'votiveBanner',joints:skeleton.joints,inverse_bind_matrices:bind})];
     const t=new Transform64();t.setTranslation(0,10,23);t.updateMatrix();
     const id=new Entity().add(t).build(ecd),model=prefab_instantiate(prefab_compile(skeleton.bundle),ecd,id);
-    cloth.models={instance_of:entity=>entity===id?model:null};
+    ecd.addComponentToEntity(id,MeshSkin.from(Int32Array.from(skeleton.data.bones.map(b=>model.entity_of(b.name))),bind));
     for(const component of clothComponents('votiveBanner'))ecd.addComponentToEntity(id,component);
     const deadline=performance.now()+5000;
     while((wind.last_joined_tick<12||cloth.last_joined_tick<12)&&performance.now()<deadline){

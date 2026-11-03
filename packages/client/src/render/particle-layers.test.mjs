@@ -72,7 +72,7 @@ test.each(profiles)('%s has finite native trajectories and a varied bounded life
     let killed=false,time=0;
     while(time<=profile.life+dt){
       const result=p.update(dt);time+=dt;
-      for(const [name,count] of [['position',3],['velocity',3],['color',4],['size',1],['rotation',1]])expect(p.read(name,count).every(Number.isFinite),name).toBe(true);
+      for(const [name,count] of [['position',3],['velocity',3],['color',4],['orientation',4],['size',1],['rotation',1]])expect(p.read(name,count).every(Number.isFinite),name).toBe(true);
       expect(p.read('size')[0]).toBeGreaterThan(0);
       if(result.killed){killed=true;expect(time).toBeGreaterThanOrEqual(life-.000001);expect(time).toBeLessThanOrEqual(life+dt+.000001);break;}
     }
@@ -97,7 +97,7 @@ test.each(profiles)('%s binds a shipped RGBA sprite and the native rendering att
   expect(!!(c.flags&EMITTER_FLAG.LIGHTING)).toBe(!!profile.alpha&&!profile.unlit);
   expect(!!(c.flags&EMITTER_FLAG.SOFT_DEPTH)).toBe(!kind.endsWith('flash'));
   expect(emitter_flags_projection(c.flags)).toBe(profile.vertical?EMITTER_PROJECTION.VERTICAL:profile.stretched?EMITTER_PROJECTION.STRETCHED:EMITTER_PROJECTION.BILLBOARD);
-  expect(c.render_velocity).toBe(c.layout.offsetOf('velocity'));expect(c.render_rotation).toBe(c.layout.offsetOf('rotation'));
+  expect(c.render_velocity).toBe(c.layout.offsetOf('velocity'));expect(c.render_orientation).toBe(c.layout.offsetOf('orientation'));
   const png=readFileSync(new URL('../../public'+c.texture,import.meta.url));
   expect(Array.from(png.subarray(0,8))).toEqual([137,80,78,71,13,10,26,10]);expect(png.toString('ascii',12,16)).toBe('IHDR');
   expect(png.readUInt32BE(16)).toBeGreaterThan(0);expect(png.readUInt32BE(20)).toBeGreaterThan(0);expect(png[24]).toBe(8);expect(png[25]).toBe(6);

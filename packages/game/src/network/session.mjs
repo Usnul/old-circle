@@ -5,7 +5,6 @@ import {HOST_VALUE_CORRECTION} from '@woosh/meep-engine/src/engine/network/corre
 import { NetworkIdentity } from '@woosh/meep-engine/src/engine/network/ecs/components/NetworkIdentity.js';
 import { BinarySerializationRegistry } from '@woosh/meep-engine/src/engine/ecs/storage/binary/BinarySerializationRegistry.js';
 import { SimAction } from '@woosh/meep-engine/src/engine/network/sim/SimAction.js';
-import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {FrameAdapter} from './frame-adapter.mjs';
 import {worldPatch,applyWorldPatch} from './world-patch.mjs';
 import { GameWorld,DT } from '../simulation/world.mjs';
@@ -14,8 +13,8 @@ import {armorIds} from '../content/equipment.mjs';
 import {charmIds} from '../content/charms.mjs';
 import {projectWorld,scopeInitialSnapshots} from './interest.mjs';
 
-// Meep 3.32 changes network frame markers and reserves peer 253 for recorded state.
-export const PROTOCOL_VERSION=11,NET_DT=1/30;
+// Meep 3.61 paged initial sync and QUIC-style connection framing.
+export const PROTOCOL_VERSION=12,NET_DT=1/30;
 export class WorldFrame {static typeName='OldCircleWorldFrame';recipient=0;snapshot={version:1,tick:0,time:17.2,actors:[],projectiles:[],events:[]};}
 export class CharacterFrame {static typeName='OldCircleCharacterFrame';actor=null;effects=[];intent={x:0,z:0,yaw:0,buttons:0};weapon=0;pvp=0;levelStat=0;sequence=0;armor=0;upgradeWeapon=0;charm=0;appliedSequence=0;}
 const weaponIds=Object.keys(WEAPONS),stats=['vigor','endurance','might','insight'];
@@ -82,7 +81,7 @@ export class SharedSession {
     this.role=role;this.peerId=peerId;this.em=new EntityManager();this.ecd=new EntityComponentDataset();
     this.ecd.setComponentTypeMap([NetworkIdentity,WorldFrame,CharacterFrame]);this.em.attachDataset(this.ecd);this.ecd.oldCircle=this;
     this.characters=new Map();this.localInput={x:0,z:0,yaw:0,buttons:0,weapon:0,pvp:0,levelStat:0,sequence:0};this.localNetworkId=0;this.playerId='';
-    this.nextNetworkId=1000;this.retired=[];this.syncedPeers=new Set();this.connections=new Map();this.views=new Map();
+    this.nextNetworkId=1000;this.retired=[];this.views=new Map();
     this.sim=simulation;this.ownsSimulation=!simulation;
   }
   async start(savedWorld){
@@ -91,7 +90,7 @@ export class SharedSession {
     await new Promise((resolve,reject)=>this.em.startup(resolve,reject));
     const registry=new BinarySerializationRegistry();for(const c of [WorldFrame,CharacterFrame])registry.registerAdapter(new FrameAdapter(c),c.typeName);
     // Gameplay is driven by replayable actions and publishes scoped deltas itself.
-    this.net=new NetworkSession({entity_manager:this.em,role:this.role,local_peer_id:this.peerId,binary_registry:registry,tick_rate_hz:30,simulation_delay_ticks:3,frame_capacity:64,reconcile:'replay',late_input:'rollback',publish_changes:false,scope_filter:this.role==='client'?{is_entity_in_scope:(_peer,id)=>id===this.localNetworkId}:null,reconnect:{enabled:false},connection_timeout_ms:3000});
+    this.net=new NetworkSession({entity_manager:this.em,role:this.role,local_peer_id:this.peerId,binary_registry:registry,tick_rate_hz:30,simulation_delay_ticks:3,frame_capacity:64,reconcile:'replay',late_input:'rollback',scope_filter:this.role==='client'?{is_entity_in_scope:(_peer,id)=>id===this.localNetworkId}:null,reconnect:{enabled:false},connection_timeout_ms:3000});
     this.net.replicate_discrete(WorldFrame,HOST_VALUE_CORRECTION);this.net.replicate_discrete(CharacterFrame,HOST_VALUE_CORRECTION);this.net.defineAction(InputAction);this.net.defineAction(PresenceAction);this.net.defineAction(WorldPatchAction);
     if(this.role==='client')this.net.defineInputSampler(()=>{
       if(!this.localNetworkId||!this.localCharacter()?.actor)return [];
@@ -99,33 +98,14 @@ export class SharedSession {
     });
     await this.net.start();
     if(this.role==='client')this.net.peer.onMalformedPacket.add((_peer,error)=>{this.failure=error;});
-    if(this.role==='client')this.net.peer.onInitialSync.add((peer,_token,frame)=>{
-      // Meep installs only the first snapshot per connection. A later copy can
-      // carry a newer frame; acknowledging that ignored copy skips world deltas.
-      if(this.syncedPeers.has(peer))return;
-      this.syncedPeers.add(peer);
-      const b=new BinaryBuffer();b.writeUint8(1);b.writeUint32(frame);this.net.peer.send_reliable_command(peer,b.raw_bytes,b.position);
-    });
     if(this.role==='host'){
       const executor=this.net.peer.executor,authorizeOwner=executor.authorize;
       // Ownership permits a peer to submit intent, not replace its replicated
       // component (including the server's command acknowledgement) wholesale.
       executor.authorize=(sender,entity,action)=>authorizeOwner(sender,entity,action)
         &&(sender===this.peerId||action instanceof InputAction&&validInput(action));
-      const replicator=this.net.peer.replicator,pack=replicator.pack_for_peer.bind(replicator);
-      // Entity scope does not gate global actions or records whose entity was
-      // retired. Their packet ACK would credit withheld world deltas as well.
-      // Write no action stream until the initial snapshot is acknowledged.
-      replicator.pack_for_peer=(peer,from,to,buffer,budget)=>this.syncedPeers.has(peer)?pack(peer,from,to,buffer,budget):from-1;
-      replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.views.get(peer)?.networkId===id};
+      this.net.peer.replicator.scope_filter={is_entity_in_scope:(peer,id)=>this.views.get(peer)?.networkId===id};
       scopeInitialSnapshots(this.net,peer=>{const view=this.views.get(peer),character=view&&this.characters.get(view.playerId);return view&&character!==undefined?[view.entity,character]:[];});
-      this.net.peer.onReliableCommand.add((peer,buffer,offset,length)=>{
-        if(length!==5)return;buffer.position=offset;if(buffer.readUint8()!==1)return;const frame=buffer.readUint32();
-        if(frame>this.net.current_frame)return;
-        // The recipient confirms the baseline it actually installed. Older
-        // action history must not race ahead of that initial world snapshot.
-        this.net.peer.baseline.set_acked(peer,frame);this.syncedPeers.add(peer);
-      });
       const f=new WorldFrame();f.snapshot=this.sim.snapshot();this.worldEntity=this.spawn(0,0,f);
       this.net.server.onRewind.add(()=>{this.worldRewound=true;});
       this.net.server.onLocalSim.add(frame=>this.hostStep(frame));
@@ -168,7 +148,7 @@ export class SharedSession {
     this.retireView(peerId);
     this.net.send(new PresenceAction(id));
   }
-  retireView(peer){const view=this.views.get(peer);if(view){this.retire(view.entity);this.views.delete(peer);}this.syncedPeers.delete(peer);}
+  retireView(peer){const view=this.views.get(peer);if(view){this.retire(view.entity);this.views.delete(peer);}}
   retire(e){
     // Prior-byte history references local ECS IDs. Keep the old row until that
     // history expires, otherwise a rewind can restore it into a new character.
@@ -201,19 +181,6 @@ export class SharedSession {
   }
   tick(){if(this.failure)throw this.failure;this.net.normalize_if_dirty();this.em.update(NET_DT);if(this.failure)throw this.failure;while(this.retired.length&&this.net.current_frame-this.retired[0].frame>66)this.ecd.removeEntity(this.retired.shift().e);}
   presentation(){if(this.failure)throw this.failure;const f=this.worldFrame(),local=this.localCharacter();if(!f||this.role==='client'&&!local?.actor)return null;const snapshot=structuredClone(f.snapshot);if(local?.actor){const i=snapshot.actors.findIndex(a=>a.id===local.actor.id);if(i>=0)snapshot.actors[i]=structuredClone(local.actor);snapshot.events.push(...structuredClone(local.effects??[]));}return snapshot;}
-  connect(peer,transport){
-    this.syncedPeers.delete(peer);
-    this.net.connect(peer,transport);
-    const channel=this.net.peer.channel_for(peer),inbound=channel.transport;
-    // A world sync can contain more fragments than the channel's 32-bit ACK
-    // window. Acknowledge each small burst before its first packets age out;
-    // waiting for the next simulation tick can otherwise cause endless resend.
-    let received=0;const empty=new Uint8Array(0);
-    // Meep defers raw packets until the fixed step. ACK after its channel reads
-    // each packet so the receive window includes the burst being acknowledged.
-    const acknowledge=(_bytes,length)=>{if(length>9&&++received%16===0)channel.send(empty,0);};
-    const cleanup=()=>{inbound.onReceive.remove(acknowledge);inbound.onDisconnect.remove(cleanup);if(this.connections.get(peer)===cleanup)this.connections.delete(peer);};
-    this.connections.get(peer)?.();this.connections.set(peer,cleanup);inbound.onReceive.add(acknowledge);inbound.onDisconnect.add(cleanup);
-  }
-  async stop(){for(const cleanup of this.connections.values())cleanup();await this.net.stop();if(this.ownsSimulation)await this.sim.stop();await new Promise((resolve,reject)=>this.em.shutdown(resolve,reject));}
+  connect(peer,transport){this.net.connect(peer,transport);}
+  async stop(){await this.net.stop();if(this.ownsSimulation)await this.sim.stop();await new Promise((resolve,reject)=>this.em.shutdown(resolve,reject));}
 }

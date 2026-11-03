@@ -21,7 +21,7 @@ export class WorldWind extends WorkerFluidSystem {
     this.published=new FluidComponent();this.published.enabled=false;
     this.published.field.setResolution(...this.fluid.field.getResolution());
     for(const key of ['velocity_x','velocity_y','velocity_z'])this.published.field[key]=new Float32Array(this.fluid.field[key].length);
-    this.transform=new Transform64();this.source=new GlobalFluidEffector();this.source.drag=.8;
+    this.transform=new Transform64();this.source=new GlobalFluidEffector();this.source.drag=.8;this.source.wind=[1.35,0,.4];
     this.effectors=new FluidEffectorsComponent();this.effectors.addEffector(this.source);
   }
   attach(ecd){new Entity().add(this.fluid).add(this.transform).build(ecd);new Entity().add(this.effectors).build(ecd);}

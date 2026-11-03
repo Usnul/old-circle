@@ -141,7 +141,7 @@ test('ground support settles the feet onto the surface instead of hovering insid
     w.teleport(p,[x,heightAt(x,z)+1,z]);run(w,180);
     const gap=()=>{
       w.ray.set([p.x,p.y,p.z,0,-1,0,1.2]);expect(w.physics.raycast(w.ray,w.hit,e=>e!==w.actors.get(p.id))).toBe(true);
-      const n=w.hit.normal,support=[0,0,0];w.ecd.getComponent(w.actors.get(p.id),Collider).shape.support(support,0,-n[0],-n[1],-n[2]);
+      const n=w.hit.normal,support=[0,0,0];w.ecd.getComponent(w.actors.get(p.id),Collider).shape.support(support,0,[-n[0],-n[1],-n[2]],0);
       return n[0]*support[0]+n[1]*(support[1]+w.hit.t)+n[2]*support[2];
     };
     expect(gap()).toBeLessThan(.035);

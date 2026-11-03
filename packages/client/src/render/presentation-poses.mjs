@@ -13,7 +13,7 @@ export class PresentationPoses {
   constructor(){
     this.log=new InterpolationLog({buffer_capacity_bytes:262144,records_capacity:4096});
     this.codec=new TransformPoseSerializationAdapter();this.blend=new PoseInterpolationAdapter();
-    this.buffer=new BinaryBuffer();this.transform=new Transform64();this.keys=new Map();this.frames=[];this.sequence=0;this.nextKey=1;
+    this.buffer=new BinaryBuffer();this.alpha=new Float64Array(1);this.transform=new Transform64();this.keys=new Map();this.frames=[];this.sequence=0;this.nextKey=1;
     this.playout=new RenderPlayout({tick_period_ms:1000/60,delay:new AdaptiveRenderDelay({tick_period_ms:1000/60,min_delay_frames:2,max_delay_frames:4,initial_delay_frames:2,safety_multiplier:1.25})});
   }
   record(key,position,rotation){
@@ -49,7 +49,7 @@ export class PresentationPoses {
   pose(key,{first,second,alpha}){
     const entry=this.keys.get(key);if(!entry||!first)return null;
     this.buffer.position=0;
-    if(!this.log.interpolate(this.buffer,entry.id,0,first.tick,second.tick,alpha,this.blend))return null;
+    this.buffer.position=0;this.alpha[0]=alpha;if(!this.log.interpolate(this.buffer,entry.id,0,first.tick,second.tick,this.alpha,0,this.blend))return null;
     this.buffer.position=0;this.codec.deserialize(this.buffer,this.transform);return this.transform;
   }
   corpse(state,time){

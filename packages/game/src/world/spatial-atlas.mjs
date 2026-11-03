@@ -93,7 +93,7 @@ export const COMPOSITION_VIEWS=[
   {id:'reliquary-lantern',label:'Reliquary · Lantern Chamber',fromPosition:dungeonPoint(DUNGEONS[0],[0,23,4.8]),targetPosition:dungeonPoint(DUNGEONS[0],[0,27,6]),yaw:0,pitch:.15,distance:2.8,time:23,requirement:'The Quiet Flame draws the eye through a sheltered upper chamber at night.'},
   ...DUNGEONS.slice(1).flatMap(d=>{
     const stair=d.connections.find(([a,b])=>a===d.rooms[0].id&&d.rooms.some(r=>r.id===b&&r.rise));
-    const from=dungeonPoint(d,[0,2,0]),to=dungeonPoint(d,stair[2]);to[1]+=1.4;
+    const from=dungeonPoint(d,[0,stair[2][1]===6?2:5.2,0]),to=dungeonPoint(d,stair[2]);to[1]+=1.4;
     const at=d.treasure.at,room=d.rooms.find(r=>r.level===at[2]&&at[0]>r.rect[0]&&at[0]<r.rect[2]&&at[1]>r.rect[1]&&at[1]<r.rect[3]);
     const reverse=at[1]-room.rect[1]<5&&room.rect[3]-at[1]>5;
     return [

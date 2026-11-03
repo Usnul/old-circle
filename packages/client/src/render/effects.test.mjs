@@ -37,7 +37,7 @@ test('levitation trails stay at the monument instead of blowing away like ambien
 test.each(Object.keys(FOOTSTEP_EFFECTS))('%s uses a shipped alpha sprite with lit, soft-depth coverage',(kind)=>{
   const c=effect(kind,0);expect(emitter_flags_blend(c.flags)).toBe(EMITTER_BLEND.ALPHA);
   expect(c.flags&EMITTER_FLAG.LIGHTING).toBe(EMITTER_FLAG.LIGHTING);expect(c.flags&EMITTER_FLAG.SOFT_DEPTH).toBe(EMITTER_FLAG.SOFT_DEPTH);
-  expect(c.texture).toMatch(/\/step-(dust|grit|leaf)\.png$/);expect(c.render_rotation).toBe(c.layout.offsetOf('rotation'));
+  expect(c.texture).toMatch(/\/step-(dust|grit|leaf)\.png$/);expect(c.render_orientation).toBe(c.layout.offsetOf('orientation'));
   const png=readFileSync(new URL('../../public'+c.texture,import.meta.url));
   expect(Array.from(png.subarray(0,8))).toEqual([137,80,78,71,13,10,26,10]);expect(png.toString('ascii',12,16)).toBe('IHDR');
   const width=png.readUInt32BE(16),height=png.readUInt32BE(20);expect(width).toBe(128);expect(height).toBe(128);

@@ -1,7 +1,8 @@
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {sampler2d_to_f16} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/sampler2d_to_f16.js';
 import {make_sky_hosek} from '@woosh/meep-engine/src/engine/graphics/sh3/path_tracer/make_sky_hosek.js';
-import {octahedral_uv_to_direction} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_uv_to_direction.js';
+import {octahedral_z_pole_uv_to_direction} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_z_pole_uv_to_direction.js';
+import {sampler2d_octahedral_skirt_fill} from '@woosh/meep-engine/src/shade/renderer/light/environment/sampler2d_octahedral_skirt_fill.js';
 import {ShadeImage} from '@woosh/meep-engine/src/shade/renderer/texture/source/ShadeImage.js';
 import {ShadeTexture} from '@woosh/meep-engine/src/shade/renderer/texture/ShadeTexture.js';
 import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
@@ -37,14 +38,15 @@ export class WorldSky {
       // horizon. Keep that diffuse fill independent of the moon's elevation.
       const sample=make_sky_hosek([source[0],Math.max(.3,source[1]),source[2]],2.4,.04,[.22,.24,.16]);
       const octahedral=Sampler2D.float32(4,256,256),direction=new Float32Array(3),brightness=.22+day*.62+night*.07,tint=[1-nightBlend*.66,1-nightBlend*.50,1-nightBlend*.18];
-      // Sample in the renderer's direction convention directly. The Hosek
-      // equirectangular helper has a different pole/longitude convention.
-      for(let y=0;y<256;y++)for(let x=0;x<256;x++){
-        const offset=(y*256+x)*4;octahedral_uv_to_direction(direction,(x+.5)/256,(y+.5)/256);
+      // Sample the 254x254 interior in the renderer's direction convention and
+      // mirror the 1-texel octahedral border skirt required by GPULightCollection.
+      for(let y=1;y<255;y++)for(let x=1;x<255;x++){
+        const offset=(y*256+x)*4;octahedral_z_pole_uv_to_direction(direction,(x-.5)/254,(y-.5)/254);
         sample(octahedral.data,offset,direction,0);
         for(let c=0;c<3;c++)octahedral.data[offset+c]=octahedral.data[offset+c]*brightness*tint[c]+nightFill[c]*nightBlend;
         octahedral.data[offset+3]=1;
       }
+      sampler2d_octahedral_skirt_fill(octahedral);
       texture=ShadeTexture.from(ShadeImage.fromSampler2D(sampler2d_to_f16(octahedral)));this.levels.set(level,texture);
     }
     return texture;

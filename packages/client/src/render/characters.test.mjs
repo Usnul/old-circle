@@ -7,6 +7,8 @@ import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform
 import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
 import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
 import {ShadedGeometrySystem} from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
+import {MeshSkinSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSkinSystem.js';
+import {MeshSkin} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/MeshSkin.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
 import {Animation} from '@woosh/meep-engine/src/engine/ecs/animation/Animation.js';
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
@@ -78,9 +80,9 @@ async function withNativeCharacters(run){
     },remove:parts=>{for(const {id} of parts)ecd.removeEntity(id);}};
     const characters=new Characters(view);
     view.meshSystem=new MeshSystem(facade,scene,async url=>characters.bundle(url));
-    view.animations=new AnimationSystem(facade,view.meshSystem);
+    view.animations=new AnimationSystem(facade,scene);
     // a model's primitives are entities, and the system that owns primitives is what puts them in the scene
-    em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(view.animations);
+    em.addSystem(view.meshSystem);em.addSystem(new ShadedGeometrySystem(facade,scene));em.addSystem(new MeshSkinSystem(facade,scene));em.addSystem(view.animations);
     em.addSystem(new TransformAttachmentSystem());em.addSystem(new ClothColliderSystem());view.cloth=new WorldCloth({sample:out=>{out.fill(0);return out;},varies:()=>false},{worker_factory:clothWorker});em.addSystem(view.cloth);em.attachDataset(ecd);
     ecd.registerComponentType(Light);
     await new Promise((resolve,reject)=>em.startup(resolve,reject));started=true;
@@ -193,15 +195,15 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       const instances=actors.map(a=>characters.create(a));
       await setImmediate();flush();
       for(let i=0;i<instances.length;i++){
-        const rig=instances[i],instance=view.meshSystem.instance_of(rig.id),skin=instance.skins[0];
-        expect(ecd.getComponent(skin.meshes[0],ShadedGeometry).material.diffuse_color.a).toBe(1);
+        const rig=instances[i],meshEntity=view.meshSystem.mesh_entities_of(rig.id)[0];
+        expect(ecd.getComponent(meshEntity,ShadedGeometry).material.diffuse_color.a).toBe(1);
         characters.update(rig,actors[i]);
       }
       flush();
       // New clip bindings must leave cloth offsets CPU-owned on every reuse.
       for(const rig of instances){
         const bones=rigs[rig.url.split(':')[0]].bones;
-        for(const [i,joint] of view.meshSystem.instance_of(rig.id).skins[0].joints.entries()){
+        for(const [i,joint] of ecd.getComponent(view.meshSystem.mesh_entities_of(rig.id)[0],MeshSkin).joints.entries()){
           const owned=ecd.getComponent(joint,GPUStateAuthority).flags&GPUStateAuthorityFlags.TransformAttachment;
           expect(Boolean(owned),bones[i].name).toBe(!bones[i].name.startsWith('cloak'));
         }
@@ -221,7 +223,7 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
       const rig=instances[0];
       // Fade the skin alone: weapon entities need no geometry for the pose/cleanup checks.
       const weapon=rig.weapon;rig.weapon=null;
-      const deadMesh=view.meshSystem.instance_of(rig.id).skins[0].meshes[0],materialOf=()=>ecd.getComponent(deadMesh,ShadedGeometry).material,opaqueMaterial=materialOf();
+      const deadMesh=view.meshSystem.mesh_entities_of(rig.id)[0],materialOf=()=>ecd.getComponent(deadMesh,ShadedGeometry).material,opaqueMaterial=materialOf();
       characters.viewAlpha(rig,.25);
       rig.weapon=weapon;
       for(const age of [0,41,44,45]){
@@ -262,8 +264,8 @@ test.each(['pool','teardown'])('character %s reuses skin allocations and resets 
 
 test('newly received corpses place dropped weapons before the skin loads and never follow the hand',()=>{
   // the joints physics writes are entities, so the corpse's skeleton and the view share a dataset
-  const skeleton=createSimulationSkeleton('pilgrim'),ecd=skeleton.dataset;ecd.registerManyComponentTypes([SGMesh,Animation,Cloth,ClothRig]);let ready=false;
-  const view={ecd,meshSystem:{instance_of:()=>ready?{skins:[{joints:skeleton.joints}]}:null},model:()=>{
+  const skeleton=createSimulationSkeleton('pilgrim'),ecd=skeleton.dataset;ecd.registerManyComponentTypes([SGMesh,MeshSkin,Animation,Cloth,ClothRig]);const meshEntity=new Entity().add(MeshSkin.from(Int32Array.from(skeleton.joints),new Float32Array(skeleton.joints.length*16))).build(ecd);let ready=false;
+  const view={ecd,meshSystem:{mesh_entities_of:()=>ready?[meshEntity]:[]},model:()=>{
     const t=new Transform64(),id=new Entity().add(t).build(ecd);return [{id,t}];
   },remove:parts=>{for(const {id} of parts)ecd.removeEntity(id);}};
   const characters=new Characters(view);

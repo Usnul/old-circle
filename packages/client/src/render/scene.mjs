@@ -9,6 +9,7 @@ import { Camera } from '@woosh/meep-engine/src/engine/graphics/ecs/camera/Camera
 import { CameraSystem } from '@woosh/meep-engine/src/engine/graphics3/CameraSystem.js';
 import { ShadedGeometry } from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
 import { ShadedGeometrySystem } from '@woosh/meep-engine/src/engine/graphics3/ShadedGeometrySystem.js';
+import {MeshSkinSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSkinSystem.js';
 import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
 import {AnimationSystem} from '@woosh/meep-engine/src/engine/graphics3/AnimationSystem.js';
 import { GPUParticleEmitterSystem } from '@woosh/meep-engine/src/engine/graphics3/GPUParticleEmitterSystem.js';
@@ -36,6 +37,7 @@ import {WorldGround} from './ground.mjs';
 import {Characters} from './characters.mjs';
 import {LanternScenery} from './lantern-chain.mjs';
 import {WorldWind} from './wind.mjs';
+import {FluidEffectorsSystem} from '@woosh/meep-engine/src/engine/physics/fluid/ecs/FluidEffectorsSystem.js';
 import {WorldCloth} from './cloth.mjs';
 import {ClothColliderSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothColliderSystem.js';
 import {WorldAmbient} from './ambient.mjs';
@@ -70,15 +72,17 @@ export class WorldView {
       config.addSystem(new TransformAttachmentSystem());
       this.scene=EngineHarness.shadeScene(engine);
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
+      config.addSystem(new MeshSkinSystem(engine.graphics,this.scene));
       this.meshSystem = new MeshSystem(engine.graphics, this.scene, async url =>
         url.includes(':') ? this.characterRenderer.bundle(url) : this.modelStore.bundle(url));
-      this.animations = new AnimationSystem(engine.graphics, this.meshSystem);
+      this.animations = new AnimationSystem(engine.graphics, this.scene);
       config.addSystem(new CameraSystem(engine.graphics));config.addSystem(new LightSystem(engine.graphics,this.scene));
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
       config.addSystem(new DecalSystem(engine.graphics,engine.assetManager));
       this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
+      config.addSystem(new FluidEffectorsSystem());
       this.wind=new WorldWind();config.addSystem(this.wind);
       this.cloth = new WorldCloth(this.wind,{camera:()=>engine.graphics.camera.camera});
       config.addSystem(new ClothColliderSystem());

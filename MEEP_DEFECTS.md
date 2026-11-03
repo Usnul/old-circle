@@ -1,6 +1,6 @@
 # Meep defects encountered by Old Circle
 
-Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.32.0`. Original findings below concern 3.20.0 on Node 24 / Windows, 2026-09-10; entries explicitly identify subsequent verification against 3.22.0. Tests use the published dependency, not a linked engine checkout.
+Engine source remains read-only. Runtime is pinned to the published `@woosh/meep-engine@3.61.1`. Original findings below concern 3.20.0 on Node 24 / Windows, 2026-09-10; entries explicitly identify subsequent verification against 3.22.0, 3.26.0, 3.32.0 and 3.61.1. Tests use the published dependency, not a linked engine checkout.
 
 ## MEEP-001 — shapeCast quaternion contract disagrees with implementation
 
@@ -16,7 +16,7 @@ Reproduction: create a capsule at `(100,4.294,28.5)`, sweep a radius `.11` spher
 
 Reproduction: `GameWorld.start({populate:false})`, spawn two actors 1.5 metres apart at the heightfield surface, call a sphere sweep with an indexed identity quaternion. Stack: `HeightMapShape3D.support → PosedShape3D.support → gjk → shape_cast → PhysicsSystem.shapeCast`.
 
-Game workaround: Meep sphere casts for convex targets, seven Meep surface rays for concave targets. This approximates thickness at concave edges; it is not an exact concave sweep. The melee and projectile regression tests exercise the adapter. Suggested engine change: BVH-pruned triangle dispatch, preserving nearest time of impact and contact normals.
+**Resolved in 3.61.1 (source and sweep regressions verified).** `src/engine/physics/queries/shape_cast.js` now dispatches concave `HeightMapShape3D` and `MeshShape3D` colliders directly instead of passing them to GJK, traversing heightfield grid cells and mesh BVH triangles while preserving nearest time of impact and contact normals. `packages/game/src/simulation/sphere-sweep.mjs` now delegates directly to `physics.shapeCast` for all colliders without the former seven-ray concave approximation, and `GameWorld.sweepContact` steps back from the swept sphere centre along the contact normal uniformly across convex and concave hits.
 
 ## MEEP-003 — graphics3 ShadedGeometrySystem does not consume component flags
 
@@ -52,13 +52,13 @@ The [upstream response](https://claude.ai/code/artifact/792fafe9-6a00-466c-9e24-
 
 Reproduction: an Old Circle persisted world with 49 actors and patrol paths serialized to 71,561 bytes. A fresh Node client connected to the running server, received about 18 MB/s of packets over five seconds, and never received `onInitialSync` or a malformed-packet event; no world or character entities were created. The production browser similarly timed out waiting for authoritative updates. A newly populated world stayed below the limit, hiding this from the original integration test.
 
-Game workaround: Meep LZ4 blocks in the gameplay binary adapters, preserving exact state while removing repeated JSON field names and actor data. The socket regression includes a populated patrol snapshot above 64 KiB before compression. This contains the current content payload; it is not a substitute for scoped actor replication as player/content counts grow. Suggested engine change: align the default send/receive limits, expose a shared configuration, and report oversize rejection rather than silently accepting unassemblable traffic.
+**Resolved in 3.61.1 (source and network regressions verified).** `Connection` (`src/engine/network/transport/connection/Connection.js`) replaces the legacy `FragmentAssembler` with a unified `max_message_bytes = 1048576` (1 MiB) budget across sender and receiver and splits initial synchronization across paged `SYNC_PAGE` messages on `Lane.BULK`. Old Circle retains Meep LZ4 blocks and scoped actor replication in the gameplay binary adapters for bandwidth efficiency.
 
 ## MEEP-008 — action history is flushed before the initial snapshot
 
 **Source verified in the published package.** `orchestrator/ServerAuthoritativeServer.js:538–539` calls `peer.flush_outbound(sim_frame)` before `onTickComplete.send1(sim_frame)`. `NetworkSession.js:1538` sends queued INITIAL_SYNC messages from that completion handler, despite its comment promising initial sync before the action stream. A newly joined peer can therefore receive and apply retained history before its initial world and frame baseline exist.
 
-Game workaround: the host excludes the new recipient from action scope until the client acknowledges the initial frame it installed through a Meep reliable command. That acknowledgement also sets the recipient's replication baseline. The loopback regression warms the host for 90 ticks before connecting and verifies that no frame is applied before initial sync. Suggested engine change: order initial snapshot delivery before history flushing and gate dependent action application until that snapshot is installed, including when a transport reorders messages.
+**Resolved in 3.61.1 (source and loopback join regression verified).** `NetworkPeer` now queues outbound traffic during the tick and flushes in `end_tick`, and `HostJoin` / `NetworkSession` gates action-stream delivery behind the paged `SYNC_PAGE` / `SYNC_COMPLETE` / `CLIENT_READY` join state machine. Old Circle removed the manual reliable-command snapshot acknowledgement, `pack_for_peer` suppression and 16-packet empty ACK hook.
 
 ## MEEP-009 — convex contact direction assumes the body origin lies inside its hull
 
@@ -78,7 +78,7 @@ Game workaround: a failed long query is split at authored room connections, sele
 
 **Source verified and covered by a two-peer integration test.** `NetworkSession.#send_initial_sync_to` passes every entry in its entity-listener map to `snapshotter_emit`; it does not consult the configured scope filter. The filter only excludes subsequent actions. A host-only rollback frame or another recipient's world projection therefore reaches every new peer if the game relies on action scope alone.
 
-Game workaround: adapt the public `NetworkPeer.send_initial_sync` hook, invoking the native snapshot emitter with exactly the recipient's WorldFrame and owned CharacterFrame. Native framing, acknowledgement and initial application remain unchanged. A regression verifies that two distant clients do not receive the host-only world ID, each other's character rows or distant actors, then verifies arrivals and removals when they meet. Suggested engine change: expose an initial entity-scope predicate distinct from owner-aware action filtering; clients still need their own entity's authoritative initial state even when their predicted actions are excluded from the echo stream.
+Game workaround: adapt the public `NetworkPeer.send_sync_page` hook, writing the `uint32` entity count header expected by `NetworkSession.#apply_initial_sync` (`snapshotter_emit` writes a varint header in 3.61.1) and invoking `snapshotter_write_entity` on `InitialSyncPage.FIRST` with only the recipient's `WorldFrame` and owned `CharacterFrame` before completing the paged join on `InitialSyncPage.FINAL`. Native page framing, acknowledgement and initial application remain unchanged. A regression verifies that two distant clients do not receive the host-only world ID, each other's character rows or distant actors, then verifies arrivals and removals when they meet. Suggested engine change: expose an initial entity-scope predicate distinct from owner-aware action filtering (clients still need their own entity's authoritative initial state even when their predicted actions are excluded from the echo stream) and align `snapshotter_emit`'s entity count header encoding with `NetworkSession.#apply_initial_sync`.
 
 ## MEEP-012 — removed geometry retains append-only BVH arena space
 

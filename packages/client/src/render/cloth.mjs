@@ -1,4 +1,5 @@
 import {Cloth} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/Cloth.js';
+import {ClothPin} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothPin.js';
 import {ClothRig} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/ClothRig.js';
 import {WorkerClothSystem} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/WorkerClothSystem.js';
 import {makeClothWorker} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/makeClothWorker.js';
@@ -11,6 +12,8 @@ import Entity from '@woosh/meep-engine/src/engine/ecs/Entity.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {T64WorldCache} from '@woosh/meep-engine/src/engine/ecs/transform/T64WorldCache.js';
 import {collect_entity_playbacks} from '@woosh/meep-engine/src/engine/graphics3/pose/collect_entity_playbacks.js';
+import {MeshSkin} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/MeshSkin.js';
+import {MeshSystem} from '@woosh/meep-engine/src/engine/graphics3/MeshSystem.js';
 import {CLOTH_COTTON,CLOTH_SILK} from '@woosh/meep-engine/src/engine/physics/cloth/ecs/cloth_dynamics_library.js';
 import {cloth_proxy_from_joints} from '@woosh/meep-engine/src/engine/physics/cloth/build/cloth_proxy_from_joints.js';
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
@@ -32,9 +35,11 @@ const capeDynamics=CLOTH_COTTON.clone();
 // A travelling coat should hold a fold and settle after a stride. Inertia is
 // the fraction of anchor motion felt by the cloth, not particle mass; drag is
 // air coupling. Cotton's full inertia/high drag made these short strips whip.
+// Omit SelfCollision (matching CLOTH_DENIM at bend=0.62) so adjacent cape strips
+// do not fight the tight slack leash when draped over curved hip/thigh capsules.
 capeDynamics.stretch=.96;capeDynamics.bend=.62;capeDynamics.slack=.12;capeDynamics.damping=.5;
 capeDynamics.inertia=.25;capeDynamics.drag=.055;
-capeDynamics.flags|=ClothDynamicsFlags.StrainLimit;
+capeDynamics.flags=ClothDynamicsFlags.StrainLimit;
 // Short links need finer collision sweeps during a gust or a fast body turn.
 capeDynamics.substeps=4;
 Object.freeze(capeDynamics);
@@ -50,16 +55,17 @@ export function clothComponents(name){
   if(name!=='pilgrim'&&name!=='votiveBanner')return [];
   if(!proxies.has(name)){
     const skeleton=createSkeleton(name);unkeyCloth(skeleton);
-    skeleton.bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind)),meshes:[]})];
+    skeleton.bundle.skins=[Skin.from({name,joints:skeleton.joints,inverse_bind_matrices:Float32Array.from(skeleton.data.bones.flatMap(b=>b.inverseBind))})];
     const prefab=prefab_compile(skeleton.bundle);
     // Keep the weighted top joint fixed to the shoulder/crossbar, so its top
     // edge cannot rotate away from the attachment as the lower joints move.
     const names=skeleton.data.bones.map(b=>b.name).filter(n=>clothJoint(n)&&n!=='cloak1'&&n!=='cloth0');
-    const {proxy,error}=cloth_proxy_from_joints(prefab,prefab.skins[0],names,{name});
+    const {proxy,groups,error}=cloth_proxy_from_joints(prefab,prefab.skins[0],names,{name});
     if(!proxy)throw new Error(error);
-    proxies.set(name,proxy);
+    proxies.set(name,{proxy,groups});
   }
-  return [ClothRig.from(proxies.get(name)),Cloth.from(name==='votiveBanner'?CLOTH_SILK:capeDynamics)];
+  const rig=new ClothRig();rig.proxy=proxies.get(name).proxy;
+  return [rig,Cloth.from(name==='votiveBanner'?CLOTH_SILK:capeDynamics)];
 }
 
 /** Native fluid drag plus body capsules posed from the same playbacks as the
@@ -81,12 +87,29 @@ export class WorldCloth extends WorkerClothSystem {
     this.bodies.delete(entity);
     for(const {id} of bodies.parts)if(bodies.ecd.entityExists(id))bodies.ecd.removeEntity(id);
   }
+  removePins(entity){
+    const garment=this.garments.get(entity),ecd=this.entityManager?.dataset;
+    if(!garment?.pins.length)return;
+    for(const joint of garment.pins)if(ecd?.entityExists(joint)&&ecd.getComponent(joint,ClothPin))ecd.removeComponentFromEntity(joint,ClothPin);
+    garment.pins.length=0;
+  }
+  resolveSkin(ecd,entity,rig){
+    if(rig.skin>=0&&ecd.entityExists(rig.skin)){
+      const skin=ecd.getComponent(rig.skin,MeshSkin);if(skin)return skin;
+    }
+    const direct=ecd.getComponent(entity,MeshSkin);
+    if(direct){rig.skin=entity;return direct;}
+    const meshEntity=this.entityManager.getSystem(MeshSystem)?.mesh_entities_of(entity)[0];
+    const skin=meshEntity!==undefined?ecd.getComponent(meshEntity,MeshSkin):null;
+    rig.skin=skin?meshEntity:-1;return skin;
+  }
   link(cloth,transform,entity){
-    this.garments.set(entity,{cloth,transform,culling:new ScreenCullState()});
+    this.garments.set(entity,{cloth,transform,culling:new ScreenCullState(),pins:[]});
     super.link(cloth,transform,entity);
   }
-  unlink(cloth,transform,entity){this.garments.delete(entity);this.removeBodies(entity);super.unlink(cloth,transform,entity);}
+  unlink(cloth,transform,entity){this.removePins(entity);this.garments.delete(entity);this.removeBodies(entity);super.unlink(cloth,transform,entity);}
   async shutdown(entityManager){
+    for(const entity of this.garments.keys())this.removePins(entity);
     await super.shutdown(entityManager);
     for(const entity of this.bodies.keys())this.removeBodies(entity);
     this.garments.clear();
@@ -106,6 +129,7 @@ export class WorldCloth extends WorkerClothSystem {
       }
       const active=culling.update(area,dt,CLOTH_CULL),instance=this.instanceOf(entity);
       if(!active&&instance){
+        this.removePins(entity);
         this.removeBodies(entity);
         // Retire the native worker registration and release its joint ownership.
         // Keep the component as the lifecycle owner so deletion/pooling still
@@ -115,9 +139,17 @@ export class WorldCloth extends WorkerClothSystem {
     }
     for(const instance of this.instances){
       const entity=instance.entity,rig=ecd.getComponent(entity,ClothRig);
-      if(rig?.proxy?.name!=='pilgrim'){this.removeBodies(entity);continue;}
-      const model=this.models?.instance_of(entity),skin=model?.skins[rig.skin];
-      if(!skin){this.removeBodies(entity);continue;}
+      const skin=rig?this.resolveSkin(ecd,entity,rig):null;
+      if(!skin){this.removePins(entity);this.removeBodies(entity);continue;}
+      const garment=this.garments.get(entity);
+      for(const {joint,particles} of proxies.get(rig.proxy?.name)?.groups??[]){
+        const jointEntity=skin.joints[joint];
+        if(!ecd.getComponent(jointEntity,ClothPin)){
+          ecd.addComponentToEntity(jointEntity,ClothPin.from({cloth:entity,particles}));
+          garment?.pins.push(jointEntity);
+        }
+      }
+      if(rig.proxy?.name!=='pilgrim'){this.removeBodies(entity);continue;}
       // The collider index reads position/rotation only. Bake actor scale into
       // its immutable shapes, including the larger keeper rigs.
       const root=ecd.getComponent(entity,Transform64),scale=Math.max(...root.scale);

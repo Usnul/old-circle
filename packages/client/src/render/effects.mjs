@@ -31,15 +31,15 @@ export function effect(kind='fire-ember',rate=35,scale=1){
   const step=FOOTSTEP_EFFECTS[kind],key=step?`${kind}:${scale}`:kind;
   if(!programs.has(key))programs.set(key,compile(kind,scale));
   const natural=FOOTSTEP_EFFECTS[kind]||AMBIENT_EFFECTS[kind]&&!AMBIENT_EFFECTS[kind].glow;
-  return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${step?.texture??'mote'}.png`,spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color',...(step?{rotation:'rotation'}:{})},prewarm:kind==='motes'?2:0});
+  return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${step?.texture??'mote'}.png`,spawn_rate:rate,flags:{blend:natural?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!natural,soft_depth:true},render:{position:'position',size:'size',color:'color',...(step?{orientation:'orientation'}:{})},prewarm:kind==='motes'?2:0});
 }
 function compile(kind,scale){
   const profile=AMBIENT_EFFECTS[kind],step=FOOTSTEP_EFFECTS[kind],ambient=!!profile||kind==='motes',levitation=kind==='levitation';
   const lifetime=step?.life??(levitation?1.4:profile?.life??6),color=step?.color??profile?.color??[2.4,1.8,.7,.9];
-  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4},...(step?[{name:'rotation',components:1},{name:'normal',components:3}]:[])]);
+  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'age',components:1},{name:'size',components:1},{name:'color',components:4},...(step?[{name:'rotation',components:1},{name:'orientation',components:4},{name:'normal',components:3}]:[])]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs,params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs??{}))wire(g,n,k,v);return n;};
-  const set=(g,name,value)=>op(g,'setAttribute',{value},{name});
+  const set=(g,name,value)=>op(g,'setParticleField',{value},{name});
   const random=op(init,'random',{}, {components:3});
   const signed=op(init,'mad',{a:random,b:[2,2,2],c:[-1,-1,-1]});
   const normal=step?op(init,'builtin',{}, {id:VM_BUILTIN.EMITTER_UP}):null;
@@ -50,22 +50,23 @@ function compile(kind,scale){
   let velocity=step?op(init,'scale',{v:tangent,s:[step.spread*scale]}):op(init,'mul',{a:signed,b:levitation?[.025,.025,.025]:[.15,.10,.15]});
   velocity=op(init,'add',{a:velocity,b:step?op(init,'scale',{v:normal,s:[step.lift*scale]}):levitation?[0,0,0]:[.15,.02,.08]});
   set(init,'velocity',velocity);set(init,'age',[0]);set(init,'size',step?op(init,'mad',{a:op(init,'random',{}, {components:1}),b:[step.size*scale*.5],c:[step.size*scale*.75]}):[profile?.size??(levitation?.23:.035)]);
-  if(step){set(init,'normal',normal);set(init,'rotation',op(init,'mul',{a:op(init,'random',{}, {components:1}),b:[Math.PI*2]}));}
+  if(step){const rotation=op(init,'mul',{a:op(init,'random',{}, {components:1}),b:[Math.PI*2]}),half=op(init,'mul',{a:rotation,b:[.5]});set(init,'normal',normal);set(init,'rotation',rotation);set(init,'orientation',op(init,'vec4',{x:[0],y:[0],z:op(init,'sin',{x:half}),w:op(init,'cos',{x:half})}));}
   set(init,'color',[0,0,0,0]);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME});
-  const age=op(update,'add',{a:op(update,'attribute',{}, {name:'age'}),b:dt});set(update,'age',age);
+  const age=op(update,'add',{a:op(update,'particleField',{}, {name:'age'}),b:dt});set(update,'age',age);
   const fadeIn=op(update,'smoothstep',{e0:[0],e1:[ambient?.65:.08],x:age});
   const fadeOut=op(update,'sub',{a:[1],b:op(update,'smoothstep',{e0:[lifetime*.45],e1:[lifetime],x:age})});
   const envelope=op(update,'mul',{a:fadeIn,b:fadeOut});
   // Lit alpha particles keep their albedo as coverage fades; additive light must fade RGB too.
   set(update,'color',step?op(update,'mul',{a:color,b:op(update,'vec4',{x:[1],y:[1],z:[1],w:envelope})}):op(update,'scale',{v:color,s:envelope}));
   op(update,'kill',{condition:op(update,'compare',{a:age,b:[lifetime]},{op:'ge'})});
-  const pos=op(update,'attribute',{}, {name:'position'});let vel=op(update,'attribute',{}, {name:'velocity'});
+  const pos=op(update,'particleField',{}, {name:'position'});let vel=op(update,'particleField',{}, {name:'velocity'});
   if(step){
-    const gravity=op(update,'scale',{v:op(update,'attribute',{}, {name:'normal'}),s:[-step.gravity*scale]});
+    const gravity=op(update,'scale',{v:op(update,'particleField',{}, {name:'normal'}),s:[-step.gravity*scale]});
     vel=op(update,'add',{a:vel,b:op(update,'scale',{v:gravity,s:dt})});set(update,'velocity',vel);
-    set(update,'size',op(update,'add',{a:op(update,'attribute',{}, {name:'size'}),b:op(update,'mul',{a:dt,b:[step.growth*scale]})}));
-    set(update,'rotation',op(update,'add',{a:op(update,'attribute',{}, {name:'rotation'}),b:op(update,'mul',{a:dt,b:[step.growth? .25:3]})}));
+    set(update,'size',op(update,'add',{a:op(update,'particleField',{}, {name:'size'}),b:op(update,'mul',{a:dt,b:[step.growth*scale]})}));
+    const rotation=op(update,'add',{a:op(update,'particleField',{}, {name:'rotation'}),b:op(update,'mul',{a:dt,b:[step.growth? .25:3]})}),half=op(update,'mul',{a:rotation,b:[.5]});
+    set(update,'rotation',rotation);set(update,'orientation',op(update,'vec4',{x:[0],y:[0],z:op(update,'sin',{x:half}),w:op(update,'cos',{x:half})}));
   }
   if(profile){
     const wind=op(update,'scale',{v:op(update,'builtin',{}, {id:VM_BUILTIN.EMITTER_DIRECTION}),s:[profile.speed]});

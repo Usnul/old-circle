@@ -1,4 +1,6 @@
-import {snapshotter_emit} from '@woosh/meep-engine/src/engine/network/sim/Snapshotter.js';
+import {snapshotter_write_entity} from '@woosh/meep-engine/src/engine/network/sim/Snapshotter.js';
+import {InitialSyncPage} from '@woosh/meep-engine/src/engine/network/orchestrator/NetworkPeer.js';
+import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
 import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
 
 export const INTEREST=Object.freeze({enter:96,leave:112,actors:96,projectiles:128,events:128,players:8,maximumPlayers:16});
@@ -25,11 +27,19 @@ export function projectWorld(snapshot,playerId,previous){
 }
 
 /** NetworkSession's initial emitter ignores its action scope. Adapt that public
- * send hook while retaining Meep's snapshot format, framing and receiver. */
+ * send hook while retaining Meep's paged snapshot format, framing and receiver. */
 export function scopeInitialSnapshots(session,entitiesForPeer){
-  const peer=session.peer,send=peer.send_initial_sync.bind(peer);
-  peer.send_initial_sync=(recipient,token,frame)=>send(recipient,token,frame,buffer=>snapshotter_emit({
-    buffer,world:session.world,slot_table:peer.slot_table,component_registry:peer.component_registry,
-    entity_iter:visit=>{for(const entity of entitiesForPeer(recipient))visit(entity);},
-  }));
+  const peer=session.peer,send=peer.send_sync_page.bind(peer),firstFrame=new Map(),empty=new BinaryBuffer();empty.writeUint32(0);
+  peer.send_sync_page=(recipient,token,frame,flags)=>{
+    const first=(flags&InitialSyncPage.FIRST)!==0,final=(flags&InitialSyncPage.FINAL)!==0;
+    if(first||(final&&firstFrame.get(recipient)!==frame)){
+      if(final)firstFrame.delete(recipient);else firstFrame.set(recipient,frame);
+      const entities=entitiesForPeer(recipient),buffer=new BinaryBuffer();
+      buffer.writeUint32(entities.length);
+      for(const entity of entities)snapshotter_write_entity(buffer,session.world,peer.slot_table,peer.component_registry,entity);
+      return send(recipient,token,frame,flags,buffer.raw_bytes,buffer.position);
+    }
+    if(final)firstFrame.delete(recipient);
+    return send(recipient,token,frame,flags,empty.raw_bytes,4);
+  };
 }

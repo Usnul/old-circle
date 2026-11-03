@@ -6,11 +6,13 @@ import {AnimationCurve} from '@woosh/meep-engine/src/engine/animation/curve/Anim
 import {curve_from_track_data_linear} from '@woosh/meep-engine/src/engine/animation/clip/curve_from_track_data_linear.js';
 import {animation_curve_optimize} from '@woosh/meep-engine/src/engine/animation/curve/animation_curve_optimize.js';
 import {t64_evaluate_world} from '@woosh/meep-engine/src/engine/ecs/transform/t64_evaluate_world.js';
+import {PosePlayback} from '@woosh/meep-engine/src/shade/renderer/animation/pose/PosePlayback.js';
 import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
 import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import {SceneBundle} from '@woosh/meep-engine/src/shade/renderer/loader/SceneBundle.js';
 import {prefab_compile} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_compile.js';
 import {prefab_instantiate} from '@woosh/meep-engine/src/engine/graphics3/prefab/prefab_instantiate.js';
+import {AnimationClips} from '@woosh/meep-engine/src/engine/graphics3/animation/AnimationClips.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
 import {clamp01} from '@woosh/meep-engine/src/core/math/clamp01.js';
 import {smoothStep} from '@woosh/meep-engine/src/core/math/smoothStep.js';
@@ -110,13 +112,13 @@ export function createSimulationSkeleton(name){
     const skeleton=createSkeleton(name);
   const prefab=prefab_compile(skeleton.bundle),dataset=new EntityComponentDataset();dataset.registerManyComponentTypes([Transform64]);
   const root=dataset.createEntity(),placement=new Transform64();placement.updateMatrix();dataset.addComponentToEntity(root,placement);
-  const instance=prefab_instantiate(prefab,dataset,root),joints=skeleton.data.bones.map(b=>instance.entity_of(b.name)),clips=instance.clips;
+  const instance=prefab_instantiate(prefab,dataset,root),joints=skeleton.data.bones.map(b=>instance.entity_of(b.name)),clips=dataset.getComponent(root,AnimationClips).clips;
   return {dataset,root,placement,instance,joints,clips,data:skeleton.data,byName:new Map(clips.map(c=>[c.name,c]))};
 }
 
 const templates=new Map();
 export function skeletonFor(a){const name=actorRig(a);if(!templates.has(name))templates.set(name,createSimulationSkeleton(name));return templates.get(name);}
-export function actorPlaybacks(a,skeleton=skeletonFor(a)){return animationPlan(a).map(p=>({clip:skeleton.byName.get(p.name),time:p.time,weight:p.weight}));}
+export function actorPlaybacks(a,skeleton=skeletonFor(a)){return animationPlan(a).map(p=>PosePlayback.from(skeleton.byName.get(p.name),p.time,p.weight));}
 export function placeSkeleton(a,skeleton){const scale=actorScale(a),yaw=a.yaw+Math.PI,t=skeleton.placement;t.setTranslation(...actorFeet(a));t.setScale(scale,scale,scale);t.setRotation(0,Math.sin(yaw/2),0,Math.cos(yaw/2));t.updateMatrix();}
 export function actorSocket(result,a,name){
   const skeleton=skeletonFor(a);placeSkeleton(a,skeleton);

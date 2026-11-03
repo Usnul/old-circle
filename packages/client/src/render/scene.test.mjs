@@ -18,6 +18,8 @@ import {GPUParticleEmitterSystem} from '@woosh/meep-engine/src/engine/graphics3/
 import {layerEffect} from './particle-layers.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 import {rangedSightOrigin} from '@old-circle/game/simulation/aim.mjs';
+import {WorldSky} from './sky.mjs';
+import {octahedral_skirt_source_texel} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_skirt_source_texel.js';
 
 // Exercise presentation and the real camera/mesh bridges without booting a browser or GPU.
 vi.mock('@woosh/meep-engine/src/engine/EngineHarness.js',()=>({EngineHarness:class{}}));
@@ -164,4 +166,14 @@ test.each(['bow','staff'])('%s retains upward sight pitch when terrain retracts 
     expect(view.aimPitch).toBeCloseTo(expectedPitch,10);
     expect(view.aimPitch).toBeCloseTo(Math.atan2(camera.transform.translation_y-target[1],Math.hypot(camera.transform.translation_x-target[0],camera.transform.translation_z-target[2])),10);
   }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
+});
+
+test('sky environment maps fill the 1-texel octahedral border skirt required by GPULightCollection',()=>{
+  const sky=new WorldSky(),texture=sky.texture(16),data=texture.image.source.data,size=256,source=new Uint32Array(2);
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    if(x>0&&x<size-1&&y>0&&y<size-1)continue;
+    octahedral_skirt_source_texel(source,x,y,size);
+    const target=(y*size+x)*4,from=(source[1]*size+source[0])*4;
+    expect(Array.from(data.subarray(target,target+4))).toEqual(Array.from(data.subarray(from,from+4)));
+  }
 });

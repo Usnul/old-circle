@@ -63,13 +63,14 @@ export function layerEffect(kind,rate=0,scale=1){
   const key=`${kind}:${scale}`;if(!programs.has(key))programs.set(key,compile(p,scale));
   return ParticleEffect.from({...programs.get(key),texture:`/assets/vfx/${p.texture}.png`,spawn_rate:rate,
     flags:{blend:p.alpha?EMITTER_BLEND.ALPHA:EMITTER_BLEND.ADDITIVE,lighting:!!p.alpha&&!p.unlit,soft_depth:!kind.endsWith('flash'),projection:p.vertical?EMITTER_PROJECTION.VERTICAL:p.stretched?EMITTER_PROJECTION.STRETCHED:EMITTER_PROJECTION.BILLBOARD},
-    render:{position:'position',velocity:'velocity',size:'size',color:'color',rotation:'rotation'}});
+    render:{position:'position',velocity:'velocity',size:'size',color:'color',orientation:'orientation'}});
 }
 function compile(p,scale){
-  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'color',components:4},...['age','life','size','initialSize','rotation','phase'].map(name=>({name,components:1})),...(p.follow?[{name:'origin',components:3}]:[])]);
+  const layout=new ParticleLayout([{name:'position',components:3},{name:'velocity',components:3},{name:'color',components:4},{name:'orientation',components:4},...['age','life','size','initialSize','rotation','phase'].map(name=>({name,components:1})),...(p.follow?[{name:'origin',components:3}]:[])]);
   const init=new NodeGraph(),update=new NodeGraph();
   const op=(g,type,inputs={},params={})=>{const n=node(g,type,params);for(const [k,v] of Object.entries(inputs))wire(g,n,k,v);return n;};
-  const set=(g,name,value)=>op(g,'setAttribute',{value},{name}),get=(g,name)=>op(g,'attribute',{}, {name});
+  const set=(g,name,value)=>op(g,'setParticleField',{value},{name}),get=(g,name)=>op(g,'particleField',{}, {name});
+  const roll=(g,angle)=>{const half=op(g,'mul',{a:angle,b:[.5]});return op(g,'vec4',{x:[0],y:[0],z:op(g,'sin',{x:half}),w:op(g,'cos',{x:half})});};
   const rng=components=>op(init,'random',{}, {components});
   const signed=op(init,'mad',{a:rng(3),b:[2,2,2],c:[-1,-1,-1]});
   const mul=(g,a,b)=>op(g,'mul',{a,b}),add=(g,a,b)=>op(g,'add',{a,b}),scaleV=(g,v,s)=>op(g,'scale',{v,s});
@@ -87,7 +88,8 @@ function compile(p,scale){
   set(init,'velocity',velocity);set(init,'age',[0]);
   set(init,'life',op(init,'mad',{a:rng(1),b:[p.life*.25],c:[p.life*.75]}));
   const size=op(init,'mad',{a:rng(1),b:[p.size*scale*.5],c:[p.size*scale*.75]});set(init,'size',size);set(init,'initialSize',size);
-  const phase=mul(init,rng(1),[Math.PI*2]);set(init,'phase',phase);set(init,'rotation',p.vertical?[0]:phase);
+  const phase=mul(init,rng(1),[Math.PI*2]),initialRotation=p.vertical?[0]:phase;
+  set(init,'phase',phase);set(init,'rotation',initialRotation);set(init,'orientation',roll(init,initialRotation));
   // Contact flashes are visible on the spawn frame, before their first UPDATE.
   set(init,'color',p.fadeIn?[0,0,0,0]:p.color);
   const dt=op(update,'builtin',{}, {id:VM_BUILTIN.DELTA_TIME}),age=add(update,get(update,'age'),dt);set(update,'age',age);
@@ -97,7 +99,8 @@ function compile(p,scale){
   const color=op(update,'mix',{a:p.color,b:p.endColor??p.color,t});
   set(update,'color',p.alpha?mul(update,color,op(update,'vec4',{x:[1],y:[1],z:[1],w:envelope})):scaleV(update,color,envelope));
   set(update,'size',mul(update,get(update,'initialSize'),op(update,'mix',{a:[1],b:[p.endSize/p.size],t})));
-  set(update,'rotation',add(update,get(update,'rotation'),mul(update,dt,[p.spin??0])));
+  const rotation=add(update,get(update,'rotation'),mul(update,dt,[p.spin??0]));
+  set(update,'rotation',rotation);set(update,'orientation',roll(update,rotation));
   let vel=get(update,'velocity');
   if(p.accel)vel=add(update,vel,scaleV(update,p.accel.map(v=>v*scale),dt));
   if(p.drag)vel=scaleV(update,vel,op(update,'div',{a:[1],b:add(update,[1],mul(update,dt,[p.drag]))}));
