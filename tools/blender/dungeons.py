@@ -108,7 +108,8 @@ def build_dungeons(world,cube,mesh,finish,cone):
                 masonry_pier(x,n,bottom,top,head_slope=f.get('rise',0)/(n1-n0))
         def pitched_roof(f):
             x0,n0,x1,n1=f['rect'];middle=(x0+x1)/2;eave=height(f,n0)+4.4;ridge=eave+min(3.2,(x1-x0)*.28)
-            for a,b,ha,hb in [(x0-.3,middle,eave,ridge),(middle,x1+.3,ridge,eave)]:
+            overhang_eave=eave-.3*(ridge-eave)/(middle-x0)
+            for a,b,ha,hb in [(x0-.3,middle,overhang_eave,ridge),(middle,x1+.3,ridge,overhang_eave)]:
                 verts=[point(x,n,y+up) for up in [0,.24] for x,n,y in [(a,n0-.3,ha),(b,n0-.3,hb),(b,n1+.3,hb),(a,n1+.3,ha)]]
                 roof=mesh('Pitched weather roof',verts,[(3,2,1,0),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],roof_mat);physical.append(roof)
             for n in [n0,n1]:
@@ -132,6 +133,12 @@ def build_dungeons(world,cube,mesh,finish,cone):
                 else:pitched_roof(f)
             # Grid-aligned walls leave shared floor edges and authored doors open.
             for a,b,out in [((x0,n0),(x1,n0),(0,-.3)),((x1,n0),(x1,n1),(.3,0)),((x1,n1),(x0,n1),(0,.3)),((x0,n1),(x0,n0),(-.3,0))]:
+                if dungeon.get('entranceFacade'):
+                    # The portal replaces the front wall and receives the stair
+                    # parapets at its outer face, with no rail through its jambs.
+                    if f['id']=='court' and a[1]==b[1]==0:continue
+                    if f['id']=='entry' and a[0]==b[0]:
+                        a=(a[0],min(a[1],-.425));b=(b[0],min(b[1],-.425))
                 length=math.dist(a,b);steps=math.ceil(length/2)
                 for i in range(steps):
                     start=tuple(a[j]+(b[j]-a[j])*i/steps for j in range(2));end=tuple(a[j]+(b[j]-a[j])*(i+1)/steps for j in range(2));mid=tuple((start[j]+end[j])/2 for j in range(2));y=height(f,mid[1])
@@ -159,18 +166,32 @@ def build_dungeons(world,cube,mesh,finish,cone):
             # Two complete courses run across the entire partition above the
             # lintel, without cutting the first course at its bearing surface.
             solid_wall(a,b,y+3.42,y+3.42,.98,courses=(y+3.42,y+4.4))
-        # A small blind arcade above the threshold marks the dungeon from the cave.
-        front=height(floors[-1],-3)
+        # Covered entrances seat their arch in the facade; other monuments keep
+        # their freestanding approach marker.
+        attached=dungeon.get('entranceFacade',False)
+        front_n=0 if attached else -3;spring=1.7 if attached else 4.2
+        front=height(floors[-1],front_n)
+        if attached:
+            court=next(f for f in floors if f['id']=='court')
+            for a,b in [((court['rect'][0],0),(-2.65,0)),((2.65,0),(court['rect'][2],0))]:
+                solid_wall(a,b,front,front,4.4)
+            # Masonry above the ring carries the gable without filling the
+            # opening or laying a coplanar surface over the dressed stones.
+            for i in range(11):
+                a=i*math.pi/11;b=(i+1)*math.pi/11
+                verts=[point(x,n,y) for n in [-.275,.275] for x,y in [(2.65*math.cos(a),front+spring+2.65*math.sin(a)),(2.65*math.cos(b),front+spring+2.65*math.sin(b)),(2.65*math.cos(b),front+4.4),(2.65*math.cos(a),front+4.4)]]
+                physical.append(mesh('Entrance bearing spandrel',verts,[(3,2,1,0),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],wall_mat))
         for side in [-1,1]:
-            backing=cube(point(side*2.35,-3,front+2.1),(.57,.82,4.2),wall_mat,.0);physical.append(backing)
-            for row in range(7):cube(point(side*2.35,-3,front+.3+row*.6),(.6,.85,.6),trim_mat,.018)
+            backing=cube(point(side*2.35,front_n,front+spring/2),(.57,.82,spring),wall_mat,.0);physical.append(backing)
+            rows=3 if attached else 7;course=spring/rows
+            for row in range(rows):cube(point(side*2.35,front_n,front+course*(row+.5)),(.6,.85,course),trim_mat,.018)
         for i in range(11):
             a=i*math.pi/11;b=(i+1)*math.pi/11
-            vertices=[point(r*math.cos(t),n,front+4.2+r*math.sin(t)) for n in [-3.425,-2.575] for r in [2.05,2.65] for t in [a,b]]
+            vertices=[point(r*math.cos(t),n,front+spring+r*math.sin(t)) for n in [front_n-.425,front_n+.425] for r in [2.05,2.65] for t in [a,b]]
             # Match the outward winding of the freestanding arch stones.
             faces=[(2,3,1,0),(5,7,6,4),(1,5,4,0),(6,7,3,2),(4,6,2,0),(3,7,5,1)]
             mesh('Threshold arch',vertices,faces,trim_mat,.018)
-            core=[point(r*math.cos(t),n,front+4.2+r*math.sin(t)) for n in [-3.405,-2.595] for r in [2.07,2.63] for t in [a,b]]
+            core=[point(r*math.cos(t),n,front+spring+r*math.sin(t)) for n in [front_n-.405,front_n+.405] for r in [2.07,2.63] for t in [a,b]]
             physical.append(mesh('Threshold arch mortar',core,faces,wall_mat))
         finish('dungeon_'+dungeon['id'],physical)
     # Two native states make the personal reward legible without a UI marker.

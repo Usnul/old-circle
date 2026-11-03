@@ -53,7 +53,7 @@ function raycastSurfaces(parts){
 test.each(['','_distant'])('bevelled arches have continuous outward-facing surfaces at detail %s',async suffix=>{
   const store=new ModelStore({manifest,materials,read});
   const arches=[{name:'arch',center:[0,4.55,0],inner:1.69,outer:2.41,depth:.45,count:13},...DUNGEONS.map(d=>({
-    name:'dungeon_'+d.id,center:[d.origin[0],floorHeight(dungeonFloors(d,heightAt).at(-1),0,-3)+4.2,d.origin[1]+3],inner:2.05,outer:2.65,depth:.425,count:11,
+    name:'dungeon_'+d.id,center:[d.origin[0],d.entranceFacade?d.elevation+1.7:floorHeight(dungeonFloors(d,heightAt).at(-1),0,-3)+4.2,d.origin[1]+(d.entranceFacade?0:3)],inner:2.05,outer:2.65,depth:.425,count:11,attached:d.entranceFacade,
   }))];
   for(const arch of arches){
     const cast=raycastSurfaces(await store.load(arch.name+suffix)),half=Math.PI/arch.count/2;
@@ -70,8 +70,53 @@ test.each(['','_distant'])('bevelled arches have continuous outward-facing surfa
       if(stone===0&&f===0)continue;
       const angle=(stone+f)*Math.PI/arch.count,c=Math.cos(angle),s=Math.sin(angle),factor=Math.cos(half)/Math.cos((f-.5)*2*half),radius=(arch.inner+arch.outer)/2;
       for(const side of [-1,1])check([radius*c,radius*s,side*(arch.depth+.5)],[0,0,-side],.5,`stone ${stone}/${f} ${side<0?'back':'front'}`);
-      check([(arch.outer+.5)*c,(arch.outer+.5)*s,0],[-c,-s,0],arch.outer+.5-arch.outer*factor,`stone ${stone}/${f} crown`);
+      if(!arch.attached)check([(arch.outer+.5)*c,(arch.outer+.5)*s,0],[-c,-s,0],arch.outer+.5-arch.outer*factor,`stone ${stone}/${f} crown`);
       check([(arch.inner-.5)*c,(arch.inner-.5)*s,0],[c,s,0],arch.inner*factor-(arch.inner-.5),`stone ${stone}/${f} soffit`);
+    }
+  }
+});
+
+test.each(['','_distant'])('the cistern entrance has a weather roof and an attached portal clear of its stair rails at detail %s',async suffix=>{
+  const d=DUNGEONS.find(d=>d.id==='ashen-cistern'),store=new ModelStore({manifest,materials,read}),cast=raycastSurfaces(await store.load('dungeon_'+d.id+suffix));
+  for(const x of [-8,-3,2,7,12])for(const n of [1,3,5]){
+    const hit=cast(dungeonPoint(d,[x,n,2]),[0,1,0],7);
+    expect(hit,`court roof above ${x},${n}`).not.toBeNull();expect(hit.material).toBe(materials.stoneDark);
+    expect(hit.normal[1]).toBeLessThan(-.5);
+  }
+  // A full-height portal at the facade, with bearing masonry over its crown.
+  for(const x of [-2.35,2.35])expect(cast(dungeonPoint(d,[x,-1,1.3]),[0,0,-1],2)?.distance).toBeCloseTo(.575,2);
+  expect(cast(dungeonPoint(d,[0,-1,4.38]),[0,0,-1],2)?.material).toBe(materials.masonrySand);
+  for(const x of [-1,0,1])expect(cast(dungeonPoint(d,[x,-1,2]),[0,0,-1],2)).toBeNull();
+  // The former freestanding arch position is open above the coping.
+  for(const x of [-2.35,2.35])expect(cast(dungeonPoint(d,[x,-4,2]),[0,0,-1],2)).toBeNull();
+});
+
+test.each(['','_distant'])('the cistern court roof rests directly on its side walls and gables at detail %s',async suffix=>{
+  const d=DUNGEONS.find(d=>d.id==='ashen-cistern'),store=new ModelStore({manifest,materials,read}),parts=await store.load('dungeon_'+d.id+suffix);
+  const roof=raycastSurfaces(parts.filter(p=>p.material===materials.stoneDark)),masonry=raycastSurfaces(parts.filter(p=>p.material===materials.masonrySand));
+  const [x0,n0,x1,n1]=d.rooms.find(r=>r.id==='court').rect;
+  const sideWalls=[x0,x1].flatMap(x=>[n0+1,(n0+n1)/2,n1-1].map(n=>[x,n]));
+  const gables=[n0,n1].flatMap(n=>[x0+1,x0+6,x1-6,x1-1].map(x=>[x,n]));
+  // Cast the roof and bearing masonry separately: an upward roof-presence
+  // check alone cannot detect daylight between their two meeting surfaces.
+  for(const [x,n] of [...sideWalls,...gables]){
+    const below=dungeonPoint(d,[x,n,3]),above=dungeonPoint(d,[x,n,9]);
+    const underside=roof(below,[0,1,0],6),bearing=masonry(above,[0,-1,0],8);
+    expect(underside,`roof bearing at ${x},${n}`).not.toBeNull();expect(bearing,`masonry bearing at ${x},${n}`).not.toBeNull();
+    expect(underside.normal[1]).toBeLessThan(-.5);expect(bearing.normal[1]).toBeGreaterThan(.5);
+    expect(below[1]+underside.distance,`open seam at ${x},${n}`).toBeCloseTo(above[1]-bearing.distance,2);
+  }
+});
+
+test('cistern braziers leave both stair flights and their channel landings clear',()=>{
+  const d=DUNGEONS.find(d=>d.id==='ashen-cistern'),stairs=d.rooms.filter(r=>r.rise),layout=buildLayout();
+  const lamps=d.lamps.map(local=>layout.props.find(p=>p.model==='brazier'&&p.position.every((v,i)=>Math.abs(v-dungeonPoint(d,local)[i])<1e-6)));
+  expect(lamps.every(Boolean)).toBe(true);
+  for(const lamp of lamps){
+    const bounds=propBounds(lamp,manifest),x0=bounds[0]-d.origin[0],x1=bounds[3]-d.origin[0],n0=d.origin[1]-bounds[5],n1=d.origin[1]-bounds[2];
+    for(const stair of stairs){
+      const [sx0,sn0,sx1,sn1]=stair.rect;
+      expect(x1<=sx0||x0>=sx1||n1<=sn0||n0>=sn1+1.5,`brazier obstructs ${stair.id}`).toBe(true);
     }
   }
 });

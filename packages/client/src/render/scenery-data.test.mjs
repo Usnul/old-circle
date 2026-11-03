@@ -21,6 +21,7 @@ import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
 import {bakedPropTransform} from '@old-circle/game/world/prop-transform.mjs';
 import {loadStaticScene,loadStaticSceneAssets} from '@old-circle/game/world/static-scene-data.mjs';
+import {staticGeometry} from '@old-circle/game/world/static-geometry.mjs';
 import {encodeScenery,propTransform} from './scenery-authoring.mjs';
 import {decodeScenery} from './scenery-data.mjs';
 import {Scenery} from './scenery.mjs';
@@ -159,9 +160,8 @@ test('shipped scenery contains every authored placement and static collider in o
   const assets=await loadStaticSceneAssets();
   const dataset=await decodeScenery(arrayBuffer(await readFile(new URL('scenery.bin',root))),current,undefined,assets);
   const layout=buildLayout();
-  expect(assets.bindings).toHaveLength(7093);
-  expect(layout.props).toHaveLength(3719);
-  expect(dataset.entityCount).toBe(10812);
+  expect(assets.bindings).toHaveLength([...staticGeometry(layout)].length);
+  expect(dataset.entityCount).toBe(assets.bindings.length+layout.props.length);
   expect(dataset.computeComponentCount(RigidBody)).toBe(0);
   // Presentation deliberately strips rigid bodies; lanterns must index the
   // remaining native colliders, including terrain, before animated proxies exist.

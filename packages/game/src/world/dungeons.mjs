@@ -63,9 +63,10 @@ export const DUNGEONS=[{
   treasure:{id:'briar-knot',name:'The Briar Knot',at:[-9,23,4.8],embers:650,charm:'briar',description:'Unlocks the Briar Knot charm: faster stamina recovery, at the cost of protection. Choose a charm at a hearth.'},
 },{
   id:'ashen-cistern',name:'The Ashen Cistern',region:'desert',level:13,origin:[178,-128],elevation:22,
+  entranceFacade:true,
   materials:{floor:'flagstoneSand',wall:'masonrySand',trim:'brass',roof:'stoneDark'},
   rooms:[
-    {id:'court',name:'The Dry Fountain',rect:[-10,0,14,6],level:0,roof:false},
+    {id:'court',name:'The Dry Fountain',rect:[-10,0,14,6],level:0,roof:true},
     {id:'west',name:'The Salt Descent',rect:[-10,6,-6,22],level:0,rise:-4.8,roof:false},
     {id:'channel',name:'The Empty Channel',rect:[-10,22,14,28],level:-4.8,roof:true},
     {id:'vault',name:'The Cinder Reservoir',rect:[-6,10,10,22],level:-4.8,roof:true},
@@ -76,7 +77,7 @@ export const DUNGEONS=[{
   openings:[{a:[-2,0],b:[2,0],level:0}],entrance:[0,-30],exit:[12,6,0],
   connections:[['entry','court',[0,0,0]],['court','west',[-8,6,0]],['court','east',[12,6,0]],['west','channel',[-8,22,-4.8]],['east','channel',[12,22,-4.8]],['channel','vault',[2,22,-4.8]],['vault','forebay',[2,10,-4.8]]],
   encounters:[{id:'court',type:'archer',at:[-5,3,0],name:'Salt Road Watcher',health:130},{id:'east',type:'archer',at:[12,9,-.9],name:'The Bucket Keeper',health:130},{id:'channel',type:'hollow',at:[-6,25,-4.8],name:'The Thirsting',health:170},{id:'channel-hound',type:'hound',at:[9,25,-4.8],name:'Ash Hound',health:145},{id:'reservoir',type:'sentinel',at:[-1,14,-4.8],name:'Warden of the Last Water',health:310}],
-  lamps:[[-8,2,0],[12,2,0],[-8,18,-3.6],[-8,25,-4.8],[12,25,-4.8],[8,12,-4.8]],tombs:[[-4,12,-4.8],[8,17,-4.8]],
+  lamps:[[-8.8,2,0],[12.8,2,0],[-4.8,20,-4.8],[-8.8,26.5,-4.8],[12.8,26.5,-4.8],[8,12,-4.8]],tombs:[[-4,12,-4.8],[8,17,-4.8]],
   treasure:{id:'ashen-lens',name:'The Ashen Lens',at:[3,13,-4.8],embers:900,charm:'ash',description:'Unlocks the Ashen Lens charm: stronger arrows in exchange for weaker melee blows. Choose a charm at a hearth.'},
 },{
   id:'glass-observatory',name:'The Listening Observatory',region:'magic',level:19,origin:[-169,-216],elevation:43,

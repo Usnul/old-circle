@@ -1,7 +1,7 @@
 import {computeCatmullRomSpline} from '@woosh/meep-engine/src/core/math/spline/computeCatmullRomSpline.js';
 import {DUNGEONS,dungeonPoint} from './dungeons.mjs';
 // World coordinates are metres, Y-up. North is -Z. One continuous landscape.
-export const WORLD_VERSION = 6;
+export const WORLD_VERSION = 7;
 export const WORLD_BOUNDS=Object.freeze({minX:-240,minZ:-480,width:480,depth:640});
 // Leaving the landscape is fatal. The lateral inset keeps the kill volume inside
 // the terrain collider, so a body that walks off the playable surface is removed
@@ -12,6 +12,8 @@ export const WORLD_KILL_VOLUME=Object.freeze({
   minZ:WORLD_BOUNDS.minZ+15,maxZ:WORLD_BOUNDS.minZ+WORLD_BOUNDS.depth-15,
 });
 export const SPAWN = [0, 0, 23];
+// Keep the road junction as the encounter anchor and site its monument beside it.
+export const SPIRE_COURT={center:[-108,-220],halfSize:[22,18],elevation:23,monument:[-101,-214]};
 export const REGIONS = [
   { id: 'meadow', name: 'The Waking Fields', level: [1, 5], center: [0, 15], radius: 95, color: '#8eaa76', enemies: ['hollow', 'hound'], landmark: 'The Bell Without a Tongue', purpose: 'Learn the old road. Light the abbey hearth.', boss: 'warden' },
   { id: 'wood', name: 'Mourningwood', level: [5, 10], center: [-125, -55], radius: 100, color: '#365d50', enemies: ['hollow', 'hound', 'archer'], landmark: 'The Widow Oak', purpose: 'Recover the root seal beneath the Widow Oak.', boss: 'rootbound' },

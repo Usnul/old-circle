@@ -1,6 +1,6 @@
 import {seededRandom} from '@woosh/meep-engine/src/core/math/random/seededRandom.js';
 import {clamp} from '@woosh/meep-engine/src/core/math/clamp.js';
-import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS, ROAD_PATHS } from './regions.mjs';
+import { heightAt, pathDistance, regionAt, landmarkPosition, HEARTHS, REGIONS, ROAD_PATHS, SPIRE_COURT } from './regions.mjs';
 import {CAVES,inCaveFootprint} from './interiors.mjs';
 import {DUNGEONS,dungeonPoint,dungeonFootprint} from './dungeons.mjs';
 
@@ -20,6 +20,7 @@ export function generateLayout() {
   const lamp=(x,z,y=heightAt(x,z))=>{add('brazier',x,z,1,0,y);lights.push([x,y+1.25,z]);};
   const banner=(x,z,yaw=.6,y=heightAt(x,z))=>{const p=add('bannerStand',x,z,1,yaw,y);banners.push({position:p.position,yaw,phase:banners.length*.73});};
   for(let tx=-3;tx<3;tx++)for(let tz=-6;tz<2;tz++)add(`terrain_${tx}_${tz}`,0,0,1,0,0);
+  const inSpireCourt=(x,z,margin=0)=>Math.abs(x-SPIRE_COURT.center[0])<16+margin&&Math.abs(z-SPIRE_COURT.center[1])<12+margin;
   const clear=(x,z,margin=7)=>pathDistance(x,z)>margin&&HEARTHS.every(h=>Math.hypot(x-h.position[0],z-h.position[2])>8)&&Math.hypot(x,z+48)>24&&Math.hypot(x-38,z+23)>14&&REGIONS.every(r=>Math.hypot(x-r.center[0],z-r.center[1])>23)&&!(z<-284&&z>-356&&x>14&&x<82);
   const slope=(x,z)=>[(heightAt(x+1,z)-heightAt(x-1,z))/2,(heightAt(x,z+1)-heightAt(x,z-1))/2];
   const plant=(model,x,z,size=1)=>{
@@ -103,12 +104,6 @@ export function generateLayout() {
   }
   add('bellTower',-7,-64,1,0,floor+.06);
   add('arch',0,-32,1.55,0,floor+.06);
-  for(const side of [-1,1])for(let i=0;i<4;i++){
-    // The north-east side opens toward the reliquary's raised burial wing.
-    if(side===1&&i>=2)continue;
-    add('abbeyWall',side*18,-40-i*5,1,Math.PI/2,floor-.2);
-    add('buttress',side*20,-40-i*5,1,side*Math.PI/2,floor-.2);
-  }
   // Blender-authored hollow: a sealed rock shell and a central burial chamber.
   for(const cave of CAVES){
     add(cave.model,0,0,1,0,0);
@@ -155,9 +150,14 @@ export function generateLayout() {
     const x=162.3+i*.65,z=-115.5+(i%3)*.8;
     if(pathDistance(x,z)>3.5)add('block',x,z,[.65+(i%2)*.2,.3,.5],i*.7,heightAt(x,z)-.08);
   }
-  const [sx,sy,sz]=landmarkPosition('spire');
-  for(let i=0;i<5;i++)add('column',sx,sz,[2-i*.3,2.5,2-i*.3],0,sy+i*10);
+  const [sx,sz]=SPIRE_COURT.monument,sy=SPIRE_COURT.elevation+.72;
+  // Flush paving unifies the fork and side terrace. Three broad stone courses
+  // spread the monument's load while the centre of the court stays open.
+  add('abbeyFloor',...SPIRE_COURT.center,[1,1,.73],0,SPIRE_COURT.elevation);
+  for(const [size,bottom,thickness] of [[6,-.18,.30],[5,.12,.30],[4,.42,.30]])add('block',sx,sz,[size,thickness,size],0,SPIRE_COURT.elevation+bottom);
+  for(let i=0;i<5;i++)props.push({model:'column',position:[sx,sy+i*10,sz],scale:[2-i*.3,2.5,2-i*.3],yaw:0});
   add('halo',sx,sz,2,0,sy+30);
+  for(const [x,z] of [[-97,-226],[-97,-211]]){lamp(x,z,SPIRE_COURT.elevation+.06);banner(x-2,z,Math.PI/2,SPIRE_COURT.elevation+.06);}
   // Paired votive columns mark a processional approach to the frozen pilgrims.
   for(let i=0;i<3;i++)for(const side of [-1,1]){
     const x=95+side*7,z=-262-i*8;add('column',x,z,[1.4,1.8,1.4],0);lamp(x-side*1.8,z);
@@ -181,7 +181,7 @@ export function generateLayout() {
   const vegetation=new Set(['tree','pine','magicTree','winterTree','groundcover','groundcover1','dryGrass','moorGrass','fern','bracken','fallenTrunk']);
   for(let i=props.length-1;i>=0;i--){const p=props[i],x=p.position[0],z=p.position[2];
     const planted=vegetation.has(p.model),landingMargin=3*Math.max(p.scale[0],p.scale[2]);
-    if((planted&&(inCaveFootprint(x,z,3)||(Math.abs(x-1)<8.4+landingMargin&&Math.abs(z-20)<9.3+landingMargin)))||((planted||/^(rock|sandstone|frostRock)/.test(p.model))&&dungeonFootprint(x,z,2)))props.splice(i,1);
+    if((planted&&(inCaveFootprint(x,z,3)||(Math.abs(x-1)<8.4+landingMargin&&Math.abs(z-20)<9.3+landingMargin)))||((planted||/^(rock|sandstone|frostRock)/.test(p.model))&&(dungeonFootprint(x,z,2)||inSpireCourt(x,z,landingMargin))))props.splice(i,1);
   }
   return {props,solids,lights,banners};
 }

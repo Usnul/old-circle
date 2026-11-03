@@ -2,10 +2,11 @@ import {expect,test} from 'vitest';
 import {readFile} from 'node:fs/promises';
 import {encodeTerrain,decodeTerrain,loadTerrain,TERRAIN_GRID} from './terrain-data.mjs';
 import {generateTerrain} from './terrain-authoring.mjs';
-import {heightAt,terrainSurface,WORLD_BOUNDS} from './regions.mjs';
+import {heightAt,terrainSurface,WORLD_BOUNDS,pathDistance,landmarkPosition,SPIRE_COURT} from './regions.mjs';
 import {buildLayout} from './layout.mjs';
 import {generateLayout} from './layout-authoring.mjs';
 import {CAVES} from './interiors.mjs';
+import colliders from '../content/colliders.json' with {type:'json'};
 
 test('shipped terrain and layout match the deterministic native authoring bake',async()=>{
   const bytes=await readFile(new URL('../content/terrain.bin',import.meta.url));
@@ -73,6 +74,47 @@ test('arrival paving and abbey walls stand on level native terrain terraces',()=
   for(const x of [-20,0,18])for(const z of [-34,-40])expect(sample(x,z)).toBeCloseTo(.65,2);
   // The gate's graded departure must remain a walkable approach, not a cliff.
   for(let z=-8;z<8;z+=2)expect(Math.abs(sample(2,z+2)-sample(2,z))/2).toBeLessThan(.8);
+});
+
+test('the circular abbey arcade has no detached straight wall strips or buttresses',()=>{
+  const abbey=generateLayout().props.filter(({position:[x,,z]})=>Math.hypot(x,z+48)<25);
+  expect(abbey.filter(({model})=>model==='abbeyWall'||model==='buttress')).toEqual([]);
+  expect(abbey.some(({model})=>model==='bellTower')).toBe(true);
+  expect(abbey.filter(({model})=>model==='arch')).toHaveLength(17);
+});
+
+test('the spire stands beside the road fork on continuous broad stone footings',()=>{
+  const {props}=buildLayout(),[x,z]=SPIRE_COURT.monument,junction=landmarkPosition('spire');
+  const columns=props.filter(p=>p.model==='column'&&p.position[0]===x&&p.position[2]===z).sort((a,b)=>a.position[1]-b.position[1]);
+  expect(columns).toHaveLength(5);
+  const base=columns[0];
+  expect(Math.hypot(base.position[0]-junction[0],base.position[2]-junction[2])).toBeGreaterThan(12);
+  expect(pathDistance(base.position[0],base.position[2])).toBeGreaterThan(8);
+  const footings=props.filter(p=>p.model==='block'&&p.position[0]===x&&p.position[2]===z&&p.scale[0]>=base.scale[0]*2&&p.scale[2]>=base.scale[2]*2).sort((a,b)=>a.position[1]-b.position[1]);
+  expect(footings.length).toBeGreaterThanOrEqual(2);
+  expect(footings[0].position[1]).toBeLessThan(heightAt(x,z));
+  for(let i=1;i<footings.length;i++){
+    const lower=footings[i-1],upper=footings[i];
+    expect(lower.position[1]+lower.scale[1]).toBeCloseTo(upper.position[1],5);
+    expect(lower.scale[0]).toBeGreaterThanOrEqual(upper.scale[0]);
+    expect(lower.scale[2]).toBeGreaterThanOrEqual(upper.scale[2]);
+  }
+  expect(footings.at(-1).position[1]+footings.at(-1).scale[1]).toBeCloseTo(base.position[1],5);
+});
+
+test('the spire paving and monument foundation rest on a flat terrain terrace',()=>{
+  const {props}=buildLayout(),[cx,cz]=SPIRE_COURT.center,[mx,mz]=SPIRE_COURT.monument;
+  const paving=props.find(p=>p.model==='abbeyFloor'&&p.position[0]===cx&&p.position[2]===cz);
+  const foundation=props.filter(p=>p.model==='block'&&p.position[0]===mx&&p.position[2]===mz).sort((a,b)=>b.scale[0]-a.scale[0])[0];
+  expect(paving).toBeDefined();expect(foundation).toBeDefined();
+  for(const prop of [paving,foundation]){
+    const vertices=colliders[prop.model].flatMap(part=>part.vertices),xs=vertices.filter((_,i)=>i%3===0),zs=vertices.filter((_,i)=>i%3===2);
+    const x0=Math.min(...xs)*prop.scale[0],x1=Math.max(...xs)*prop.scale[0],z0=Math.min(...zs)*prop.scale[2],z1=Math.max(...zs)*prop.scale[2];
+    for(const u of [0,.25,.5,.75,1])for(const v of [0,.25,.5,.75,1]){
+      const x=prop.position[0]+x0+(x1-x0)*u,z=prop.position[2]+z0+(z1-z0)*v;
+      expect(heightAt(x,z),`${prop.model} support at ${x},${z}`).toBeCloseTo(SPIRE_COURT.elevation,2);
+    }
+  }
 });
 
 test('the burial passage has level cross-sections beneath the authored rock vault',()=>{
