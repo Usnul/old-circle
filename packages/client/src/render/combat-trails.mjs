@@ -20,18 +20,18 @@ export class CombatTrails {
       const weapon=WEAPONS[a.weapon];
       if(a.hp<=0||a.archetype==='hound'||weapon?.style!=='melee'||a.attackKind!=='weapon'||a.attackAge<weapon.active[0]||a.attackAge>weapon.active[1])continue;
       const pose=weaponPose(a),d=v3_distance(...pose.end,...focus);if(d>RANGE)continue;
-      candidates.push({key:`blade:${a.id}:${a.attackId}`,position:pose.end,age:a.attackAge,distance:a.id===player.id?-1:d,width:(a.boss?.085:.045)*pose.scale,life:.14,color:a.boss?[1,.66,.34,.45]:[.79,.89,.94,.42]});
+      candidates.push({key:`blade:${a.id}:${a.attackId}`,position:pose.end,age:a.attackAge,distance:a.id===player.id?-1:d,width:(a.boss?.085:.045)*pose.scale,life:.14,color:a.boss?[1,.66,.34,.70]:[.79,.89,.94,.66]});
     }
     for(const p of projectiles){
       if(isBossHazard(p))continue;const d=v3_distance(...p.position,...focus);if(d>RANGE)continue;
-      const arrow=p.weapon==='bow';candidates.push({key:`missile:${p.key??p.id}`,position:p.position,age:p.age,distance:d,width:arrow?.025:p.effect==='cinder'?.14:.09,life:arrow?.09:.22,color:arrow?[.70,.73,.68,.23]:p.effect==='cinder'?[1,.38,.10,.68]:[.28,.70,1,.62]});
+      const arrow=p.weapon==='bow';candidates.push({key:`missile:${p.key??p.id}`,position:p.position,age:p.age,distance:d,width:arrow?.025:p.effect==='cinder'?.14:.09,life:arrow?.09:.22,color:arrow?[.70,.73,.68,.41]:p.effect==='cinder'?[1,.38,.10,.90]:[.28,.70,1,.86]});
     }
     candidates.sort((a,b)=>a.distance-b.distance);const selected=candidates.slice(0,MAX_TRAILS),wanted=new Set(selected.map(c=>c.key)),live=new Set();
     for(const source of selected){
       live.add(source.key);let e=this.entries.get(source.key);
       if(!e){
         if(this.entries.size>=MAX_TRAILS){const old=[...this.entries].find(([key])=>!wanted.has(key));if(old){this.view.ecd.removeEntity(old[1].id);this.entries.delete(old[0]);}else continue;}
-        const trail=new Trail3D();trail.maxAge=source.life;trail.width=source.width;trail.radialSegments=4;trail.color.set(...source.color);
+        const trail=new Trail3D();trail.maxAge=source.life;trail.width=source.width;trail.radialSegments=4;trail.warmup=false;trail.color.set(...source.color);
         const t=new Transform64();t.setTranslation(...source.position);t.updateMatrix();
         const id=new Entity().add(t).add(trail).build(this.view.ecd);e={id,t,trail,last:source.position,age:source.age,fading:0};this.entries.set(source.key,e);
       }else{

@@ -46,7 +46,7 @@ export class EnemyMind {
     const w=this.world,a=this.actor,dx=goal[0]-a.x,dz=goal[2]-a.z,d=Math.hypot(dx,dz);let next=goal;
     const halfHeight=a.boss?1.2675:.845,from=[a.x,a.y-halfHeight,a.z],to=[goal[0],goal[1]-(this.target&&goal[0]===this.target.x&&goal[2]===this.target.z?(this.target.boss?1.2675:.845):halfHeight),goal[2]];
     if((d>.1||Math.abs(from[1]-to[1])>.65)&&(w.navigation?.inDungeon(from)||w.navigation?.inDungeon(to)||!w.lineOfSight([a.x,a.y,a.z],[goal[0],goal[1],goal[2]],w.actors.get(a.id),this.target&&w.actors.get(this.target.id)))){
-      if(!a.path||w.tick-(a.pathTick??0)>60){
+      if(!a.path||w.tick-(a.pathTick??0)>60+enemySeed(a.id)%30){
         const result=w.navigation?.tile(a.home).path(from,to);
         a.path=result?.reachable?result.points:[];a.pathTick=w.tick;
       }

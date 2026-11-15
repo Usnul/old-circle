@@ -19,6 +19,7 @@ import {layerEffect} from './particle-layers.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 import {rangedSightOrigin} from '@old-circle/game/simulation/aim.mjs';
 import {WorldSky} from './sky.mjs';
+import {octahedral_z_pole_uv_to_direction} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_z_pole_uv_to_direction.js';
 import {octahedral_skirt_source_texel} from '@woosh/meep-engine/src/shade/renderer/light/environment/octahedral_skirt_source_texel.js';
 
 // Exercise presentation and the real camera/mesh bridges without booting a browser or GPU.
@@ -168,7 +169,7 @@ test.each(['bow','staff'])('%s retains upward sight pitch when terrain retracts 
   }finally{await new Promise((resolve,reject)=>em.shutdown(resolve,reject));}
 });
 
-test('sky environment maps fill the 1-texel octahedral border skirt required by GPULightCollection',()=>{
+test('sky environment maps fill the 1-texel octahedral border skirt required by GPULightCollection and calibrate day/night radiance',()=>{
   const sky=new WorldSky(),texture=sky.texture(16),data=texture.image.source.data,size=256,source=new Uint32Array(2);
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
     if(x>0&&x<size-1&&y>0&&y<size-1)continue;
@@ -176,4 +177,44 @@ test('sky environment maps fill the 1-texel octahedral border skirt required by 
     const target=(y*size+x)*4,from=(source[1]*size+source[0])*4;
     expect(Array.from(data.subarray(target,target+4))).toEqual(Array.from(data.subarray(from,from+4)));
   }
+  const upperMean=level=>{
+    const f16=sky.texture(level).image.source.data,dir=new Float32Array(3),sum=[0,0,0];let weight=0,valid=true;
+    for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++){
+      octahedral_z_pole_uv_to_direction(dir,(x-.5)/254,(y-.5)/254);
+      const o=(y*size+x)*4,r=f16[o],g=f16[o+1],b=f16[o+2];
+      if(!(Number.isFinite(r)&&r>0&&Number.isFinite(g)&&g>0&&Number.isFinite(b)&&b>0&&f16[o+3]===1))valid=false;
+      if(dir[1]>=0){const w=dir[1]+.05;sum[0]+=r*w;sum[1]+=g*w;sum[2]+=b*w;weight+=w;}
+    }
+    expect(valid).toBe(true);
+    return sum.map(v=>v/weight);
+  };
+  const midnight=upperMean(0),dawn=upperMean(16),morning=upperMean(20),noon=upperMean(32);
+  const lum=([r,g,b])=>.2126*r+.7152*g+.0722*b;
+  expect(lum(noon)).toBeGreaterThan(lum(morning));
+  expect(lum(morning)).toBeGreaterThan(lum(dawn));
+  expect(noon[2]).toBeGreaterThan(noon[1]);expect(noon[1]).toBeGreaterThan(noon[0]);
+  expect(midnight[2]).toBeGreaterThan(midnight[0]);
+
+  const scene=new Scene();scene.atmosphere.enable_by_default();expect(scene.atmosphere.enabled).toBe(true);
+  const light=sky.update(scene,12);
+  expect(scene.atmosphere.enabled).toBe(false);
+  expect(scene.lights.environment).toBe(sky.texture(32));
+  expect(light.intensity).toBeGreaterThan(3);
+
+  const secondScene=new Scene();secondScene.atmosphere.enable_by_default();
+  sky.update(secondScene,12);
+  expect(secondScene.atmosphere.enabled).toBe(false);
+  expect(secondScene.lights.environment).toBe(sky.texture(32));
+
+  // Dusk (18:00, level 48) and early twilight (18:22.5, level 49) keep the western horizon brighter than the east without a 180° flip.
+  const horizonSide=(level,signX)=>{
+    const f16=sky.texture(level).image.source.data,dir=new Float32Array(3);let sum=0,count=0;
+    for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++){
+      octahedral_z_pole_uv_to_direction(dir,(x-.5)/254,(y-.5)/254);
+      if(dir[1]>.02&&dir[1]<.25&&dir[0]*signX>.8){const o=(y*size+x)*4;sum+=lum([f16[o],f16[o+1],f16[o+2]]);count++;}
+    }
+    return sum/count;
+  };
+  expect(horizonSide(48,-1)).toBeGreaterThan(horizonSide(48,1));
+  expect(horizonSide(49,-1)).toBeGreaterThan(horizonSide(49,1));
 });

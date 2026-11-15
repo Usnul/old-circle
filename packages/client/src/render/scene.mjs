@@ -70,7 +70,7 @@ export class WorldView {
     this.engine=await EngineHarness.bootstrap({configuration:(config,engine)=>{
       engine.renderingEnabled=false;
       config.addSystem(new TransformAttachmentSystem());
-      this.scene=EngineHarness.shadeScene(engine);
+      this.scene=EngineHarness.shadeScene(engine);this.scene.atmosphere.enabled=false;
       config.addSystem(new ShadedGeometrySystem(engine.graphics,this.scene));
       config.addSystem(new MeshSkinSystem(engine.graphics,this.scene));
       this.meshSystem = new MeshSystem(engine.graphics, this.scene, async url =>
@@ -80,7 +80,7 @@ export class WorldView {
       this.particles=new GPUParticleEmitterSystem(engine.graphics,this.scene,engine.assetManager);config.addSystem(this.particles);
       config.addSystem(new ParticipatingMediaSystem(engine.graphics,this.scene));
       config.addSystem(new DecalSystem(engine.graphics,engine.assetManager));
-      this.trailSystem=new Trail3DSystem(engine.graphics);config.addSystem(this.trailSystem);
+      this.trailSystem=new Trail3DSystem(engine.graphics,this.scene);config.addSystem(this.trailSystem);
       config.addSystem(new SoundListenerSystem(engine.sound.context));
       config.addSystem(new FluidEffectorsSystem());
       this.wind=new WorldWind();config.addSystem(this.wind);

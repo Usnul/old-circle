@@ -1,5 +1,4 @@
 import {BinaryBuffer} from '@woosh/meep-engine/src/core/binary/BinaryBuffer.js';
-import {Graph} from '@woosh/meep-engine/src/core/graph/v2/Graph.js';
 import {bt_mesh_validate} from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/query/bt_mesh_validate.js';
 import {bt_mesh_is_manifold} from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/query/bt_mesh_is_manifold.js';
 import {bt_mesh_from_indexed_geometry} from '@woosh/meep-engine/src/core/geom/3d/topology/struct/binary/io/bt_mesh_from_indexed_geometry.js';
@@ -68,27 +67,23 @@ export function decodeDungeonNavigation(bytes) {
 
 export function withDungeonNavigation(outdoors,atlases){
   const floors=new Map(DUNGEONS.map(d=>[d.id,dungeonFloors(d,heightAt)])),tiles=new WeakMap();
-  const roomAt=(d,p)=>floors.get(d.id).find(f=>{const y=floorHeight(f,p[0]-d.origin[0],d.origin[1]-p[2]);return y!==null&&Math.abs(p[1]-y)<1.5;});
+  const roomAt=(d,p)=>floors.get(d.id).find(f=>{const y=floorHeight(f,p[0]-d.origin[0],d.origin[1]-p[2]);return y!==null&&Math.abs(p[1]-y)<1.7;});
   const containing=p=>DUNGEONS.find(d=>roomAt(d,p));
   const entry=d=>{const p=dungeonPoint(d,d.entrance);p[1]=floorHeight(floors.get(d.id).at(-1),...d.entrance);return p;};
-  const graphs=new Map(DUNGEONS.map(d=>{const graph=new Graph();for(const f of floors.get(d.id))graph.addNode(f.id);for(const [a,b] of d.connections)graph.createEdge(a,b);return [d.id,graph];}));
-  const join=paths=>paths.find(p=>!p.reachable)??{reachable:true,points:paths.flatMap(p=>p.points),length:paths.reduce((sum,p)=>sum+p.length,0),resolution:.5};
-  const inside=(d,from,to)=>{
-    const atlas=atlases.get(d.id),direct=atlas.path(from,to);if(direct.reachable)return direct;
-    // Split long folded-surface queries at authored room connections. The native
-    // graph selects the rooms; every physical leg still uses Meep's navmesh.
-    const a=roomAt(d,from),b=roomAt(d,to);if(!a||!b)return direct;
-    const rooms=graphs.get(d.id).findPath(a.id,b.id);if(!rooms||rooms.length<2)return direct;
-    const points=[from];for(let i=1;i<rooms.length;i++){const link=d.connections.find(([a,b])=>a===rooms[i-1]&&b===rooms[i]||b===rooms[i-1]&&a===rooms[i]);points.push(dungeonPoint(d,link[2]));}points.push(to);
-    return join(points.slice(1).map((p,i)=>atlas.path(points[i],p)));
+  const join=paths=>{
+    const blocked=paths.find(p=>!p.reachable);if(blocked)return blocked;
+    const points=[];for(const p of paths)for(const pt of p.points)if(!points.length||Math.hypot(pt[0]-points.at(-1)[0],pt[1]-points.at(-1)[1],pt[2]-points.at(-1)[2])>.05)points.push(pt);
+    return {reachable:true,points,length:paths.reduce((sum,p)=>sum+p.length,0),resolution:.5};
   };
+  const inside=(d,from,to)=>atlases.get(d.id).path(from,to);
   return {...outdoors,inDungeon:p=>!!containing(p),tile(home){
     const outer=outdoors.tile(home);
     if(tiles.has(outer))return tiles.get(outer);
     const tile={...outer,path(from,to){
       const a=containing(from),b=containing(to);if(a?.id===b?.id)return a?inside(a,from,to):outer.path(from,to);
-      const paths=[];if(a)paths.push(inside(a,from,entry(a)));
-      paths.push(outer.path(a?entry(a):from,b?entry(b):to));if(b)paths.push(inside(b,entry(b),to));
+      const outFrom=a?entry(a):from,outTo=b?entry(b):to,outTile=outdoors.tile([(outFrom[0]+outTo[0])*.5,0,(outFrom[2]+outTo[2])*.5]);
+      const paths=[];if(a)paths.push(inside(a,from,outFrom));
+      paths.push(outTile.path(outFrom,outTo));if(b)paths.push(inside(b,outTo,to));
       return join(paths);
     }};tiles.set(outer,tile);return tile;
   }};

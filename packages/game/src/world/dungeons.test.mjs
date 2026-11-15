@@ -24,10 +24,10 @@ function walk(w,p,route){
 }
 
 test('stacked rooms retain their own navigation layer and connect through the ascent',async()=>{
-  const nav=await loadNavigation(),d=DUNGEONS[0],lower=dungeonPoint(d,[0,18,0]),upper=dungeonPoint(d,[0,18,4.8]);
+  const nav=await loadNavigation(),d=DUNGEONS[0],lower=dungeonPoint(d,[0,18,0]),upper=dungeonPoint(d,[0,18,4.8]),lantern=dungeonPoint(d,[0,23,4.8]);
   expect(dungeonRoomAt(lower,heightAt).room.id).toBe('chapter');
   expect(dungeonRoomAt(upper,heightAt).room.id).toBe('relic');
-  for(const [from,to] of [[lower,upper],[upper,lower]]){
+  for(const [from,to] of [[lower,upper],[upper,lower],[lower,lantern],[lantern,lower]]){
     const path=nav.tile(from).path(from,to);
     expect(path.reachable).toBe(true);expect(path.length).toBeGreaterThan(35);
     expect(path.points.some(p=>p[0]<d.origin[0]-13)).toBe(true);
@@ -36,6 +36,14 @@ test('stacked rooms retain their own navigation layer and connect through the as
   const samples=d.rooms.map(r=>dungeonPoint(d,[(r.rect[0]+r.rect[2])/2,(r.rect[1]+r.rect[3])/2,r.level+(r.rise??0)/2]));
   samples.push(dungeonPoint(d,[0,13,0]));
   for(const from of samples)for(const to of samples)expect(nav.tile(from).path(from,to).reachable,`${from} → ${to}`).toBe(true);
+  for(const deep of DUNGEONS){
+    const encounter=deep.encounters.at(-1),home=dungeonPoint(deep,encounter.at),approach=dungeonPoint(deep,[deep.entrance[0],deep.entrance[1]-4]);
+    approach[1]=heightAt(approach[0],approach[2]);
+    const out=nav.tile(home).path(home,approach),back=nav.tile(home).path(approach,home);
+    expect(out.reachable,`${deep.id} ${encounter.id} → approach`).toBe(true);
+    expect(back.reachable,`approach → ${deep.id} ${encounter.id}`).toBe(true);
+    for(let i=1;i<out.points.length;i++)expect(Math.hypot(out.points[i][0]-out.points[i-1][0],out.points[i][1]-out.points[i-1][1],out.points[i][2]-out.points[i-1][2])).toBeGreaterThan(.05);
+  }
 });
 
 test.each(DUNGEONS)('$name has connected room floors and a physically walkable route from the approach to its personal reward',async d=>{

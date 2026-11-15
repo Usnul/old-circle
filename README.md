@@ -1,6 +1,6 @@
 # Old Circle
 
-An original dark fantasy action RPG built on **Meep 3.61.1**, with a shared persistent world and a reproducible Blender content pipeline. The game is under active development; the current playable world still needs substantial content and art work before release.
+An original dark fantasy action RPG built on **Meep 3.71.1**, with a shared persistent world and a reproducible Blender content pipeline. The game is under active development; the current playable world still needs substantial content and art work before release.
 
 ![Old Circle concept and title-screen artwork](packages/client/public/assets/art/old-circle-concept.png)
 
@@ -25,7 +25,7 @@ pnpm server                  # serves the built client at http://127.0.0.1:8787
 
 The production host defaults to loopback. `HOST`, `PORT` and `OLD_CIRCLE_DATA_DIR` configure it. A remote deployment needs HTTPS/WSS for WebGPU and a secure browser context. Public hosting, authentication and operational deployment are not configured here.
 
-The production build includes Brotli sidecars for compressible code and native assets. The host streams them when the browser accepts Brotli, with an uncompressed fallback. Geometry currently transfers in 27.3 MiB and decodes to the unchanged 115.7 MiB catalogue used by the offline cache. Compression runs during the build, outside the live simulation.
+The production build includes Brotli sidecars for compressible code and native assets. The host streams them when the browser accepts Brotli, with an uncompressed fallback. Geometry currently transfers in 26.9 MiB and decodes to the 101.3 MiB BVH8 meshlet catalogue used by the offline cache. Compression runs during the build, outside the live simulation.
 
 ## Play
 
@@ -44,7 +44,7 @@ The combat HUD shows current resources, weapon costs, remaining arrows when usin
 
 The current world is about 480 × 640 metres, with six connected biome zones and regional hearths, an abbey, a traversable rock hollow, six layered regional dungeons, five normal enemy archetypes and six keepers. The dungeons include a sunken cistern, a three-storey observatory and returning galleries, with thirty authored guards and personal treasures. The keepers add bell waves, root traps, cinder volleys, mirrored sigils, frost lines and a final judgment combination to their weapon attacks, with stronger patterns below half health. Five armor sets trade protection, poise, movement, stealth and resource recovery, with distinct Blender skins. Five exploration charms add mutually exclusive blessings and burdens for stamina, arrows, spells, protection or damage. Safe hearths change armor and charms, replenish a basic quiver and reinforce owned weapons up to seal-limited rank +6. The first reliquary's personal reward grants a permanent flask slot. All six seals unlock a personal ending in the journal; the shared world remains playable. Characters use Blender armatures and weighted skins, directional locomotion, jump/landing and weapon actions, played by Meep's animation system. Deaths transfer the skeleton to Meep ragdoll physics.
 
-Each player receives a bounded nearby view through Meep's packed binary adapters and LZ4 compression. Prediction and replay run in a warm simulation Worker; Meep's adaptive render playout smooths presentation. Disconnects continue locally, and reconnect carries only the character into the authoritative world. The host defaults to eight players. Scenery uses authored detail levels and streams local scene instances; a complete serialized geometry cache supports travel after a connection loss. Native trails and decals present combat and foot contacts. Sopra uses geometric occlusion, material transmission and 1,033 baked reverb probes, with acoustic pathing disabled. See [architecture](docs/ARCHITECTURE.md) for authority, memory and operating limits. Public identity and internet transport remain release work.
+Each player receives a bounded nearby view through Meep's packed binary adapters and LZ4 compression. Prediction and replay run in a warm simulation Worker; Meep's adaptive render playout smooths presentation. Disconnects continue locally, and reconnect carries only the character into the authoritative world. The host defaults to eight players. Scenery uses authored detail levels and streams local scene instances; a complete serialized geometry cache supports travel after a connection loss. Native trails and decals present combat and foot contacts. Sopra uses geometric occlusion, material transmission and 1,126 baked reverb probes, with acoustic pathing disabled. See [architecture](docs/ARCHITECTURE.md) for authority, memory and operating limits. Public identity and internet transport remain release work.
 
 ## Develop
 
