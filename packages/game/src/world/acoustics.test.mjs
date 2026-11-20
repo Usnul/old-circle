@@ -1,87 +1,35 @@
 import {expect,test,vi} from 'vitest';
-import {AcousticSourceState} from '@woosh/meep-engine/src/engine/sound/simulation/core/AcousticSourceState.js';
-import {AcousticSolution} from '@woosh/meep-engine/src/engine/sound/simulation/core/AcousticSolution.js';
-import {AcousticProbeField} from '@woosh/meep-engine/src/engine/sound/simulation/probe/AcousticProbeField.js';
-import {RayHit} from '@woosh/meep-engine/src/engine/sound/simulation/core/RayHit.js';
-import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
-import {createWorldAcoustics,ACOUSTIC_MATERIALS} from './acoustics.mjs';
-import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
-import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
-import {Transform64} from '@woosh/meep-engine/src/engine/ecs/transform/Transform64.js';
-import {TRANSFORM64_EVENT_CHANGE} from '@woosh/meep-engine/src/engine/ecs/transform/TRANSFORM64_EVENT_CHANGE.js';
-import {Name} from '@woosh/meep-engine/src/engine/ecs/name/Name.js';
-import {Collider} from '@woosh/meep-engine/src/engine/physics/ecs/Collider.js';
-import {BoxShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/BoxShape3D.js';
-import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
 import {Sampler2D} from '@woosh/meep-engine/src/engine/graphics/texture/sampler/Sampler2D.js';
 import {HeightMapShape3D} from '@woosh/meep-engine/src/core/geom/3d/shape/HeightMapShape3D.js';
-import {heightAt,WORLD_VERSION,WORLD_BOUNDS} from './regions.mjs';
-import baked from '../content/acoustic-probes.json' with {type:'json'};
+import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
+import {ACOUSTIC_MATERIALS,materialForModel} from './acoustics.mjs';
+import {buildLayout} from './layout.mjs';
 
-test('acoustics consumes live components and follows their pose and dataset lifecycle', async () => {
-  const entityManager = new EntityManager();
-  const dataset = new EntityComponentDataset();
-  dataset.registerManyComponentTypes([Transform64, Collider, Name]);
-  entityManager.attachDataset(dataset);
-  await new Promise((resolve, reject) => entityManager.startup(resolve, reject));
-
-  const entity = dataset.createEntity();
-  const transform = new Transform64();
-  transform.setTranslation(4, 0, 0);
-  transform.setScale(2, 1, 1);
-  transform.updateMatrix();
-  const collider = new Collider();
-  const shape = BoxShape3D.from(1, 1, 1);
-  collider.shape = shape;
-  const name = new Name('woodPlank');
-  dataset.addComponentToEntity(entity, transform);
-  dataset.addComponentToEntity(entity, collider);
-  dataset.addComponentToEntity(entity, name);
-
-  const world = await createWorldAcoustics(entityManager);
-  try {
-    expect(world.entityManager).toBe(entityManager);
-    expect(entityManager.dataset).toBe(dataset);
-    expect(dataset.entityCount).toBe(1);
-    expect(world.bodies).toBe(1);
-    expect(dataset.getComponent(entity, Transform64)).toBe(transform);
-    expect(dataset.getComponent(entity, Collider)).toBe(collider);
-    expect(dataset.getComponent(entity, Name)).toBe(name);
-    expect(collider.shape).toBe(shape);
-    const body = dataset.getComponent(entity, AcousticBody);
-    expect(body.material).toBe(ACOUSTIC_MATERIALS.wood);
-
-    const ray = new Ray3();
-    const hit = new RayHit();
-    ray.set([0, 0, 0, 1, 0, 0, 20]);
-    const intersects = () => world.simulator.occluderIndex.closestHit(ray, hit);
-    expect(intersects()).toBe(true);
-    expect(hit.position[0]).toBeCloseTo(2);
-
-    transform.setTranslation(10, 0, 0);
-    dataset.sendEvent(entity, TRANSFORM64_EVENT_CHANGE);
-    expect(intersects()).toBe(true);
-    expect(hit.position[0]).toBeCloseTo(8);
-
-    dataset.removeComponentFromEntity(entity, AcousticBody);
-    expect(intersects()).toBe(false);
-    dataset.addComponentToEntity(entity, body);
-    expect(intersects()).toBe(true);
-
-    entityManager.detachDataset();
-    expect(intersects()).toBe(false);
-    transform.setTranslation(14, 0, 0);
-    dataset.sendEvent(entity, TRANSFORM64_EVENT_CHANGE);
-    expect(intersects()).toBe(false);
-    entityManager.attachDataset(dataset);
-    expect(intersects()).toBe(true);
-    expect(hit.position[0]).toBeCloseTo(12);
-
-    dataset.removeEntity(entity);
-    expect(intersects()).toBe(false);
-  } finally {
-    await new Promise((resolve, reject) => entityManager.shutdown(resolve, reject));
+test('every authored scenery model maps to a three-band acoustic material',()=>{
+  const models=new Set(buildLayout().props.map(prop=>prop.model));
+  expect(models.size).toBeGreaterThan(20);
+  const known=new Set(Object.values(ACOUSTIC_MATERIALS));
+  for(const model of models)expect(known.has(materialForModel(model))).toBe(true);
+  for(const material of known){
+    for(const band of [0,1,2]){
+      expect(material.absorption[band]).toBeGreaterThanOrEqual(0);expect(material.absorption[band]).toBeLessThanOrEqual(1);
+      expect(material.transmission[band]).toBeGreaterThanOrEqual(0);expect(material.transmission[band]).toBeLessThanOrEqual(1);
+    }
+    // Walls and plants pass more bass than treble.
+    expect(material.transmission[0]).toBeGreaterThanOrEqual(material.transmission[2]);
   }
+});
+
+test('terrain, masonry, timber, snow and plants are distinguished',()=>{
+  expect(materialForModel('terrain')).toBe(ACOUSTIC_MATERIALS.ground);
+  expect(materialForModel('terrain_-2_1')).toBe(ACOUSTIC_MATERIALS.ground);
+  expect(materialForModel('abbeyWall')).toBe(ACOUSTIC_MATERIALS.stone);
+  expect(materialForModel('fallenTrunk')).toBe(ACOUSTIC_MATERIALS.wood);
+  expect(materialForModel('pine')).toBe(ACOUSTIC_MATERIALS.wood);
+  expect(materialForModel('frostRock2')).toBe(ACOUSTIC_MATERIALS.snow);
+  expect(materialForModel('bracken')).toBe(ACOUSTIC_MATERIALS.foliage);
+  // Foliage lets most sound through; masonry does not.
+  expect(ACOUSTIC_MATERIALS.foliage.transmission[1]).toBeGreaterThan(ACOUSTIC_MATERIALS.stone.transmission[1]*10);
 });
 
 test('native terrain rays cross only a linear number of cells across the world',()=>{
@@ -99,56 +47,4 @@ test('native terrain rays cross only a linear number of cells across the world',
     expect(sample.mock.calls.length).toBeLessThanOrEqual(4*(240+320));
   }
   ray.set([-400,50,-500,-1,0,0,Infinity]);expect(terrain.raycast(hit,ray)).toBe(false);
-});
-
-test('acoustics preserves and raycasts the original translated terrain collider', async ({onTestFinished}) => {
-  const entityManager=new EntityManager(),dataset=new EntityComponentDataset();
-  dataset.registerManyComponentTypes([Transform64,Collider,Name]);entityManager.attachDataset(dataset);
-  const entity=dataset.createEntity(),transform=new Transform64(),collider=new Collider();
-  const shape=HeightMapShape3D.from(new Sampler2D(new Float32Array(9).fill(40),1,3,3),4,50,4);
-  collider.shape=shape;transform.setTranslation(0,-15,-100);
-  dataset.addComponentToEntity(entity,transform);dataset.addComponentToEntity(entity,collider);dataset.addComponentToEntity(entity,new Name('terrain'));
-  const {simulator}=await createWorldAcoustics(entityManager);
-  onTestFinished(()=>new Promise((resolve,reject)=>entityManager.shutdown(resolve,reject)));
-  expect(collider.shape).toBe(shape);
-  expect(dataset.getComponent(entity,AcousticBody).material).toBe(ACOUSTIC_MATERIALS.ground);
-  const ray=new Ray3(),hit=new RayHit();ray.set([0,50,-100,0,-1,0,30]);
-  expect(simulator.occluderIndex.closestHit(ray,hit)).toBe(true);
-  expect(Array.from(hit.position)).toEqual([0,25,-100]);
-});
-
-test('native acoustics distinguish an open doorway, stone partition, stacked floor and canonical terrain',async({onTestFinished})=>{
-  const {simulator,bodies,entityManager}=await createWorldAcoustics();
-  onTestFinished(() => new Promise((resolve, reject) => entityManager.shutdown(resolve, reject)));
-  expect(bodies).toBe(baked.bodies);expect(simulator.pathing).toBe(false);
-  const solve=(listener,source)=>{const out=new AcousticSolution(),state=new AcousticSourceState();for(let i=0;i<12;i++)simulator.solveFor(listener,source,.05,state,out);return out;};
-  const open=solve([35,5.8,-55],[28,5.8,-55]);expect(open.occlusion).toBeLessThan(.05);
-  const wall=solve([35,5.8,-53],[28,5.8,-53]);expect(wall.occlusion).toBeGreaterThan(.95);expect(wall.transmission[0]).toBeGreaterThan(wall.transmission[2]);expect(wall.transmission[2]).toBeLessThan(.01);
-  const floor=solve([38,10.6,-66],[38,5.8,-66]);expect(floor.occlusion).toBeGreaterThan(.95);expect(floor.hasPath).toBe(false);
-  for(const [x,z] of [[-201.3,122.6],[140.2,44.9],[-29.4,-196.3]]){
-    const y=heightAt(x,z),hit=new RayHit(),ray=new Ray3();ray.set([x,y+.5,z,0,-1,0,1]);expect(simulator.occluderIndex.closestHit(ray,hit)).toBe(true);expect(hit.position[1]).toBeCloseTo(y,4);
-  }
-  let terrain,transform;
-  entityManager.dataset.traverseEntities([Collider,Name,Transform64],(collider,name,t)=>{
-    if(name.getValue()==='terrain'){terrain=collider.shape;transform=t;}
-  });
-  expect(terrain.constructor).toBe(HeightMapShape3D);
-  const {minX,minZ,width,depth}=WORLD_BOUNDS,hit=new Float32Array(6),ray=new Ray3();
-  for(let i=0;i<80;i++){
-    const x=minX+2+(i*37.31)%(width-4),z=minZ+2+(i*79.17)%(depth-4),y=heightAt(x,z);
-    ray.set([x-transform.translation_x,y-transform.translation_y+.5,z-transform.translation_z,0,-1,0,1]);
-    expect(terrain.raycast(hit,ray)).toBe(true);
-    expect(hit[1]+transform.translation_y).toBeCloseTo(y,4);
-  }
-});
-
-test('baked reverb selects visible probes on the correct dungeon storey without a pathing graph',async({onTestFinished})=>{
-  const {simulator,entityManager}=await createWorldAcoustics();
-  onTestFinished(() => new Promise((resolve, reject) => entityManager.shutdown(resolve, reject)));
-  const field=new AcousticProbeField();field.fromJSON(baked.field);
-  expect(baked.worldVersion).toBe(WORLD_VERSION);expect(field.hasVisibility).toBe(false);expect(field.size).toBeGreaterThan(500);
-  const lower=field.nearestVisibleIndex(38,5.8,-66,simulator.occluderIndex),upper=field.nearestVisibleIndex(38,10.6,-72,simulator.occluderIndex);
-  expect(field.probeY(lower)).toBeLessThan(8);expect(field.probeY(upper)).toBeGreaterThan(10);
-  expect(field.reverbBand(lower,0)).toBeGreaterThan(field.reverbBand(lower,2));expect(field.reverbDecay(upper)).toBeGreaterThan(.3);
-  for(const probe of baked.field.probes)for(const value of [...probe.reverbDecay,...probe.reverbDirection])expect(Number.isFinite(value)).toBe(true);
 });

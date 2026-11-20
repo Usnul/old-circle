@@ -6,7 +6,7 @@ import {ACOUSTIC_VOICE_LIMIT} from './acoustics.mjs';
 test('local hurt, healing and exertion stay audible during spatial crowding and replay once per authority epoch',()=>{
   const audio=new WorldAudio({},{lights:[]}),player={id:'player',x:1,y:2,z:3};
   audio.play=vi.fn();audio.sopra={update:vi.fn(),listenerPosition:null,setListener:vi.fn(function(position){this.listenerPosition=position;}),playOneShot:vi.fn()};
-  audio.acoustics={update:vi.fn(),stats:{cover:0},simulator:{forget:vi.fn()}};audio.wind={fadeToGainDb:vi.fn()};
+  audio.acoustics={update:vi.fn(),start:vi.fn(),forget:vi.fn(),stats:{}};audio.wind={fadeToGainDb:vi.fn()};
   for(const name of ['impact','hurt','effort','potion'])audio.localEvents[name]=Object.assign(new EventDescription(),{label:name,is3D:false});
   for(let i=0;i<ACOUSTIC_VOICE_LIMIT;i++)audio.voices.add({state:1});
   const event=(type,id,key,weapon)=>({type,id,key,weapon,damage:12,position:[1,2,3]});

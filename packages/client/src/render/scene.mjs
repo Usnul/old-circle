@@ -158,7 +158,7 @@ export class WorldView {
     this.streaming.rebuildGround();
     await this.geometryCache.warm(p=>progress('Loading world assets…',.65+p*.18));
     this.banners=new WorldBanners(this,layout.banners);
-    this.audio=new WorldAudio(this.engine,layout);await this.audio.start();
+    this.audio=new WorldAudio(this.engine,layout,this.scene);await this.audio.start();
     this.footsteps=new WorldFootsteps(this);
     this.bossHazards=new BossHazards(this);
     this.combatTrails=new CombatTrails(this);
@@ -259,7 +259,7 @@ export class WorldView {
     this.engine.graphics.renderer.exposure_compensation=this.exposureBias;
     this.sun.l.intensity.set(sky.intensity);this.sun.l.color.set(...sky.color);
     t64_look_rotation(this.sun.t,...sky.direction.map(v=>-v),0,1,0);this.sun.t.updateMatrix();t64_announce_change(this.ecd,this.sun.id);
-    this.audio.update(snapshot,player,dt);
+    this.audio.update(snapshot,player,dt,this.shelter??0);
     this.footsteps.update(presented,playerId,this.poses.epoch,renderTime,dt);
     this.bossHazards.update(snapshot.projectiles,player,this.poses.epoch,dt);
     this.combatTrails.update(presented,snapshot.projectiles,player,this.poses.epoch,dt);

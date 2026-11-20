@@ -3,31 +3,77 @@ import {MockAudioContext} from '@woosh/meep-engine/src/engine/sound/sopra/util/M
 import {SopraEngine} from '@woosh/meep-engine/src/engine/sound/sopra/SopraEngine.js';
 import {EventDescription} from '@woosh/meep-engine/src/engine/sound/sopra/definition/EventDescription.js';
 import {SampleAudioClip} from '@woosh/meep-engine/src/engine/sound/sopra/definition/clip/SampleAudioClip.js';
+import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
+import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {ParentEntity} from '@woosh/meep-engine/src/engine/ecs/parent/ParentEntity.js';
+import {EntityManager} from '@woosh/meep-engine/src/engine/ecs/EntityManager.js';
+import {EntityComponentDataset} from '@woosh/meep-engine/src/engine/ecs/EntityComponentDataset.js';
 import Vector3 from '@woosh/meep-engine/src/core/geom/Vector3.js';
+import {ACOUSTIC_MATERIALS} from '@old-circle/game/world/acoustics.mjs';
 import {buildLayout} from '@old-circle/game/world/layout.mjs';
+import {Scenery} from './scenery.mjs';
 import {WorldAudio} from './audio.mjs';
 import {WorldAcoustics} from './acoustics.mjs';
 
-test('Sopra spatial voices use band transmission, bounded reverb and a dry wind bus with no pathing',async({onTestFinished})=>{
-  const context=new MockAudioContext(),nodes=[];
-  for(const name of ['createGain','createPanner','createBiquadFilter','createConvolver']){const create=context[name].bind(context);context[name]=()=>{const node=create();nodes.push(node);return node;};}
+async function startManager(){
+  const entityManager=new EntityManager(),dataset=new EntityComponentDataset();
+  dataset.registerManyComponentTypes([Scenery,ShadedGeometry,ParentEntity]);
+  entityManager.attachDataset(dataset);
+  await new Promise((resolve,reject)=>entityManager.startup(resolve,reject));
+  return {entityManager,dataset};
+}
+const stopManager=entityManager=>new Promise((resolve,reject)=>entityManager.shutdown(resolve,reject));
+
+function sopraWithMock(){
+  const context=new MockAudioContext();
   const buffer=context.createBuffer(1,context.sampleRate,context.sampleRate),provider={get:async()=>buffer,tryGet:()=>buffer};
-  const sopra=new SopraEngine(context,context.destination,provider),layout=buildLayout(),audio=new WorldAudio({},layout);
-  audio.sopra=sopra;audio.acoustics=await WorldAcoustics.create(sopra);
-  onTestFinished(() => new Promise((resolve, reject) => audio.acoustics.entityManager.shutdown(resolve, reject)));
-  const description=new EventDescription();description.is3D=true;description.distanceMax=45;description.maxInstances=64;description.rootClip=SampleAudioClip.from('test.wav');
+  return new SopraEngine(context,context.destination,provider);
+}
+
+test('drawn scenery primitives carry the acoustic material of their authored model',async({onTestFinished})=>{
+  const {entityManager,dataset}=await startManager();onTestFinished(()=>stopManager(entityManager));
+  const acoustics=await WorldAcoustics.create(sopraWithMock(),entityManager);
+  const primitive=(model)=>{
+    const root=dataset.createEntity();
+    if(model){const scenery=new Scenery();scenery.model=model;dataset.addComponentToEntity(root,scenery);}
+    const child=dataset.createEntity();
+    dataset.addComponentToEntity(child,ParentEntity.from(root));dataset.addComponentToEntity(child,new ShadedGeometry());
+    return child;
+  };
+  const terrain=primitive('terrain_0_0'),wall=primitive('arch'),plank=primitive('fallenTrunk'),fern=primitive('fern'),frost=primitive('frostRock1'),character=primitive(null);
+  acoustics.surfaces.update();
+  const material=entity=>dataset.getComponent(entity,AcousticBody)?.material;
+  expect(material(terrain)).toBe(ACOUSTIC_MATERIALS.ground);
+  expect(material(wall)).toBe(ACOUSTIC_MATERIALS.stone);
+  expect(material(plank)).toBe(ACOUSTIC_MATERIALS.wood);
+  expect(material(fern)).toBe(ACOUSTIC_MATERIALS.foliage);
+  expect(material(frost)).toBe(ACOUSTIC_MATERIALS.snow);
+  // Actors keep Meep's default material; only authored scenery is named.
+  expect(material(character)).toBeUndefined();
+  expect(acoustics.surfaces.bodies).toBe(5);
+  dataset.removeEntity(wall);
+  expect(acoustics.surfaces.bodies).toBe(4);
+});
+
+test('the GPU acoustic system becomes the simulator propagation when graphics are supplied',async({onTestFinished})=>{
+  const {entityManager}=await startManager();onTestFinished(()=>stopManager(entityManager));
+  const extensions=[],graphics={scene_context:()=>null,add_extension:e=>{extensions.push(e);return e;},remove_extension:e=>extensions.splice(extensions.indexOf(e),1)};
+  const acoustics=await WorldAcoustics.create(sopraWithMock(),entityManager,{graphics,scene:{isScene:true}});
+  expect(acoustics.simulator.propagation).toBe(acoustics.gpu.propagation);
+  expect(extensions).toHaveLength(1);
+});
+
+test('acoustic voices reverberate through the effects bus while wind stays dry, within a bounded voice budget',async({onTestFinished})=>{
+  const {entityManager}=await startManager();onTestFinished(()=>stopManager(entityManager));
+  const sopra=sopraWithMock(),layout=buildLayout(),audio=new WorldAudio({},layout);
+  audio.sopra=sopra;audio.acoustics=await WorldAcoustics.create(sopra,entityManager);
+  expect(sopra.busGraph.getAcousticReverb('effects')).not.toBeNull();
+  expect(sopra.busGraph.getAcousticReverb('ambient')).toBeNull();
+  const description=new EventDescription();description.is3D=true;description.distanceMax=45;description.maxInstances=64;description.busId='effects';description.rootClip=SampleAudioClip.from('test.wav');
   const listener=new Vector3(35,5.8,-53);sopra.listenerPosition=listener;
   const voice=audio.spatial(description,[28,5.8,-53]);expect(voice.acoustic).toBe(true);
-  const panners=nodes.filter(n=>n.kind==='panner');expect(panners).toHaveLength(1); // No corner-leak send.
-  for(let i=0;i<12;i++)audio.acoustics.update(listener,audio.voices,.05);
-  const taps=nodes.filter(n=>n.kind==='gain'&&n.connections.includes(panners[0]));expect(taps).toHaveLength(3);
-  // The subtractive taps sum to the low-band amplitude: sqrt(transmitted energy).
-  expect(taps.reduce((sum,n)=>sum+n.gain.value,0)).toBeCloseTo(Math.sqrt(.1),2);expect(Math.min(...taps.map(n=>n.gain.value))).toBeLessThan(.1);
-  expect(sopra.busGraph.getOutput('effects').connections).toContain(audio.acoustics.reverb.input);
-  expect(sopra.busGraph.getOutput('ambient').connections).not.toContain(audio.acoustics.reverb.input);
-  const convolved=nodes.filter(n=>n.kind==='convolver'&&n.buffer);expect(convolved.length).toBeGreaterThan(0);expect(convolved.every(n=>n.buffer.duration<=2.05)).toBe(true);
-  expect(audio.acoustics.simulator.pathing).toBe(false);
+  audio.acoustics.update(listener,audio.voices);expect(audio.acoustics.stats.voices).toBe(1);
   expect(audio.spatial(description,[200,10,150])).toBeNull();
   for(let i=0;i<40;i++)audio.spatial(description,[35+i*.05,5.8,-54]);expect(audio.voices.size).toBe(24);
-  for(const v of [...audio.voices])v.stop();expect(audio.voices.size).toBe(0);audio.acoustics.update(listener,audio.voices,.05);expect(audio.acoustics.stats.voices).toBe(0);
+  for(const v of [...audio.voices])v.stop();expect(audio.voices.size).toBe(0);audio.acoustics.update(listener,audio.voices);expect(audio.acoustics.stats.voices).toBe(0);
 });

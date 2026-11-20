@@ -1,44 +1,94 @@
-import {AcousticProbeField} from '@woosh/meep-engine/src/engine/sound/simulation/probe/AcousticProbeField.js';
-import {ProbeReverbRenderer} from '@woosh/meep-engine/src/engine/sound/simulation/render/ProbeReverbRenderer.js';
+import {AcousticSimulator} from '@woosh/meep-engine/src/engine/sound/simulation/AcousticSimulator.js';
+import {AcousticBody} from '@woosh/meep-engine/src/engine/sound/simulation/ecs/AcousticBody.js';
+import {GPUAcousticSystem} from '@woosh/meep-engine/src/engine/graphics3/GPUAcousticSystem.js';
+import {AcousticReverbEffect} from '@woosh/meep-engine/src/engine/sound/sopra/definition/effect/AcousticReverbEffect.js';
+import {SopraEngine,SopraDefaultBus} from '@woosh/meep-engine/src/engine/sound/sopra/SopraEngine.js';
 import {EventInstanceState} from '@woosh/meep-engine/src/engine/sound/sopra/runtime/EventInstance.js';
-import {Ray3} from '@woosh/meep-engine/src/core/geom/3d/ray/Ray3.js';
+import {ShadedGeometry} from '@woosh/meep-engine/src/engine/graphics/ecs/mesh-v2/ShadedGeometry.js';
+import {ParentEntity} from '@woosh/meep-engine/src/engine/ecs/parent/ParentEntity.js';
+import {System} from '@woosh/meep-engine/src/engine/ecs/System.js';
 import {v3_distance} from '@woosh/meep-engine/src/core/geom/vec3/v3_distance.js';
-import {createWorldAcoustics} from '@old-circle/game/world/acoustics.mjs';
-import probes from '@old-circle/game/content/acoustic-probes.json';
+import {materialForModel} from '@old-circle/game/world/acoustics.mjs';
+import {Scenery} from './scenery.mjs';
 
 export const ACOUSTIC_VOICE_LIMIT=24;
-const SKY_DIRECTIONS=[[0,1,0],[.6,.8,0],[-.6,.8,0],[0,.8,.6],[0,.8,-.6]];
-export class WorldAcoustics {
-  static async create(sopra, entityManager) {
-    return new WorldAcoustics(sopra, await createWorldAcoustics(entityManager));
-  }
-  constructor(sopra,{simulator,bodies,entityManager}){
-    this.simulator=simulator;
+
+/**
+ * Names the acoustic material of every drawn primitive of authored scenery.
+ * MeshSystem spawns one entity per primitive under the Scenery root; Meep's
+ * GPU acoustics read the AcousticBody on that row of the scene database.
+ * Bodies are attached on the next update rather than inside the observer.
+ */
+export class SceneryAcousticSystem extends System {
+  dependencies=[ShadedGeometry,ParentEntity];
+  pending=new Set();
+  bodies=0;
+
+  async startup(entityManager){
     this.entityManager=entityManager;
-    this.field=new AcousticProbeField();this.field.fromJSON(probes.field);
-    // A post-effects send returns through master gain; broad wind stays dry.
-    this.reverb=new ProbeReverbRenderer(sopra.audioContext,sopra.busGraph.getInput('master'));
-    this.reverb.maxDecaySeconds=2;this.reverb.sendLevel=.018;this.reverb.changeThreshold=.15;
-    sopra.busGraph.getOutput('effects').connect(this.reverb.input);
-    this.elapsed=1;this.probeElapsed=1;this.ray=new Ray3();this.bands=new Float32Array(3);
-    this.stats={bodies,probes:this.field.size,voices:0,probe:-1,cover:0,ms:0,decay:0};
+    const dataset=entityManager.dataset;
+    if(dataset&&!dataset.isComponentTypeRegistered(AcousticBody))dataset.registerComponentType(AcousticBody);
   }
-  update(listener,voices,dt){
-    this.elapsed+=dt;this.probeElapsed+=dt;if(this.elapsed<.05)return;this.elapsed=0;const started=performance.now();
+  link(geometry,parent,entity){this.pending.add(entity);}
+  unlink(geometry,parent,entity){
+    if(this.pending.delete(entity))return;
+    const dataset=this.entityManager?.dataset;
+    if(dataset?.getComponent(entity,AcousticBody))this.bodies--;
+  }
+  update(){
+    if(this.pending.size===0)return;
+    const dataset=this.entityManager.dataset;
+    for(const entity of this.pending){
+      if(!dataset.entityExists(entity)||dataset.getComponent(entity,AcousticBody))continue;
+      const parent=dataset.getComponent(entity,ParentEntity),scenery=parent&&dataset.getComponent(parent.entity,Scenery);
+      if(!scenery)continue;
+      dataset.addComponentToEntity(entity,AcousticBody.from(materialForModel(scenery.model)));
+      this.bodies++;
+    }
+    this.pending.clear();
+  }
+}
+
+/** Effects carry the acoustic reverb; broad ambient wind stays dry. */
+export function acousticBuses(){
+  return SopraEngine.defaultBuses().map(bus=>{
+    if(bus.id===SopraDefaultBus.Effects)bus.effects=[...bus.effects,new AcousticReverbEffect()];
+    return bus;
+  });
+}
+
+export class WorldAcoustics {
+  /**
+   * @param {SopraEngine} sopra
+   * @param {EntityManager} entityManager the presentation manager whose dataset the scene draws
+   * @param {{graphics?:object,scene?:object}} [gpu] without these every source stays dry
+   */
+  static async create(sopra,entityManager,{graphics,scene}={}){
+    sopra.setBuses(acousticBuses(),{keepVolumes:true});
+    const simulator=new AcousticSimulator(),surfaces=new SceneryAcousticSystem();
+    await entityManager.addSystem(surfaces);
+    let gpu=null;
+    if(graphics&&scene){gpu=new GPUAcousticSystem(graphics,scene,simulator);await entityManager.addSystem(gpu);}
+    return new WorldAcoustics(sopra,simulator,surfaces,gpu);
+  }
+  constructor(sopra,simulator,surfaces,gpu){
+    this.sopra=sopra;this.simulator=simulator;this.surfaces=surfaces;this.gpu=gpu;
+    this.stats={bodies:0,voices:0,sources:0,ms:0};
+  }
+  /** Solve a voice as it starts, so its first audible frame is already propagated. */
+  start(voice){
+    const listener=this.sopra.listenerPosition;
+    if(listener)this.simulator.solve(voice,listener);
+  }
+  forget(voice){this.simulator.forget(voice);}
+  update(listener,voices){
+    const started=performance.now();
     const live=[...voices].filter(v=>v.acoustic&&v.position&&v.state===EventInstanceState.Playing&&v3_distance(...v.position,...listener)<v.description.distanceMax);
     live.sort((a,b)=>v3_distance(...a.position,...listener)-v3_distance(...b.position,...listener));
-    live.length=Math.min(live.length,ACOUSTIC_VOICE_LIMIT);this.simulator.apply(live,listener);this.stats.voices=live.length;
-    if(this.probeElapsed>=.2){
-      this.probeElapsed=0;const index=this.simulator.occluderIndex,probe=this.field.nearestVisibleIndex(...listener,index);this.stats.probe=probe;
-      let covered=0;for(const direction of SKY_DIRECTIONS){this.ray.set([...listener,...direction,24]);if(index.anyHit(this.ray))covered++;}
-      const cover=covered/SKY_DIRECTIONS.length;this.stats.cover=cover;
-      // Normalised convolution has no absolute reflected-energy level. Bound
-      // its outdoor return and tail using local shelter, while enclosed rooms
-      // retain the baked three-band decay. This is an authored mix choice.
-      this.reverb.sendLevel=.018+.162*cover;
-      for(let band=0;band<3;band++)this.bands[band]=probe<0?0:Math.min(this.field.reverbBand(probe,band),.35+1.65*cover);
-      this.reverb.setBands(this.bands);this.stats.decay=Math.max(...this.bands);
-    }
+    live.length=Math.min(live.length,ACOUSTIC_VOICE_LIMIT);
+    // GPU results land between frames and are re-applied by the simulator itself.
+    this.simulator.apply(live,listener);
+    this.stats.voices=live.length;this.stats.bodies=this.surfaces.bodies;this.stats.sources=this.gpu?.propagation.source_count??0;
     this.stats.ms=performance.now()-started;
   }
 }

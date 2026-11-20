@@ -12,9 +12,10 @@ import {WorldAcoustics,ACOUSTIC_VOICE_LIMIT} from './acoustics.mjs';
 import {heightAt} from '@old-circle/game/world/regions.mjs';
 
 export class WorldAudio {
-  constructor(engine,layout){
+  constructor(engine,layout,scene){
     this.engine=engine;
     this.layout=layout;
+    this.scene=scene;
     this.events={};this.localEvents={};
     this.bellTime=0;
     this.footVoices=[];
@@ -39,7 +40,7 @@ export class WorldAudio {
       this.events[name]=description;
       if(['impact','hurt','effort','potion'].includes(name))this.localEvents[name]=Object.assign(new EventDescription(),description,{is3D:false,gainDb:name==='impact'?-5:-8,maxInstances:3});
     }));
-    this.acoustics = await WorldAcoustics.create(this.sopra, this.engine.entityManager);
+    this.acoustics = await WorldAcoustics.create(this.sopra, this.engine.entityManager, {graphics: this.engine.graphics, scene: this.scene});
     this.wind = this.sopra.playEvent(this.events.wind);
     this.engine.sound.volume=.55;
   }
@@ -47,13 +48,13 @@ export class WorldAudio {
     for(const v of this.voices)if(v.state===EventInstanceState.Stopped)this.voices.delete(v);
     if(this.voices.size>=ACOUSTIC_VOICE_LIMIT)return null;
     if(this.sopra.listenerPosition&&v3_distance(...position,...this.sopra.listenerPosition)>=description.distanceMax)return null;
-    const options={position:new Vector3(...position),acoustic:true,pathing:false,sourceRadius,maxLifetime};
+    const options={position:new Vector3(...position),acoustic:true,sourceRadius,maxLifetime};
     const voice=loop?this.sopra.playEvent(description,options):this.sopra.playOneShot(description,options);
-    if(voice){this.voices.add(voice);voice.onEnded.addOne(()=>{this.voices.delete(voice);this.acoustics.simulator.forget(voice);});}return voice;
+    if(voice){this.voices.add(voice);this.acoustics.start(voice);voice.onEnded.addOne(()=>{this.voices.delete(voice);this.acoustics.forget(voice);});}return voice;
   }
   play(name,position){return this.spatial(this.events[name],position);}
   playDirect(name){
-    return this.sopra.playOneShot(this.localEvents[name],{acoustic:false,pathing:false});
+    return this.sopra.playOneShot(this.localEvents[name],{acoustic:false});
   }
   footstep(actor,foot,position,surface,now,local){
     this.footVoices=this.footVoices.filter(v=>now<v.until);
@@ -64,7 +65,7 @@ export class WorldAudio {
     const description=this.events[`${foot.hound?'paw':'step'}-${surface}-${variant}`],voice=this.spatial(description,[position[0],position[1]+.12,position[2]],{maxLifetime:.7,sourceRadius:.06});
     if(voice){voice.setGainDb(description.gainDb+(actor.crouch?-9:Math.hypot(actor.vx,actor.vz)>4?2:0)+(actor.boss?3:0)+(local?0:-3));this.footVoices.push({until:now+.6,local});}
   }
-  update(snapshot,player,dt){
+  update(snapshot,player,dt,shelter=0){
     if(!player)return;const listener=new Vector3(player.x,player.y+.65,player.z);this.sopra.setListener(listener);
     if(this.lastSnapshot!==snapshot){
       if(snapshot.presentationEpoch!==this.presentationEpoch){
@@ -103,9 +104,9 @@ export class WorldAudio {
       this.ambientTime=0;const nearby=this.layout.lights.map((p,i)=>({p,i,d:v3_distance(...p,...listener)})).filter(p=>p.d<32).sort((a,b)=>a.d-b.d).slice(0,3),wanted=new Set(nearby.map(p=>p.i));
       for(const [id,voice] of this.fires)if(!wanted.has(id)){voice.fadeOutAndStop(.25);this.fires.delete(id);}
       for(const {p,i} of nearby)if(!this.fires.has(i)||this.fires.get(i).state===EventInstanceState.Stopped){const v=this.spatial(this.events.fire,p,{loop:true,sourceRadius:.25});if(v)this.fires.set(i,v);}
-      const gain=-23-this.acoustics.stats.cover*12;if(gain!==this.windGain){this.wind.fadeToGainDb(gain,.6);this.windGain=gain;}
+      const gain=-23-shelter*12;if(gain!==this.windGain){this.wind.fadeToGainDb(gain,.6);this.windGain=gain;}
     }
-    this.acoustics.update(listener,this.voices,dt);
+    this.acoustics.update(listener,this.voices);
     this.sopra.update();
   }
 }
